@@ -1,0 +1,22 @@
+# 构建产物
+build/
+/server
+/fileupload
+
+# 运行时数据
+storage/
+
+# 编辑器
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# 系统
+.DS_Store
+Thumbs.db
+
+# 环境
+.env
+.env.local

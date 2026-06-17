@@ -1,0 +1,50 @@
+# fileupload 服务端 Docker Compose 部署
+# 包含 Redis + fileupload-server
+#
+# 启动:
+#   cd deploy/docker
+#   docker compose up -d
+#
+# 停止:
+#   docker compose down
+#
+# 查看日志:
+#   docker compose logs -f
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: fileupload-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  server:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+    container_name: fileupload-server
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - FILEUPLOAD_REDIS_ADDR=redis:6379
+      - FILEUPLOAD_DATABASE_PATH=/var/lib/fileupload/fileupload.db
+      - FILEUPLOAD_CONFIG=/etc/fileupload/fileupload.yaml
+      - TZ=Asia/Shanghai
+    volumes:
+      - fileupload-data:/var/lib/fileupload
+    depends_on:
+      redis:
+        condition: service_healthy
+
+volumes:
+  redis-data:
+  fileupload-data:

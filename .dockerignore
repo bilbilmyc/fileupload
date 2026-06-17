@@ -1,0 +1,26 @@
+# Git
+.git/
+.gitignore
+
+# 构建产物
+build/
+*.exe
+*.exe~
+
+# 编辑器
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# 系统
+.DS_Store
+Thumbs.db
+
+# 环境
+.env
+.env.local
+
+# Doc
+docs/

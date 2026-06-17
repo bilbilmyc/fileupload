@@ -1,0 +1,33 @@
+# fileupload 服务配置文件
+# 默认路径：当前目录下的 fileupload.yaml 或 fileupload.yml
+# 也可通过 FILEUPLOAD_CONFIG 环境变量指定路径
+
+server:
+  addr: ":8080"              # 监听地址
+  read_timeout: 30           # 读取超时（秒）
+  write_timeout: 300         # 写入超时（秒），大文件需长超时
+  idle_timeout: 60           # 空闲超时（秒）
+
+storage:
+  type: "local"              # 存储类型：local / s3（s3 为预留）
+  data_dir: "storage/data"           # 数据文件存放目录
+  temp_dir: "storage/tmp"            # 上传分片临时目录
+
+redis:
+  addr: "12.2.40.40:6002"     # Redis 地址
+  password: "dev123"               # 密码
+  db: 10                      # 数据库编号
+  prefix: "upload:"          # key 前缀
+
+database:
+  type: "sqlite"             # 数据库类型：sqlite / postgres（pg 为预留）
+  path: "storage/fileupload.db"      # SQLite 文件路径 / PG DSN
+
+upload:
+  session_ttl_minutes: 60    # 上传会话无活动超时（分钟）
+  default_chunk_size: 10485760  # 默认分片大小（字节），10MB
+  worker_pool_size: 4        # 并发 worker 池大小
+  worker_queue_size: 100     # worker 排队上限
+
+download:
+  max_archive_size: 0        # 目录打包大小上限（0 = 不限）

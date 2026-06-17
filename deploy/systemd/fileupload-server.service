@@ -1,0 +1,51 @@
+# fileupload 服务端 systemd 服务单元
+# 安装:
+#   sudo cp deploy/systemd/fileupload-server.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable fileupload-server
+#   sudo systemctl start fileupload-server
+#
+# 查看日志:
+#   sudo journalctl -u fileupload-server -f
+
+[Unit]
+Description=fileupload 文件上传下载服务
+Documentation=https://github.com/mayc/casdao/fileupload
+After=network.target redis.service
+Wants=redis.service
+
+[Service]
+Type=simple
+User=fileupload
+Group=fileupload
+
+# 工作目录，数据文件将在此目录下创建
+WorkingDirectory=/var/lib/fileupload
+
+# 可执行文件路径
+ExecStart=/usr/local/bin/fileupload-server
+
+# 配置文件路径（可选，不指定则使用工作目录下的 fileupload.yaml）
+Environment=FILEUPLOAD_CONFIG=/etc/fileupload/fileupload.yaml
+
+# 日志
+StandardOutput=journal
+StandardError=journal
+
+# 重启策略
+Restart=on-failure
+RestartSec=5
+
+# 安全限制
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/fileupload
+
+# 资源限制
+LimitNOFILE=65536
+LimitNPROC=4096
+
+[Install]
+WantedBy=multi-user.target

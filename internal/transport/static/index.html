@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>fileupload 测试工具</title>
+<style>
+  :root {
+    --bg: #f5f7fa;
+    --card: #fff;
+    --border: #e2e8f0;
+    --primary: #3b82f6;
+    --primary-hover: #2563eb;
+    --success: #22c55e;
+    --danger: #ef4444;
+    --text: #1e293b;
+    --text2: #64748b;
+    --radius: 8px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    padding: 24px;
+  }
+  .container { max-width: 900px; margin: 0 auto; }
+  h1 { font-size: 1.6rem; margin-bottom: 4px; }
+  .subtitle { color: var(--text2); margin-bottom: 24px; font-size: 0.9rem; }
+
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+  .card h2 { font-size: 1.1rem; margin-bottom: 12px; }
+
+  .upload-zone {
+    border: 2px dashed var(--border);
+    border-radius: var(--radius);
+    padding: 40px 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .upload-zone:hover, .upload-zone.dragover {
+    border-color: var(--primary);
+    background: #f0f7ff;
+  }
+  .upload-zone .icon { font-size: 2.5rem; margin-bottom: 8px; }
+  .upload-zone p { color: var(--text2); }
+  .upload-zone input { display: none; }
+
+  .progress-bar {
+    width: 100%;
+    height: 8px;
+    background: var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+    margin: 8px 0;
+  }
+  .progress-bar .fill {
+    height: 100%;
+    background: var(--primary);
+    width: 0%;
+    transition: width 0.3s;
+  }
+  .status { font-size: 0.85rem; color: var(--text2); }
+
+  .file-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .file-item:last-child { border-bottom: none; }
+  .file-info { flex: 1; }
+  .file-name { font-weight: 500; }
+  .file-meta { font-size: 0.8rem; color: var(--text2); }
+  .file-actions { display: flex; gap: 8px; }
+  .file-actions .tag {
+    font-size: 0.75rem;
+    padding: 2px 8px;
+    border-radius: 4px;
+    background: #e5e7eb;
+  }
+  .tag.success { background: #dcfce7; color: #166534; }
+  .tag.error { background: #fee2e2; color: #991b1b; }
+  .tag.pending { background: #fef9c3; color: #854d0e; }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 14px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--card);
+    cursor: pointer;
+    font-size: 0.85rem;
+    transition: all 0.15s;
+  }
+  .btn:hover { background: var(--bg); }
+  .btn-primary {
+    background: var(--primary);
+    color: #fff;
+    border-color: var(--primary);
+  }
+  .btn-primary:hover { background: var(--primary-hover); }
+  .btn-danger { color: var(--danger); border-color: var(--danger); }
+  .btn-danger:hover { background: #fef2f2; }
+  .btn-sm { padding: 4px 10px; font-size: 0.8rem; }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .toast {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    padding: 12px 20px;
+    border-radius: var(--radius);
+    color: #fff;
+    font-size: 0.9rem;
+    transform: translateY(80px);
+    opacity: 0;
+    transition: all 0.3s;
+    z-index: 100;
+  }
+  .toast.show { transform: translateY(0); opacity: 1; }
+  .toast.success { background: var(--success); }
+  .toast.error { background: var(--danger); }
+
+  .tabs { display: flex; gap: 0; margin-bottom: 16px; border-bottom: 2px solid var(--border); }
+  .tab {
+    padding: 8px 20px;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    color: var(--text2);
+    font-size: 0.9rem;
+  }
+  .tab.active { color: var(--primary); border-bottom-color: var(--primary); font-weight: 600; }
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
+  .empty-state { text-align: center; padding: 32px; color: var(--text2); }
+
+  .chunk-config { display: flex; gap: 16px; flex-wrap: wrap; margin: 12px 0; }
+  .chunk-config label { display: flex; align-items: center; gap: 6px; font-size: 0.85rem; color: var(--text2); }
+  .chunk-config input, .chunk-config select {
+    padding: 4px 8px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-size: 0.85rem;
+    width: 120px;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>📦 fileupload 测试工具</h1>
+  <p class="subtitle">文件上传下载服务的浏览器端测试面板</p>
+
+  <!-- Toast -->
+  <div id="toast" class="toast"></div>
+
+  <!-- Tabs -->
+  <div class="tabs">
+    <div class="tab active" data-tab="upload">上传</div>
+    <div class="tab" data-tab="files">文件列表</div>
+    <div class="tab" data-tab="download">下载</div>
+  </div>
+
+  <!-- 上传 Tab -->
+  <div id="tab-upload" class="tab-content active">
+    <div class="card">
+      <h2>选择文件</h2>
+      <div class="chunk-config">
+        <label>分片大小 <input type="number" id="chunkSize" value="10485760" min="1024"></label>
+        <label>压缩 <select id="compressType"><option value="none">无</option><option value="zstd">zstd</option></select></label>
+        <label>Namespace <input type="text" id="namespace" value="demo" style="width:100px"></label>
+      </div>
+      <div style="display:flex; gap:12px; align-items:center; margin-bottom:8px;">
+        <label style="font-size:0.85rem; cursor:pointer;">
+          <input type="checkbox" id="dirMode" onchange="toggleDirMode()"> 📁 目录上传模式
+        </label>
+        <span id="dirModeHint" style="font-size:0.8rem; color:var(--text2); display:none;">选择目录后自动递归上传并提交 manifest</span>
+      </div>
+      <div class="upload-zone" id="dropZone">
+        <div class="icon">☁️</div>
+        <p>点击选择文件，或拖拽文件到此处</p>
+        <input type="file" id="fileInput">
+      </div>
+      <div id="uploadProgress" style="display:none">
+        <div class="progress-bar"><div class="fill" id="progressFill"></div></div>
+        <div class="status" id="uploadStatus">准备上传…</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 文件列表 Tab -->
+  <div id="tab-files" class="tab-content">
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+        <h2>已上传文件</h2>
+        <button class="btn btn-sm" onclick="listFiles()">🔄 刷新</button>
+      </div>
+      <div id="fileList">
+        <div class="empty-state">尚无文件，先去上传吧</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 下载 Tab -->
+  <div id="tab-download" class="tab-content">
+    <div class="card">
+      <h2>下载文件</h2>
+      <div style="display:flex; gap:8px; margin-top:8px;">
+        <input type="text" id="downloadID" placeholder="输入 FileID 或 DirID"
+               style="flex:1; padding:8px 12px; border:1px solid var(--border); border-radius:6px; font-size:0.9rem;">
+        <button class="btn btn-primary" onclick="downloadFile()">下载</button>
+      </div>
+      <div style="margin-top:8px;">
+        <label style="font-size:0.85rem; color:var(--text2)">
+          <input type="checkbox" id="downloadVerify"> 下载后校验 SHA-256
+        </label>
+        <select id="downloadFormat" style="margin-left:12px; padding:4px 8px; border:1px solid var(--border); border-radius:4px; font-size:0.85rem;">
+          <option value="raw">原始文件</option>
+          <option value="tar.gz">tar.gz</option>
+          <option value="tar.zst">tar.zst</option>
+        </select>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ===== Tab 切换 =====
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
+    if (tab.dataset.tab === 'files') listFiles();
+  });
+});
+
+// ===== 目录模式切换 =====
+function toggleDirMode() {
+  const dirMode = document.getElementById('dirMode').checked;
+  const input = document.getElementById('fileInput');
+  const hint = document.getElementById('dirModeHint');
+  hint.style.display = dirMode ? 'inline' : 'none';
+  if (dirMode) {
+    input.setAttribute('webkitdirectory', '');
+    input.setAttribute('directory', '');
+    dropZone.querySelector('p').textContent = '点击选择目录，或拖拽目录到此处';
+  } else {
+    input.removeAttribute('webkitdirectory');
+    input.removeAttribute('directory');
+    dropZone.querySelector('p').textContent = '点击选择文件，或拖拽文件到此处';
+  }
+}
+
+// ===== Toast =====
+function toast(msg, type = 'success') {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'toast ' + type + ' show';
+  setTimeout(() => el.classList.remove('show'), 3000);
+}
+
+// ===== 拖拽上传 =====
+const dropZone = document.getElementById('dropZone');
+const fileInput = document.getElementById('fileInput');
+
+dropZone.addEventListener('click', () => fileInput.click());
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('dragover');
+  if (e.dataTransfer.files.length) startUpload(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change', () => {
+  if (fileInput.files.length) startUpload(fileInput.files[0]);
+  fileInput.value = '';
+});
+
+// ===== 上传逻辑 (REST API: init → chunks → finalize) =====
+async function startUpload(file) {
+  const dirMode = document.getElementById('dirMode').checked;
+
+  // 目录模式：遍历所有文件逐个上传，最后提交 manifest
+  if (dirMode && file.webkitRelativePath) {
+    await uploadDirectory(file);
+    return;
+  }
+
+  await uploadSingleFile(file);
+}
+
+async function uploadDirectory(firstFile) {
+  const ns = document.getElementById('namespace').value || 'demo';
+  const compress = document.getElementById('compressType').value;
+  const chunkSize = parseInt(document.getElementById('chunkSize').value) || 10485760;
+  const progressDiv = document.getElementById('uploadProgress');
+  const progressFill = document.getElementById('progressFill');
+  const statusEl = document.getElementById('uploadStatus');
+  progressDiv.style.display = 'block';
+
+  // 收集所有文件
+  const input = document.getElementById('fileInput');
+  const files = Array.from(input.files).filter(f => f.webkitRelativePath);
+  const dirName = firstFile.webkitRelativePath.split('/')[0];
+  statusEl.textContent = `📁 上传目录: ${dirName} (${files.length} 个文件)`;
+
+  const entries = [];
+  for (let i = 0; i < files.length; i++) {
+    const f = files[i];
+    const relPath = f.webkitRelativePath.substring(dirName.length + 1);
+    const pct = ((i / files.length) * 100).toFixed(0);
+    statusEl.textContent = `📄 [${i+1}/${files.length}] ${relPath} (${pct}%)`;
+    progressFill.style.width = pct + '%';
+
+    try {
+      const fileID = await uploadSingleFile(f, true);
+      if (fileID) {
+        entries.push({ path: relPath, file_id: fileID });
+      }
+    } catch (e) {
+      console.error(`上传失败: ${relPath}`, e);
+    }
+  }
+
+  // 提交目录 manifest
+  statusEl.textContent = '提交目录 manifest…';
+  try {
+    const resp = await fetch('/v1/dirs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Namespace': ns },
+      body: JSON.stringify({ entries })
+    });
+    if (!resp.ok) throw new Error('manifest 提交失败');
+    const data = await resp.json();
+    progressFill.style.width = '100%';
+    statusEl.textContent = `✅ 目录上传完成！DirID: ${data.dir_id}`;
+    toast(`目录上传成功: ${dirName}`, 'success');
+    listFiles();
+  } catch (e) {
+    statusEl.textContent = '❌ ' + e.message;
+    toast(e.message, 'error');
+  }
+}
+
+async function uploadSingleFile(file, silent = false) {
+  const ns = document.getElementById('namespace').value || 'demo';
+  const compress = document.getElementById('compressType').value;
+  const chunkSize = parseInt(document.getElementById('chunkSize').value) || 10485760;
+
+  // 显示进度
+  const progressDiv = document.getElementById('uploadProgress');
+  const progressFill = document.getElementById('progressFill');
+  const statusEl = document.getElementById('uploadStatus');
+  progressDiv.style.display = 'block';
+  progressFill.style.width = '0%';
+  statusEl.textContent = `📄 ${file.name} (${formatSize(file.size)}) — 计算 SHA-256…`;
+
+  // 计算 SHA-256
+  const sha256 = await computeSHA256(file);
+  statusEl.textContent = `SHA-256: ${sha256} — 创建会话…`;
+
+  try {
+    // 1. 秒传预检
+    const checkResp = await fetch(`/v1/files?sha256=${sha256}&namespace=${ns}&name=${encodeURIComponent(file.name)}`, { method: 'HEAD' });
+    if (checkResp.status === 200) {
+      const data = await checkResp.json();
+      statusEl.textContent = `✅ 秒传命中！FileID: ${data.file_id}`;
+      progressFill.style.width = '100%';
+      toast('秒传成功！', 'success');
+      return;
+    }
+
+    // 2. 创建上传会话
+    const initResp = await fetch(`/v1/uploads/init?size=${file.size}`, {
+      method: 'POST',
+      headers: {
+        'X-SHA256': sha256,
+        'X-Compression': compress,
+        'X-Namespace': ns,
+        'X-File-Name': encodeURIComponent(file.name),
+      }
+    });
+    if (!initResp.ok) throw new Error('创建会话失败: ' + initResp.status);
+    const initData = await initResp.json();
+    const sessionID = initData.session_id;
+    const actualChunkSize = initData.chunk_size || chunkSize;
+
+    // 3. 分片上传
+    const totalChunks = Math.ceil(file.size / actualChunkSize);
+    statusEl.textContent = `会话 ${sessionID} — 0/${totalChunks} 分片`;
+
+    for (let i = 0; i < totalChunks; i++) {
+      const start = i * actualChunkSize;
+      const end = Math.min(start + actualChunkSize, file.size);
+      const chunk = file.slice(start, end);
+
+      // 计算分片 SHA-256
+      const chunkBuf = await chunk.arrayBuffer();
+      const chunkHash = await sha256Hex(new Uint8Array(chunkBuf));
+      const sliceSHA = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', chunkBuf)))
+        .map(b => b.toString(16).padStart(2, '0')).join('');
+
+      // 上传分片
+      const chunkResp = await fetch(`/v1/uploads/${sessionID}/chunks/${i}`, {
+        method: 'PUT',
+        body: chunkBuf,
+        headers: { 'X-Slice-SHA256': sliceSHA, 'Content-Type': 'application/octet-stream' }
+      });
+      if (!chunkResp.ok) throw new Error(`分片 ${i+1} 上传失败`);
+
+      const pct = ((i + 1) / totalChunks * 100).toFixed(0);
+      progressFill.style.width = pct + '%';
+      statusEl.textContent = `会话 ${sessionID.slice(0,8)}… — ${i+1}/${totalChunks} 分片 (${pct}%)`;
+    }
+
+    // 4. Finalize
+    statusEl.textContent = '合并中…';
+    progressFill.style.width = '95%';
+    const finalResp = await fetch(`/v1/uploads/${sessionID}/finalize`, { method: 'POST' });
+    if (!finalResp.ok) throw new Error('Finalize 失败: ' + finalResp.status);
+    const finalData = await finalResp.json();
+
+    progressFill.style.width = '100%';
+    statusEl.textContent = `✅ 上传完成！FileID: ${finalData.file_id}`;
+    toast(`上传成功: ${file.name}`, 'success');
+    appendFileToList(finalData);
+
+  } catch (err) {
+    statusEl.textContent = '❌ ' + err.message;
+    toast(err.message, 'error');
+  }
+}
+
+// ===== SHA-256 计算 =====
+async function computeSHA256(file) {
+  const buf = await file.arrayBuffer();
+  const hash = await crypto.subtle.digest('SHA-256', buf);
+  return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function sha256Hex(uint8) {
+  return Array.from(uint8).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+// ===== 文件列表 =====
+async function listFiles() {
+  const ns = document.getElementById('namespace').value || 'demo';
+  const el = document.getElementById('fileList');
+
+  try {
+    const resp = await fetch(`/v1/ls?namespace=${ns}`);
+    if (!resp.ok) throw new Error('请求失败');
+    const data = await resp.json();
+    const children = data.children || [];
+
+    if (children.length === 0) {
+      el.innerHTML = '<div class="empty-state">尚无文件</div>';
+      return;
+    }
+
+    el.innerHTML = children.map(f => renderFileItem(f)).join('');
+  } catch (err) {
+    el.innerHTML = `<div class="empty-state">加载失败: ${err.message}</div>`;
+  }
+}
+
+function renderFileItem(f) {
+  const id = f.file_id || '';
+  const name = f.name || id;
+  const size = formatSize(f.size || 0);
+  const sha = (f.sha256 || '').slice(0, 12);
+  return `
+    <div class="file-item">
+      <div class="file-info">
+        <div class="file-name">${f.is_dir ? '📁' : '📄'} ${escapeHtml(name)}</div>
+        <div class="file-meta">${id.slice(0,12)}… · ${size} · ${sha}</div>
+      </div>
+      <div class="file-actions">
+        <span class="tag success">${f.is_dir ? '目录' : '文件'}</span>
+        <button class="btn btn-sm" onclick="copyID('${id}')">复制 ID</button>
+        <button class="btn btn-sm btn-primary" onclick="downloadByID('${id}', '${escapeHtml(name)}')">下载</button>
+      </div>
+    </div>`;
+}
+
+function appendFileToList(f) {
+  const el = document.getElementById('fileList');
+  const empty = el.querySelector('.empty-state');
+  if (empty) el.innerHTML = '';
+  el.insertAdjacentHTML('afterbegin', renderFileItem(f));
+}
+
+function copyID(id) {
+  navigator.clipboard.writeText(id).then(() => toast('已复制: ' + id));
+}
+
+// ===== 下载 =====
+function downloadFile() {
+  const id = document.getElementById('downloadID').value.trim();
+  if (!id) { toast('请输入 FileID', 'error'); return; }
+  downloadByID(id, id);
+}
+
+function downloadByID(id, name) {
+  const ns = document.getElementById('namespace').value || 'demo';
+  const format = document.getElementById('downloadFormat').value;
+  const verify = document.getElementById('downloadVerify').checked;
+
+  if (format === 'raw') {
+    window.open(`/v1/files/${id}?namespace=${ns}`, '_blank');
+  } else {
+    window.open(`/v1/dirs/${id}?format=${format}&namespace=${ns}`, '_blank');
+  }
+  toast(`开始下载: ${name}`);
+}
+
+// ===== 工具函数 =====
+function formatSize(bytes) {
+  if (!bytes || bytes === 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(1024));
+  return (bytes / Math.pow(1024, i)).toFixed(i > 0 ? 1 : 0) + ' ' + units[i];
+}
+
+function escapeHtml(s) {
+  const div = document.createElement('div');
+  div.textContent = s;
+  return div.innerHTML;
+}
+
+// ===== 初始加载 =====
+listFiles();
+</script>
+</body>
+</html>
