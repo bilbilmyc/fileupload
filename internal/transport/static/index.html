@@ -333,32 +333,17 @@ let flatFiles = [];
 async function loadFileTree() {
   const ns = document.getElementById('namespace').value || 'demo';
   document.getElementById('fileTree').innerHTML = '<div class="empty-state">加载中…</div>';
-  flatFiles = await loadAllChildren(ns, '');
-  renderFileTree();
-}
 
-async function loadAllChildren(ns, parentId) {
-  const url = parentId ? `/v1/ls?parent=${parentId}&namespace=${ns}` : `/v1/ls?namespace=${ns}`;
-  const resp = await fetch(url);
-  if (!resp.ok) return [];
+  // 加载根目录所有文件（flat list），由 renderFileTree 按 path 构建虚拟目录树
+  const resp = await fetch(`/v1/ls?namespace=${ns}`);
+  if (!resp.ok) { document.getElementById('fileTree').innerHTML = '<div class="empty-state">加载失败</div>'; return; }
   const data = await resp.json();
-  // "dir" 是目录本身（parentId 查询时返回），"children" 是子节点
-  let list = data.children || [];
-  if (data.dir) {
-    list = [data.dir, ...list];
-  }
-  // 去重
-  const seen = new Set();
-  const result = [];
-  for (const f of list) {
-    if (seen.has(f.file_id)) continue;
-    seen.add(f.file_id);
-    result.push({
-      id: f.file_id, name: f.name, path: f.path || f.name,
-      size: f.size || 0, isDir: f.is_dir || false, parentId: parentId,
-    });
-  }
-  return result;
+  flatFiles = (data.children || []).map(f => ({
+    id: f.file_id, name: f.name, path: f.path || f.name,
+    size: f.size || 0, sha256: f.sha256 || '',
+    isDir: f.is_dir || false,
+  }));
+  renderFileTree();
 }
 
 async function renderFileTree() {
@@ -371,36 +356,76 @@ async function renderFileTree() {
   let list = flatFiles;
   if (filter) list = flatFiles.filter(f => f.name.toLowerCase().includes(filter) || f.path.toLowerCase().includes(filter));
 
-  // 按 parentId 分组建立树
-  const childrenOf = {};
+  // 从 Path 字段构建虚拟目录树（按 / 分隔）
+  // 如 path="skills/understand/languages/python.md" → 三层嵌套
+  const tree = { children: {} };
+
   for (const f of list) {
-    const p = f.parentId || '';
-    if (!childrenOf[p]) childrenOf[p] = [];
-    childrenOf[p].push(f);
+    // 跳过目录节点自身（path="/"），其内容通过子文件的 path 体现
+    if (f.isDir) continue;
+    const parts = f.path.split('/');
+    let node = tree;
+    for (let i = 0; i < parts.length - 1; i++) {
+      const seg = parts[i];
+      if (!seg) continue; // 跳过空段（如 path 起始的 /）
+      if (!node.children[seg]) {
+        node.children[seg] = { _virtual: true, name: seg, children: {} };
+      }
+      node = node.children[seg];
+    }
+    // 最后一个 segment 是文件名
+    node.children[f.name] = { ...f, _virtual: false };
   }
 
-  // 递归渲染
-  function render(parentId, depth) {
-    const kids = childrenOf[parentId] || [];
-    return kids.map(f => {
-      const indent = depth * 20;
-      const hasKids = childrenOf[f.id] && childrenOf[f.id].length > 0;
-      return `<div class="tree-node" style="padding-left:${indent}px">
+  // 递归渲染树
+  function renderNode(node, depth) {
+    const indent = depth * 20;
+    // 先渲染目录（虚拟 + 真实），再渲染文件
+    const dirs = [];
+    const files = [];
+    for (const [name, child] of Object.entries(node.children)) {
+      if (child._virtual) {
+        dirs.push(child);
+      } else if (!child.isDir) {
+        files.push(child);
+      } else {
+        dirs.push(child); // 真实目录节点
+      }
+    }
+
+    let html = '';
+    for (const d of dirs) {
+      const childHtml = renderNode(d, depth + 1);
+      const hasKids = Object.keys(d.children).length > 0;
+      // 虚拟目录名从 path 段推断，没有实际 DirID 可下载
+      const isVirtual = d._virtual;
+      html += `<div class="tree-node" style="padding-left:${indent}px">
         <div class="tree-row">
-          <span class="icon">${f.isDir ? '📁' : '📄'}</span>
-          <span class="name" ${!f.isDir ? `onclick="downloadFile('${f.id}','${esc(f.name)}','raw')"` : ''} title="${esc(f.path)}">${esc(f.name)}</span>
-          <span class="meta">${!f.isDir ? fmtSize(f.size) : hasKids ? childrenOf[f.id].length + '项' : ''}</span>
+          <span class="icon">📁</span>
+          <span class="name" title="${isVirtual ? '虚拟目录' : esc(d.name)}">${esc(d.name)}</span>
+          <span class="meta">${hasKids ? Object.keys(d.children).length + '项' : ''}</span>
+          <span class="actions">${d.id ? `<button class="btn btn-sm" onclick="downloadFile('${d.id}','${esc(d.name)}','tar.gz')">⬇ tar.gz</button>` : ''}${d.id ? `<button class="btn btn-sm btn-danger" onclick="deleteFile('${d.id}')">🗑</button>` : ''}</span>
+        </div>
+        ${hasKids ? '<div class="tree-children">' + childHtml + '</div>' : ''}
+      </div>`;
+    }
+    for (const f of files) {
+      html += `<div class="tree-node" style="padding-left:${indent}px">
+        <div class="tree-row">
+          <span class="icon">📄</span>
+          <span class="name" onclick="downloadFile('${f.id}','${esc(f.name)}','raw')" title="${esc(f.path)}">${esc(f.name)}</span>
+          <span class="meta">${fmtSize(f.size)}${f.sha256 ? ' ' + f.sha256.slice(0,8) : ''}</span>
           <span class="actions">
-            ${f.isDir ? `<button class="btn btn-sm" onclick="downloadFile('${f.id}','${esc(f.name)}','tar.gz')">⬇ tar.gz</button>` : `<button class="btn btn-sm" onclick="downloadFile('${f.id}','${esc(f.name)}','raw')">⬇</button>`}
+            <button class="btn btn-sm" onclick="downloadFile('${f.id}','${esc(f.name)}','raw')">⬇</button>
             <button class="btn btn-sm btn-danger" onclick="deleteFile('${f.id}')">🗑</button>
           </span>
         </div>
-        ${hasKids ? '<div class="tree-children">' + render(f.id, depth + 1) + '</div>' : ''}
       </div>`;
-    }).join('');
+    }
+    return html;
   }
 
-  el.innerHTML = render('', 0) || '<div class="empty-state">无匹配文件</div>';
+  el.innerHTML = renderNode(tree, 0) || '<div class="empty-state">无匹配文件</div>';
 }
 
 // ====== file ops ======
