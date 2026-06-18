@@ -1,12 +1,9 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"math/rand"
-	"net/http"
 	"sync"
 	"time"
 
@@ -15,14 +12,13 @@ import (
 
 func runBench(ctx context.Context, cfg config.Config, args []string) {
 	flags := parseFlags(args)
-	serverURL := getServerURL(cfg, flags)
 	numFiles := parseInt(flags, "files", 10)
 	fileSize := parseSize(flags, "size", 1*1024*1024) // 默认 1MB
 	concurrency := parseInt(flags, "concurrency", 4)
 
-	fmt.Printf("压测: %d 文件 × %d 字节, 并发 %d, 服务端 %s\n",
-		numFiles, fileSize, concurrency, serverURL)
+	fmt.Printf("压测: %d 文件 × %d 字节, 并发 %d\n", numFiles, fileSize, concurrency)
 
+	c := newClientFromFlags(flags, cfg)
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, concurrency)
 	start := time.Now()
@@ -42,47 +38,16 @@ func runBench(ctx context.Context, cfg config.Config, args []string) {
 			data := make([]byte, fileSize)
 			rand.Read(data)
 
-			// 上传
-			url := fmt.Sprintf("%s/uploads", serverURL)
-			req, _ := http.NewRequestWithContext(ctx, "POST", url, nil)
-			req.Header.Set("Upload-Length", fmt.Sprintf("%d", fileSize))
-			req.Header.Set("X-Compression", "none")
-
-			resp, err := http.DefaultClient.Do(req)
+			name := fmt.Sprintf("bench-%d.dat", idx)
+			_, err := c.uploadBytes(ctx, name, data, "", "none", UploadOptions{
+				ChunkSize:   fileSize, // 单分片
+				Concurrency: 1,
+				Compress:    "none",
+			})
 			if err != nil {
-				fmt.Printf("[%d] 创建会话失败: %v\n", idx, err)
+				fmt.Printf("[%d] 上传失败: %v\n", idx, err)
 				return
 			}
-			location := resp.Header.Get("Location")
-			resp.Body.Close()
-
-			if location == "" {
-				return
-			}
-			sessionID := location[9:] // 去掉 /uploads/
-
-			// 单分片上传
-			chunkURL := fmt.Sprintf("%s/uploads/%s", serverURL, sessionID)
-			chunkReq, _ := http.NewRequestWithContext(ctx, "PATCH", chunkURL, bytes.NewReader(data))
-			chunkReq.Header.Set("Upload-Offset", "0")
-			chunkReq.Header.Set("X-Slice-Index", "0")
-
-			chunkResp, err := http.DefaultClient.Do(chunkReq)
-			if err != nil {
-				fmt.Printf("[%d] 分片上传失败: %v\n", idx, err)
-				return
-			}
-			chunkResp.Body.Close()
-
-			// finalize
-			finalURL := fmt.Sprintf("%s/v1/uploads/%s/finalize", serverURL, sessionID)
-			finalReq, _ := http.NewRequestWithContext(ctx, "POST", finalURL, nil)
-			finalResp, err := http.DefaultClient.Do(finalReq)
-			if err != nil {
-				return
-			}
-			io.Copy(io.Discard, finalResp.Body)
-			finalResp.Body.Close()
 
 			mu.Lock()
 			totalBytes += fileSize

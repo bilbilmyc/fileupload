@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"hash"
 	"io"
-	"net/http"
 	"os"
 	"strings"
 
@@ -16,123 +18,99 @@ func runDownload(ctx context.Context, cfg config.Config, args []string) {
 		fmt.Println("用法: fileupload download <fileID|dirID> [-o <path>] [--format tar.gz] [--verify] [--range start-end] [--server <url>] [--namespace <ns>]")
 		os.Exit(1)
 	}
-
 	id := args[0]
 	flags := parseFlags(args[1:])
-	serverURL := getServerURL(cfg, flags)
-	outputPath := getFlag(flags, "o", "")
+	c := newClientFromFlags(flags, cfg)
+	outputPath := getFlag(flags, "o", id)
 	format := getFlag(flags, "format", "tar.gz")
 	verify := getFlag(flags, "verify", "false") == "true"
-	rangeStr := getFlag(flags, "range", "")
-	namespace := getFlag(flags, "namespace", "default")
+	rng := getFlag(flags, "range", "")
 
-	if outputPath == "" {
-		outputPath = id
+	isDir, err := isDir(ctx, c, id)
+	if err != nil {
+		// 如果 stat 失败，按文件处理
+		fmt.Printf("警告: 无法判断类型 (%v)，按文件处理\n", err)
+		isDir = false
 	}
-
-	// 先尝试 stat 判断是文件还是目录
-	isDir := checkIsDir(ctx, serverURL, id, namespace)
 
 	if isDir {
-		downloadDir(ctx, serverURL, id, outputPath, format, namespace)
-	} else {
-		downloadFile(ctx, serverURL, id, outputPath, rangeStr, verify, namespace)
+		if err := downloadDirToFile(ctx, c, id, outputPath, format, verify); err != nil {
+			fmt.Printf("错误: 下载目录失败: %v\n", err)
+			os.Exit(1)
+		}
+		return
 	}
-}
-
-func downloadFile(ctx context.Context, serverURL, fileID, outputPath, rangeStr string, verify bool, namespace string) {
-	url := fmt.Sprintf("%s/v1/files/%s?namespace=%s", serverURL, fileID, namespace)
-	req, _ := http.NewRequestWithContext(ctx, "GET", url, nil)
-
-	if rangeStr != "" {
-		req.Header.Set("Range", "bytes="+rangeStr)
-	}
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
+	if err := downloadFileToFile(ctx, c, id, outputPath, rng, verify); err != nil {
 		fmt.Printf("错误: 下载失败: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+func downloadFileToFile(ctx context.Context, c *Client, fileID, outputPath, rng string, verify bool) error {
+	resp, err := c.DownloadFile(ctx, fileID, rng)
+	if err != nil {
+		return err
+	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
-		body, _ := io.ReadAll(resp.Body)
-		fmt.Printf("错误: 下载失败 (%d): %s\n", resp.StatusCode, string(body))
-		os.Exit(1)
-	}
-
-	// 创建输出文件
 	out, err := os.Create(outputPath)
 	if err != nil {
-		fmt.Printf("错误: 创建输出文件失败: %v\n", err)
-		os.Exit(1)
+		return err
 	}
 	defer out.Close()
 
-	written, err := io.Copy(out, resp.Body)
-	if err != nil {
-		fmt.Printf("错误: 写入文件失败: %v\n", err)
-		os.Exit(1)
+	var h hash.Hash
+	var w io.Writer = out
+	if verify {
+		h = sha256.New()
+		w = io.MultiWriter(out, h)
 	}
 
-	sha256 := resp.Header.Get("X-SHA256")
-	fmt.Printf("下载完成: %s (%d 字节)\n", outputPath, written)
-	if sha256 != "" {
-		fmt.Printf("服务端 SHA-256: %s\n", sha256)
+	written, err := io.Copy(w, resp.Body)
+	if err != nil {
+		return err
 	}
+
+	serverSHA := resp.Header.Get("X-SHA256")
+	if verify && serverSHA != "" && h != nil {
+		got := hex.EncodeToString(h.Sum(nil))
+		if got != serverSHA {
+			return fmt.Errorf("SHA-256 mismatch: got %s want %s", got, serverSHA)
+		}
+	}
+	fmt.Printf("下载完成: %s (%d 字节)\n", outputPath, written)
+	if serverSHA != "" {
+		fmt.Printf("SHA-256: %s\n", serverSHA)
+	}
+	return nil
 }
 
-func downloadDir(ctx context.Context, serverURL, dirID, outputPath, format, namespace string) {
-	url := fmt.Sprintf("%s/v1/dirs/%s?format=%s&namespace=%s", serverURL, dirID, format, namespace)
-	req, _ := http.NewRequestWithContext(ctx, "GET", url, nil)
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		fmt.Printf("错误: 目录下载失败: %v\n", err)
-		os.Exit(1)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		fmt.Printf("错误: 目录下载失败 (%d): %s\n", resp.StatusCode, string(body))
-		os.Exit(1)
-	}
-
-	// 确保输出路径有正确扩展名
+func downloadDirToFile(ctx context.Context, c *Client, dirID, outputPath, format string, verify bool) error {
 	if !strings.HasSuffix(outputPath, ".tar.gz") && !strings.HasSuffix(outputPath, ".tar.zst") {
 		outputPath += "." + format
 	}
 
+	resp, err := c.DownloadDir(ctx, dirID, format)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
 	out, err := os.Create(outputPath)
 	if err != nil {
-		fmt.Printf("错误: 创建输出文件失败: %v\n", err)
-		os.Exit(1)
+		return err
 	}
 	defer out.Close()
 
 	written, err := io.Copy(out, resp.Body)
 	if err != nil {
-		fmt.Printf("错误: 写入文件失败: %v\n", err)
-		os.Exit(1)
+		return err
 	}
 
 	treeSHA := resp.Header.Get("X-Tree-SHA256")
 	fmt.Printf("目录下载完成: %s (%d 字节)\n", outputPath, written)
 	if treeSHA != "" {
-		fmt.Printf("目录 Tree SHA-256: %s\n", treeSHA)
+		fmt.Printf("Tree SHA-256: %s\n", treeSHA)
 	}
-}
-
-func checkIsDir(ctx context.Context, serverURL, id, namespace string) bool {
-	url := fmt.Sprintf("%s/v1/stat/%s?namespace=%s", serverURL, id, namespace)
-	resp, err := http.DefaultClient.Get(url)
-	if err != nil {
-		return false
-	}
-	defer resp.Body.Close()
-
-	// 通过解析 response 判断 is_dir
-	// 简化：如果 id 以 "dir_" 开头则视为目录
-	return strings.HasPrefix(id, "dir_") || resp.StatusCode != http.StatusOK
+	return nil
 }
