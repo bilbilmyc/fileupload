@@ -80,6 +80,7 @@ type FileMetadata struct {
 
 // DirManifest 目录上传时客户端提交的清单
 type DirManifest struct {
+	Name    string     `json:"name,omitempty"` // 目录名，为空时自动生成
 	Entries []DirEntry `json:"entries"`
 }
 

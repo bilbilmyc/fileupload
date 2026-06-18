@@ -48,6 +48,7 @@ func (r *Router) Handler() http.Handler {
 	var h http.Handler = r.mux
 	h = r.middleware.Namespace(h)
 	h = r.middleware.RateLimit(h)
+	h = r.middleware.Logging(h) // 请求日志（状态码 + 耗时）
 	h = r.middleware.RequestID(h)
 	h = r.middleware.Recover(h)
 	return h

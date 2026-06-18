@@ -407,10 +407,14 @@ func (s *UploadService) SubmitDir(ctx context.Context, manifest DirManifest, nam
 	dirID := NewID()
 	now := time.Now()
 
-	// 创建根目录节点
+	// 创建根目录节点，保留上传时的原始目录名
+	dirName := manifest.Name
+	if dirName == "" {
+		dirName = fmt.Sprintf("dir_%s", dirID[:8])
+	}
 	root := &FileMetadata{
 		FileID:    dirID,
-		Name:      fmt.Sprintf("dir_%s", dirID[:8]),
+		Name:      dirName,
 		Path:      "/",
 		Namespace: namespace,
 		IsDir:     true,

@@ -26,7 +26,7 @@ database:
 upload:
   session_ttl_minutes: 60    # 上传会话无活动超时（分钟）
   default_chunk_size: 10485760  # 默认分片大小（字节），10MB
-  worker_pool_size: 4        # 并发 worker 池大小
+  worker_pool_size: 10        # 并发 worker 池大小
   worker_queue_size: 100     # worker 排队上限
 
 download:

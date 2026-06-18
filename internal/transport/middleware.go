@@ -135,6 +135,28 @@ func (l *RateLimiter) Allow() bool {
 	return false
 }
 
+// responseWriter wraps http.ResponseWriter to capture status code
+type responseWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (rw *responseWriter) WriteHeader(code int) {
+	rw.status = code
+	rw.ResponseWriter.WriteHeader(code)
+}
+
+// Logging 请求日志中间件，记录方法、路径、状态码、耗时
+func (m *Middleware) Logging(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		rw := &responseWriter{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(rw, r)
+		elapsed := time.Since(start)
+		log.Printf("[%s] %s %s → %d (%s)", r.Method, r.URL.Path, GetNamespace(r.Context()), rw.status, elapsed)
+	})
+}
+
 // ---- 辅助函数 ----
 
 // GetNamespace 从 context 中获取 namespace

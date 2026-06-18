@@ -351,8 +351,8 @@ func fileSHA256(path string) (string, error) {
 }
 
 // SubmitDir 提交目录 manifest，创建目录记录。
-func (c *Client) SubmitDir(ctx context.Context, entries []clientDirEntry) (*FileInfo, error) {
-	body, _ := json.Marshal(clientDirManifest{Entries: entries})
+func (c *Client) SubmitDir(ctx context.Context, name string, entries []clientDirEntry) (*FileInfo, error) {
+	body, _ := json.Marshal(clientDirManifest{Name: name, Entries: entries})
 	u := fmt.Sprintf("%s/v1/dirs?namespace=%s", c.ServerURL, url.QueryEscape(c.Namespace))
 	req, _ := http.NewRequestWithContext(ctx, "POST", u, bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -374,6 +374,7 @@ func (c *Client) SubmitDir(ctx context.Context, entries []clientDirEntry) (*File
 
 // clientDirManifest 目录 manifest 结构。
 type clientDirManifest struct {
+	Name    string           `json:"name,omitempty"`
 	Entries []clientDirEntry `json:"entries"`
 }
 
@@ -452,7 +453,9 @@ func (c *Client) UploadDir(ctx context.Context, dirPath string, opts UploadOptio
 	if firstErr != nil {
 		return nil, firstErr
 	}
-	return c.SubmitDir(ctx, entries)
+	// 用本地目录名作为存储目录名
+	dirName := filepath.Base(dirPath)
+	return c.SubmitDir(ctx, dirName, entries)
 }
 
 // DownloadFile 下载单个文件，返回 HTTP 响应（调用者负责关闭 Body）。
