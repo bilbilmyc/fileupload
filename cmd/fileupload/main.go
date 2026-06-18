@@ -79,9 +79,11 @@ func printUsage() {
     --concurrency 4       并发分片数（默认 4）
     --compress zstd       压缩格式 zstd|none（默认 zstd）
     --resume              启用断点续传（默认开启）
+    --exclude-hidden      跳过以 . 开头的隐藏文件（默认不跳）
     示例:
       fileupload upload data.bin
       fileupload upload ./dir/ --concurrency 8
+      fileupload upload ./git-project/ --exclude-hidden
 
   download <id>         下载文件或目录
     -o <path>             输出路径（默认使用 fileID/dirID）

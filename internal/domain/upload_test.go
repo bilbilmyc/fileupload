@@ -68,9 +68,12 @@ func TestCreateSession_ZeroLength(t *testing.T) {
 	svc, _, _ := newTestUploadService(t)
 	ctx := context.Background()
 
-	_, err := svc.CreateSession(ctx, "sha", 0, CompNone, 0, "ns", "")
-	if err != ErrInvalidArgument {
-		t.Errorf("CreateSession(0 length) err = %v, want ErrInvalidArgument", err)
+	session, err := svc.CreateSession(ctx, "sha", 0, CompNone, 0, "ns", "")
+	if err != nil {
+		t.Fatalf("CreateSession(0 length) err = %v, want nil", err)
+	}
+	if session.UploadLength != 0 {
+		t.Errorf("UploadLength = %d, want 0", session.UploadLength)
 	}
 }
 
@@ -293,15 +296,32 @@ func TestFinalize_ChecksumMismatch(t *testing.T) {
 	_ = storage
 }
 
-func TestFinalize_NoChunks(t *testing.T) {
-	svc, _, _ := newTestUploadService(t)
+func TestFinalize_NoChunksZeroByte(t *testing.T) {
+	svc, meta, _ := newTestUploadService(t)
 	ctx := context.Background()
 
-	session, _ := svc.CreateSession(ctx, "sha", 100, CompNone, 10, "ns", "")
+	// 创建 0 字节上传会话
+	session, _ := svc.CreateSession(ctx, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", 0, CompNone, 10, "ns", "empty.txt")
 
-	_, err := svc.Finalize(ctx, session.SessionID)
-	if err != ErrInvalidArgument {
-		t.Errorf("Finalize(no chunks) err = %v, want ErrInvalidArgument", err)
+	// 不传任何分片，直接 Finalize → 应成功创建空文件
+	result, err := svc.Finalize(ctx, session.SessionID)
+	if err != nil {
+		t.Fatalf("Finalize(0 bytes) err = %v, want nil", err)
+	}
+	if result.Size != 0 {
+		t.Errorf("Size = %d, want 0", result.Size)
+	}
+	if result.Name != "empty.txt" {
+		t.Errorf("Name = %s, want empty.txt", result.Name)
+	}
+
+	// 验证 blob 被创建
+	blob, _ := meta.GetBlobBySha(ctx, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+	if blob == nil {
+		t.Error("0 字节文件 Finalize 后 blob 未创建")
+	}
+	if blob.Size != 0 {
+		t.Errorf("blob Size = %d, want 0", blob.Size)
 	}
 }
 

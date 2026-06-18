@@ -25,10 +25,11 @@ func runUpload(ctx context.Context, cfg config.Config, args []string) {
 	}
 
 	opts := UploadOptions{
-		ChunkSize:   parseSize(flags, "chunk-size", 10*1024*1024),
-		Concurrency: parseInt(flags, "concurrency", 4),
-		Compress:    getFlag(flags, "compress", "zstd"),
-		Resume:      getFlag(flags, "resume", "true") != "false",
+		ChunkSize:     parseSize(flags, "chunk-size", 10*1024*1024),
+		Concurrency:   parseInt(flags, "concurrency", 4),
+		Compress:      getFlag(flags, "compress", "zstd"),
+		Resume:        getFlag(flags, "resume", "true") != "false",
+		ExcludeHidden: getFlag(flags, "exclude-hidden", "false") == "true",
 	}
 
 	if info.IsDir() {

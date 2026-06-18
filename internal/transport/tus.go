@@ -30,7 +30,7 @@ func (h *TusHandler) CreateUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	uploadLength, err := strconv.ParseInt(uploadLengthStr, 10, 64)
-	if err != nil || uploadLength <= 0 {
+	if err != nil || uploadLength < 0 {
 		respondError(w, http.StatusBadRequest, domain.ErrInvalidArgument)
 		return
 	}
@@ -148,8 +148,12 @@ func NewRESTHandler(uploadSvc *domain.UploadService, downloadSvc *domain.Downloa
 func (h *RESTHandler) InitUpload(w http.ResponseWriter, r *http.Request) {
 	// 同 tus 创建逻辑，共享 UploadService
 	lengthStr := r.URL.Query().Get("size")
+	if lengthStr == "" {
+		respondError(w, http.StatusBadRequest, domain.ErrInvalidArgument)
+		return
+	}
 	uploadLength, _ := strconv.ParseInt(lengthStr, 10, 64)
-	if uploadLength <= 0 {
+	if uploadLength < 0 {
 		respondError(w, http.StatusBadRequest, domain.ErrInvalidArgument)
 		return
 	}

@@ -89,7 +89,7 @@ func (s *UploadService) CheckExists(ctx context.Context, sha256, namespace, name
 
 // CreateSession 创建上传会话
 func (s *UploadService) CreateSession(ctx context.Context, sha256 string, length int64, compression CompressionFormat, chunkSize int64, namespace, fileName string) (*UploadSession, error) {
-	if length <= 0 {
+	if length < 0 {
 		return nil, ErrInvalidArgument
 	}
 	if chunkSize <= 0 {
@@ -310,8 +310,52 @@ func (s *UploadService) Finalize(ctx context.Context, sessionID string) (*FileMe
 	if err != nil {
 		return nil, fmt.Errorf("列举分片: %w", err)
 	}
+	// 0 字节文件处理：无分片，直接创建空 blob 和文件记录
 	if len(chunks) == 0 {
-		return nil, ErrInvalidArgument
+		fileID := NewID()
+		fileName := session.FileName
+		if fileName == "" {
+			fileName = fileID
+		}
+		actualSha := session.SHA256
+		if actualSha == "" {
+			actualSha = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" // sha256 of empty
+		}
+		storagePath := fmt.Sprintf("%s/%s", session.Namespace, fileName)
+		// 写入空文件
+		if _, err := s.storage.Write(ctx, storagePath, bytes.NewReader(nil)); err != nil {
+			return nil, fmt.Errorf("写入空文件: %w", err)
+		}
+		blob := &ContentBlob{
+			SHA256:      actualSha,
+			StoragePath: storagePath,
+			Size:        0,
+			RefCount:    1,
+			CreatedAt:   time.Now(),
+		}
+		if err := s.meta.PutBlob(ctx, blob); err != nil {
+			_ = s.storage.Delete(ctx, storagePath)
+			return nil, fmt.Errorf("写入去重记录: %w", err)
+		}
+		fileMeta := &FileMetadata{
+			FileID:    fileID,
+			SHA256:    actualSha,
+			Name:      filepath.Base(fileName),
+			Path:      fileName,
+			Size:      0,
+			Namespace: session.Namespace,
+			IsDir:     false,
+			CreatedAt: time.Now(),
+		}
+		if err := s.meta.PutFile(ctx, fileMeta); err != nil {
+			_, _ = s.meta.DecrBlobRef(ctx, actualSha)
+			return nil, fmt.Errorf("写入文件记录: %w", err)
+		}
+		session.Status = SessionCompleted
+		session.FileID = fileID
+		_ = s.meta.DeleteSession(ctx, sessionID)
+		log.Printf("[upload] Finalize %s → %s (0 字节, ns=%s)", sessionID, fileID, session.Namespace)
+		return fileMeta, nil
 	}
 
 	// 按 index 排序

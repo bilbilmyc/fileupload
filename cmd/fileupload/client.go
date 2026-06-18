@@ -221,6 +221,8 @@ type UploadOptions struct {
 	FileName string
 	// NoProgress 静默模式：目录上传时禁用逐文件进度条，改用 [3/50] 文件名 显示。
 	NoProgress bool
+	// ExcludeHidden 为 true 时跳过以 . 开头的隐藏文件。
+	ExcludeHidden bool
 }
 
 // UploadFile 上传单个文件。支持压缩、并发分片、秒传。
@@ -303,10 +305,10 @@ func (c *Client) uploadBytes(ctx context.Context, fileName string, data []byte, 
 		})
 	}
 
-	// 进度跟踪 — 可视化进度条（含实时速率）
-	// 目录上传时用 [3/50] 文件名 显示，跳过逐文件 bar
+	// 进度跟踪 — 可视化进度条
+	// 0 字节文件或目录上传模式跳过 bar
 	var p *Progress
-	if !opts.NoProgress {
+	if !opts.NoProgress && total > 0 {
 		p = NewProgress(int64(total), "Uploading")
 		p.Start()
 		defer p.Stop()
@@ -413,21 +415,14 @@ func (c *Client) UploadDir(ctx context.Context, dirPath string, opts UploadOptio
 		if err != nil {
 			return nil
 		}
-		// 跳过隐藏目录（.git 等）及其所有子内容
-		if info.IsDir() && len(info.Name()) > 0 && info.Name()[0] == '.' && path != dirPath {
-			return filepath.SkipDir
-		}
 		if info.IsDir() {
 			return nil
 		}
-		// 跳过隐藏文件（.DS_Store 等）
-		if len(info.Name()) > 0 && info.Name()[0] == '.' {
-			return nil
-		}
-		// 跳过空文件（0 字节服务端无法创建上传会话）
-		if info.Size() == 0 {
-			fmt.Fprintf(os.Stderr, "  跳过空文件: %s\n", path)
-			return nil
+		// --exclude-hidden 开启时跳过隐藏文件和隐藏目录
+		if opts.ExcludeHidden {
+			if len(info.Name()) > 0 && info.Name()[0] == '.' {
+				return nil
+			}
 		}
 		rel, err := filepath.Rel(dirPath, path)
 		if err != nil {

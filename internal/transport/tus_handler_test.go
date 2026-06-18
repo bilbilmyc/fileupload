@@ -90,8 +90,8 @@ func TestCreateUpload_ZeroLength(t *testing.T) {
 	req.Header.Set("Upload-Length", "0")
 	w := httptest.NewRecorder()
 	tusHandler.CreateUpload(w, req)
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want 400", w.Code)
+	if w.Code != http.StatusCreated {
+		t.Errorf("0-length upload status = %d, want 201", w.Code)
 	}
 }
 
