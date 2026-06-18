@@ -68,3 +68,81 @@ func (c *Client) List(ctx context.Context, parentID string) (*ListResult, error)
 	}
 	return &res, nil
 }
+
+// StatResult stat 查询结果。
+type StatResult struct {
+	File map[string]any `json:"file"`
+	Blob map[string]any `json:"blob"`
+}
+
+// Stat 查询文件或目录信息。
+func (c *Client) Stat(ctx context.Context, id string) (*StatResult, error) {
+	u := fmt.Sprintf("%s/v1/stat/%s?namespace=%s", c.ServerURL, url.PathEscape(id), url.QueryEscape(c.Namespace))
+	req, _ := http.NewRequestWithContext(ctx, "GET", u, nil)
+	resp, err := c.do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("stat failed (%d): %s", resp.StatusCode, string(body))
+	}
+	var res StatResult
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+// Delete 删除文件。
+func (c *Client) Delete(ctx context.Context, id string) error {
+	u := fmt.Sprintf("%s/v1/files/%s?namespace=%s", c.ServerURL, url.PathEscape(id), url.QueryEscape(c.Namespace))
+	req, _ := http.NewRequestWithContext(ctx, "DELETE", u, nil)
+	resp, err := c.do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("delete failed (%d): %s", resp.StatusCode, string(body))
+	}
+	return nil
+}
+
+// DeleteDir 删除目录。
+func (c *Client) DeleteDir(ctx context.Context, id string) error {
+	u := fmt.Sprintf("%s/v1/dirs/%s?namespace=%s", c.ServerURL, url.PathEscape(id), url.QueryEscape(c.Namespace))
+	req, _ := http.NewRequestWithContext(ctx, "DELETE", u, nil)
+	resp, err := c.do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("delete dir failed (%d): %s", resp.StatusCode, string(body))
+	}
+	return nil
+}
+
+// Scan 触发服务端一致性巡检。
+func (c *Client) Scan(ctx context.Context) (map[string]any, error) {
+	u := fmt.Sprintf("%s/v1/admin/scan", c.ServerURL)
+	req, _ := http.NewRequestWithContext(ctx, "POST", u, nil)
+	resp, err := c.do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("scan failed (%d): %s", resp.StatusCode, string(body))
+	}
+	var res map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+		return nil, err
+	}
+	return res, nil
+}
