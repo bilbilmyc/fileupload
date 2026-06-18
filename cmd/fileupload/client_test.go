@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -114,5 +115,45 @@ func TestCompressZstd(t *testing.T) {
 	got, _ := io.ReadAll(r)
 	if !bytes.Equal(got, in) {
 		t.Fatalf("roundtrip failed")
+	}
+}
+
+func TestClientUploadFlow(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("HEAD /v1/files", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	})
+	mux.HandleFunc("POST /uploads", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", "/uploads/sess-123")
+		w.WriteHeader(http.StatusCreated)
+	})
+	mux.HandleFunc("PATCH /uploads/{id}", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Upload-Offset", r.Header.Get("Upload-Offset"))
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("POST /v1/uploads/{id}/finalize", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"file_id":"fid","sha256":"sha","size":5,"name":"x"}`)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "default")
+	exists, err := c.CheckExists(context.Background(), "sha", "x")
+	if err != nil {
+		t.Fatalf("CheckExists unexpected err: %v", err)
+	}
+	if exists != nil {
+		t.Fatalf("CheckExists should be nil for 404, got %+v", exists)
+	}
+	sid, err := c.CreateSession(context.Background(), 5, "sha", "none", 1024, "x")
+	if err != nil || sid != "sess-123" {
+		t.Fatalf("CreateSession: %s %v", sid, err)
+	}
+	if err := c.UploadChunk(context.Background(), sid, 0, []byte("hello"), 0); err != nil {
+		t.Fatal(err)
+	}
+	info, err := c.Finalize(context.Background(), sid)
+	if err != nil || info.FileID != "fid" {
+		t.Fatalf("Finalize: %+v %v", info, err)
 	}
 }

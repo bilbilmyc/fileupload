@@ -2,11 +2,19 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 
 	"github.com/klauspost/compress/zstd"
 )
+
+// sha256Sum 计算字节片的 SHA-256 十六进制字符串。
+func sha256Sum(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
+}
 
 // compressBuffer 使用指定格式压缩数据，返回压缩后的字节。
 func compressBuffer(data []byte, format string) ([]byte, error) {

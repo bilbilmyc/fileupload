@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -166,4 +167,105 @@ func (c *Client) Scan(ctx context.Context) (map[string]any, error) {
 		return nil, err
 	}
 	return res, nil
+}
+
+// FileInfo 上传完成后的文件元信息。
+type FileInfo struct {
+	FileID string `json:"file_id"`
+	SHA256 string `json:"sha256"`
+	Size   int64  `json:"size"`
+	Name   string `json:"name"`
+}
+
+// CheckExists 秒传预检：查询文件是否已存在。
+func (c *Client) CheckExists(ctx context.Context, sha256, name string) (*FileInfo, error) {
+	u := fmt.Sprintf("%s/v1/files?sha256=%s&namespace=%s&name=%s", c.ServerURL, url.QueryEscape(sha256), url.QueryEscape(c.Namespace), url.QueryEscape(name))
+	req, _ := http.NewRequestWithContext(ctx, "HEAD", u, nil)
+	resp, err := c.do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("check exists failed (%d): %s", resp.StatusCode, string(body))
+	}
+	var info FileInfo
+	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
+		return nil, err
+	}
+	return &info, nil
+}
+
+// CreateSession 创建 tus 上传会话。
+func (c *Client) CreateSession(ctx context.Context, size int64, sha256, compression string, chunkSize int64, fileName string) (string, error) {
+	u := fmt.Sprintf("%s/uploads", c.ServerURL)
+	req, _ := http.NewRequestWithContext(ctx, "POST", u, nil)
+	req.Header.Set("Upload-Length", strconv.FormatInt(size, 10))
+	req.Header.Set("X-SHA256", sha256)
+	req.Header.Set("X-Compression", compression)
+	req.Header.Set("X-Chunk-Size", strconv.FormatInt(chunkSize, 10))
+	req.Header.Set("X-File-Name", fileName)
+	req.Header.Set("X-Namespace", c.Namespace)
+
+	resp, err := c.do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("create session failed (%d): %s", resp.StatusCode, string(body))
+	}
+	loc := resp.Header.Get("Location")
+	loc = strings.TrimPrefix(loc, "/uploads/")
+	if loc == "" {
+		return "", fmt.Errorf("server returned empty Location")
+	}
+	return loc, nil
+}
+
+// UploadChunk 上传单个分片。
+func (c *Client) UploadChunk(ctx context.Context, sessionID string, index int, data []byte, offset int64) error {
+	u := fmt.Sprintf("%s/uploads/%s", c.ServerURL, url.PathEscape(sessionID))
+	h := sha256Sum(data)
+	req, _ := http.NewRequestWithContext(ctx, "PATCH", u, bytes.NewReader(data))
+	req.Header.Set("Upload-Offset", strconv.FormatInt(offset, 10))
+	req.Header.Set("X-Slice-Index", strconv.Itoa(index))
+	req.Header.Set("X-Slice-SHA256", h)
+	req.ContentLength = int64(len(data))
+
+	resp, err := c.do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("upload chunk %d failed (%d): %s", index, resp.StatusCode, string(body))
+	}
+	return nil
+}
+
+// Finalize 触发服务端合并文件。
+func (c *Client) Finalize(ctx context.Context, sessionID string) (*FileInfo, error) {
+	u := fmt.Sprintf("%s/v1/uploads/%s/finalize", c.ServerURL, url.PathEscape(sessionID))
+	req, _ := http.NewRequestWithContext(ctx, "POST", u, nil)
+	resp, err := c.do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("finalize failed (%d): %s", resp.StatusCode, string(body))
+	}
+	var info FileInfo
+	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
+		return nil, err
+	}
+	return &info, nil
 }
