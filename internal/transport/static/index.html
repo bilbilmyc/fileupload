@@ -248,7 +248,7 @@ async function startDirUpload(files) {
     });
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     const data = await resp.json();
-    up(id, 100, `✅ 目录上传完成! DirID: ${data.dir_id}`, true);
+    up(id, 100, `✅ 目录上传完成! DirID: ${data.file_id}`, true);
     toast(`📁 "${dirName}" 上传完成 (${entries.length} 个文件)`, 'success');
     setTimeout(loadFileTree, 500);
   } catch (e) {

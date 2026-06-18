@@ -394,7 +394,7 @@ func TestE2E_DirUploadAndDownload(t *testing.T) {
 	var dirResult map[string]string
 	json.NewDecoder(dirResp.Body).Decode(&dirResult)
 	dirResp.Body.Close()
-	dirID := dirResult["dir_id"]
+	dirID := dirResult["file_id"]
 
 	// === 3. Stat dir ===
 	statResp := f.doReq("GET", "/v1/stat/"+dirID, nil, map[string]string{

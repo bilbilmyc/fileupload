@@ -258,7 +258,7 @@ func (h *RESTHandler) SubmitDir(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respondJSON(w, http.StatusCreated, map[string]string{
-		"dir_id": dir.FileID,
+		"file_id": dir.FileID,
 	})
 }
 

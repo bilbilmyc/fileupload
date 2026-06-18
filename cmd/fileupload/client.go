@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -411,8 +412,10 @@ func (c *Client) UploadDir(ctx context.Context, dirPath string, opts UploadOptio
 	if concurrency <= 0 {
 		concurrency = 4
 	}
-	// 显示并发数
 	fmt.Fprintf(os.Stderr, "  上传 %d 个文件（并发 %d）\n", len(tasks), concurrency)
+
+	// 进度：atomic 计数器显示当前正在上传的文件
+	var doneCount int32
 
 	type result struct {
 		rel   string
@@ -427,6 +430,8 @@ func (c *Client) UploadDir(ctx context.Context, dirPath string, opts UploadOptio
 		task := t
 		go func() {
 			defer func() { <-sem }()
+			n := atomic.AddInt32(&doneCount, 1)
+			fmt.Fprintf(os.Stderr, "\r  [%d/%d] %s", n, len(tasks), task.rel)
 			dirOpts := opts
 			dirOpts.FileName = task.rel
 			fmeta, err := c.UploadFile(ctx, task.path, dirOpts)
@@ -452,6 +457,7 @@ func (c *Client) UploadDir(ctx context.Context, dirPath string, opts UploadOptio
 			entries = append(entries, clientDirEntry{Path: r.rel, FileID: r.fmeta.FileID})
 		}
 	}
+	fmt.Fprintln(os.Stderr) // 换行
 	if firstErr != nil {
 		return nil, firstErr
 	}

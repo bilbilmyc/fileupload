@@ -434,8 +434,8 @@ func TestREST_SubmitDir(t *testing.T) {
 	}
 	var resp map[string]string
 	json.NewDecoder(w.Body).Decode(&resp)
-	if resp["dir_id"] == "" {
-		t.Error("dir_id is empty")
+	if resp["file_id"] == "" {
+		t.Error("file_id is empty")
 	}
 }
 
