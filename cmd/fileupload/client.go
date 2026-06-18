@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -35,9 +36,29 @@ func NewClient(serverURL, namespace string) *Client {
 	}
 }
 
-// do 执行 HTTP 请求，返回响应。
+// do 执行 HTTP 请求，对 5xx/503 自动重试最多 3 次，支持 Retry-After。
 func (c *Client) do(req *http.Request) (*http.Response, error) {
-	return c.HTTPClient.Do(req)
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		// 除第一次外，每次重试需要重新构造 body（因为第一次可能已被消费）
+		resp, err := c.HTTPClient.Do(req)
+		if err != nil {
+			lastErr = err
+			time.Sleep(time.Duration(attempt+1) * 500 * time.Millisecond)
+			continue
+		}
+		if resp.StatusCode != http.StatusServiceUnavailable && resp.StatusCode < 500 {
+			return resp, nil
+		}
+		ra := resp.Header.Get("Retry-After")
+		resp.Body.Close()
+		delay := time.Duration(attempt+1) * 500 * time.Millisecond
+		if sec, err := strconv.Atoi(ra); err == nil && sec > 0 {
+			delay = time.Duration(sec) * time.Second
+		}
+		time.Sleep(delay)
+	}
+	return nil, lastErr
 }
 
 // ListResult 目录列表结果。
