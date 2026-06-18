@@ -407,9 +407,13 @@ type clientDirEntry struct {
 func (c *Client) UploadDir(ctx context.Context, dirPath string, opts UploadOptions) (*FileInfo, error) {
 	// 收集文件
 	type fileTask struct {
-		path string
-		rel  string
+		path string // 本地绝对路径
+		rel  string // 存储路径（含 dirPrefix: skills/subdir/file.txt）
+		mrel string // manifest 路径（不含 dirPrefix: subdir/file.txt）
 	}
+	// 用上传的目录名作为路径前缀，保留目录本身在存储结构中
+	dirPrefix := filepath.Base(dirPath)
+
 	var tasks []fileTask
 	err := filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -428,7 +432,12 @@ func (c *Client) UploadDir(ctx context.Context, dirPath string, opts UploadOptio
 		if err != nil {
 			return err
 		}
-		tasks = append(tasks, fileTask{path: path, rel: filepath.ToSlash(rel)})
+		rel = filepath.ToSlash(rel)
+		tasks = append(tasks, fileTask{
+			path: path,
+			rel:  dirPrefix + "/" + rel,
+			mrel: rel,
+		})
 		return nil
 	})
 	if err != nil {
@@ -451,6 +460,7 @@ func (c *Client) UploadDir(ctx context.Context, dirPath string, opts UploadOptio
 
 	type result struct {
 		rel   string
+		mrel  string
 		fmeta *FileInfo
 		err   error
 	}
@@ -467,7 +477,7 @@ func (c *Client) UploadDir(ctx context.Context, dirPath string, opts UploadOptio
 			dirOpts := opts
 			dirOpts.FileName = task.rel
 			fmeta, err := c.UploadFile(ctx, task.path, dirOpts)
-			results <- result{rel: task.rel, fmeta: fmeta, err: err}
+			results <- result{rel: task.rel, mrel: task.mrel, fmeta: fmeta, err: err}
 		}()
 	}
 
@@ -486,7 +496,7 @@ func (c *Client) UploadDir(ctx context.Context, dirPath string, opts UploadOptio
 			errs = append(errs, fmt.Sprintf("%s: %v", r.rel, r.err))
 		}
 		if r.fmeta != nil {
-			entries = append(entries, clientDirEntry{Path: r.rel, FileID: r.fmeta.FileID})
+			entries = append(entries, clientDirEntry{Path: r.mrel, FileID: r.fmeta.FileID})
 		}
 	}
 	fmt.Fprintln(os.Stderr) // 换行
