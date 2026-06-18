@@ -256,7 +256,7 @@ func TestFinalize_Success(t *testing.T) {
 		t.Error("Finalize 后 file 未创建")
 	}
 
-	// 验证存储有数据（路径格式: demo/<fileID_前缀>_sanitized_filename）
+	// 验证存储有数据（路径格式: demo/<fileID>）
 	found := false
 	for k := range storage.files {
 		if len(k) > 5 && k[:5] == "demo/" {

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -44,7 +45,7 @@ func (h *TusHandler) CreateUpload(w http.ResponseWriter, r *http.Request) {
 	if chunkSizeStr != "" {
 		chunkSize, _ = strconv.ParseInt(chunkSizeStr, 10, 64)
 	}
-	fileName := r.Header.Get("X-File-Name")
+	fileName := decodeFileName(r.Header.Get("X-File-Name"))
 	namespace := GetNamespace(r.Context())
 
 	session, err := h.uploadSvc.CreateSession(r.Context(),
@@ -155,7 +156,7 @@ func (h *RESTHandler) InitUpload(w http.ResponseWriter, r *http.Request) {
 
 	sha256 := r.Header.Get("X-SHA256")
 	compression := r.Header.Get("X-Compression")
-	fileName := r.Header.Get("X-File-Name")
+	fileName := decodeFileName(r.Header.Get("X-File-Name"))
 	if compression == "" {
 		compression = "none"
 	}
@@ -449,4 +450,19 @@ func formatContentRange(offset, length, total int64) string {
 // decodeJSON 解码 JSON 请求体
 func decodeJSON(r io.Reader, v any) error {
 	return json.NewDecoder(r).Decode(v)
+}
+
+// decodeFileName 对 X-File-Name 头值进行智能解码。
+// 某些客户端（如浏览器）可能对 non-ASCII 文件名做了 URL 编码，兼容处理。
+func decodeFileName(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	// 如果包含 % 且解码后不是纯 ASCII，说明是 URL 编码的
+	if strings.Contains(raw, "%") {
+		if decoded, err := url.QueryUnescape(raw); err == nil && decoded != raw {
+			return decoded
+		}
+	}
+	return raw
 }

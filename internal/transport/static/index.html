@@ -438,7 +438,7 @@ async function uploadFile(file, onProgress) {
     method: 'POST',
     headers: {
       'X-SHA256': sha256, 'X-Compression': compress,
-      'X-Namespace': ns, 'X-File-Name': encodeURIComponent(file.name),
+      'X-Namespace': ns, 'X-File-Name': file.name,
     }
   });
   if (!initResp.ok) throw new Error('创建会话失败');

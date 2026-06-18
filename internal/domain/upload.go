@@ -334,7 +334,9 @@ func (s *UploadService) Finalize(ctx context.Context, sessionID string) (*FileMe
 	if fileName == "" {
 		fileName = fileID
 	}
-	storagePath := fmt.Sprintf("%s/%s", session.Namespace, safeStorageName(fileName))
+	// 存储路径用 fileID（UUID），避免用户文件名带特殊字符/路径穿越问题
+	// 原始文件名保留在 FileMetadata.Name 中供展示
+	storagePath := fmt.Sprintf("%s/%s", session.Namespace, fileID)
 	teeReader, acc := s.hasher.TeeReader(originalReader)
 
 	written, err := s.storage.Write(ctx, storagePath, teeReader)
