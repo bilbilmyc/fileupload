@@ -173,6 +173,35 @@ func (c *Client) Scan(ctx context.Context) (map[string]any, error) {
 	return res, nil
 }
 
+// resumeState 存储断点续传的暂存信息。
+type resumeState struct {
+	SessionID string `json:"session_id"`
+	SHA256    string `json:"sha256"`
+	FileSize  int64  `json:"file_size"`
+}
+
+// resumeStatePath 根据文件 SHA-256 返回 resume 状态文件路径。
+func resumeStatePath(sha256 string) string {
+	return filepath.Join(os.TempDir(), fmt.Sprintf(".fileupload.resume.%s.json", sha256))
+}
+
+// saveResumeState 保存 resume 状态到硬盘。
+func saveResumeState(path string, state resumeState) error {
+	data, _ := json.Marshal(state)
+	return os.WriteFile(path, data, 0600)
+}
+
+// loadResumeState 从硬盘加载 resume 状态。
+func loadResumeState(path string) (resumeState, error) {
+	var state resumeState
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return state, err
+	}
+	err = json.Unmarshal(data, &state)
+	return state, err
+}
+
 // UploadOptions 上传选项。
 type UploadOptions struct {
 	ChunkSize   int64
@@ -248,6 +277,20 @@ func (c *Client) uploadBytes(ctx context.Context, fileName string, data []byte, 
 		chunkCount++
 	}
 
+	// 保存 resume state（仅非 zstd 压缩，因为压缩后数据为临时数据）
+	if opts.Resume && compress != "zstd" {
+		saveResumeState(resumeStatePath(originalSHA), resumeState{
+			SessionID: sessionID,
+			SHA256:    originalSHA,
+			FileSize:  int64(total),
+		})
+	}
+
+	// 进度跟踪
+	p := NewProgress(int64(total), func(current, total int64) {
+		fmt.Printf("\r  上传进度: %s / %s (%d%%)", humanBytes(current), humanBytes(total), current*100/total)
+	})
+
 	sem := make(chan struct{}, opts.Concurrency)
 	errCh := make(chan error, chunkCount)
 
@@ -264,7 +307,11 @@ func (c *Client) uploadBytes(ctx context.Context, fileName string, data []byte, 
 		sem <- struct{}{}
 		go func() {
 			defer func() { <-sem }()
-			errCh <- c.UploadChunk(ctx, sessionID, idx, chunk, offset)
+			err := c.UploadChunk(ctx, sessionID, idx, chunk, offset)
+			if err == nil {
+				p.Add(int64(len(chunk)))
+			}
+			errCh <- err
 		}()
 	}
 
@@ -274,7 +321,12 @@ func (c *Client) uploadBytes(ctx context.Context, fileName string, data []byte, 
 		}
 	}
 
-	return c.Finalize(ctx, sessionID)
+	fmt.Println()
+	info, err := c.Finalize(ctx, sessionID)
+	if err == nil && opts.Resume && compress != "zstd" {
+		os.Remove(resumeStatePath(originalSHA))
+	}
+	return info, err
 }
 
 // fileSHA256 计算文件的 SHA-256 十六进制字符串。
