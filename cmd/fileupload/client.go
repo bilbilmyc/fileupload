@@ -384,9 +384,9 @@ type clientDirEntry struct {
 	FileID string `json:"file_id"`
 }
 
-// UploadDir 上传目录：并发上传每个文件后提交 manifest。
+// UploadDir 并发上传目录：收集所有文件后以固定并发数上传，最后提交 manifest。
 func (c *Client) UploadDir(ctx context.Context, dirPath string, opts UploadOptions) (*FileInfo, error) {
-	// 先收集所有文件
+	// 收集文件
 	type fileTask struct {
 		path string
 		rel  string
@@ -407,15 +407,17 @@ func (c *Client) UploadDir(ctx context.Context, dirPath string, opts UploadOptio
 		return nil, err
 	}
 
-	// 并发上传（默认 4 个 worker）
 	concurrency := opts.Concurrency
 	if concurrency <= 0 {
 		concurrency = 4
 	}
+	// 显示并发数
+	fmt.Fprintf(os.Stderr, "  上传 %d 个文件（并发 %d）\n", len(tasks), concurrency)
+
 	type result struct {
-		rel    string
-		fmeta  *FileInfo
-		err    error
+		rel   string
+		fmeta *FileInfo
+		err   error
 	}
 	sem := make(chan struct{}, concurrency)
 	results := make(chan result, len(tasks))
@@ -432,7 +434,7 @@ func (c *Client) UploadDir(ctx context.Context, dirPath string, opts UploadOptio
 		}()
 	}
 
-	// 等待所有上传完成
+	// drain sem
 	go func() {
 		for i := 0; i < cap(sem); i++ {
 			sem <- struct{}{}
@@ -453,7 +455,6 @@ func (c *Client) UploadDir(ctx context.Context, dirPath string, opts UploadOptio
 	if firstErr != nil {
 		return nil, firstErr
 	}
-	// 用本地目录名作为存储目录名
 	dirName := filepath.Base(dirPath)
 	return c.SubmitDir(ctx, dirName, entries)
 }

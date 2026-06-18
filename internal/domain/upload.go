@@ -115,9 +115,9 @@ func (s *UploadService) CreateSession(ctx context.Context, sha256 string, length
 }
 
 // AppendChunk 追加一个分片（由 tus/REST handler 调用）
-// 任务提交到 worker 池处理。
-// 注意：body 先在当前 goroutine 中完全读取缓存，再提交到 worker 池，
-// 避免异步 goroutine 中读取已关闭的 HTTP body。
+// body 在当前 goroutine 中完全读进内存后，提交到 worker 池异步处理。
+// worker 池使用 background context，不受 HTTP handler 取消影响。
+// 调用方通过 done channel 等待处理完成。
 func (s *UploadService) AppendChunk(ctx context.Context, sessionID string, index int, body io.Reader, declaredSha256 string) error {
 	// 校验会话存在且状态正确
 	session, err := s.meta.GetSession(ctx, sessionID)
@@ -140,34 +140,49 @@ func (s *UploadService) AppendChunk(ctx context.Context, sessionID string, index
 		return fmt.Errorf("读取分片数据: %w", err)
 	}
 
-	// 同步处理分片（不提交 worker 池），避免 HTTP handler 返回后 context 取消导致后续操作失败
-	s.processChunkBytes(ctx, sessionID, session.Namespace, index, chunkData, declaredSha256)
-	return nil
+	// 提交到 worker 池异步处理（使用 background context 避免 HTTP handler 取消的影响）
+	done := make(chan error, 1)
+	task := func() {
+		// 使用 background context，防止 HTTP handler 返回后 ctx 取消导致操作失败
+		bgCtx := context.Background()
+		done <- s.processChunkBytes(bgCtx, sessionID, session.Namespace, index, chunkData, declaredSha256)
+	}
+
+	if err := s.pool.Submit(ctx, task); err != nil {
+		return err
+	}
+
+	// 等待异步处理完成
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
-// processChunkBytes 处理已读入内存的分片数据
-// 在当前 goroutine 中同步执行（不再提交到 worker 池），
-// 避免 HTTP handler 返回后 context 被取消导致 Redis 操作失败。
-func (s *UploadService) processChunkBytes(ctx context.Context, sessionID string, _ string, index int, chunkData []byte, declaredSha256 string) {
+// processChunkBytes 处理已读入内存的分片数据（在 worker 池中执行）。
+func (s *UploadService) processChunkBytes(ctx context.Context, sessionID string, _ string, index int, chunkData []byte, declaredSha256 string) error {
 	partPath := filepath.Join(s.cfg.TempDir, sessionID, fmt.Sprintf("%d.part", index))
 
 	teeReader, acc := s.hasher.TeeReader(bytes.NewReader(chunkData))
 
 	written, err := s.storage.Write(ctx, partPath, teeReader)
 	if err != nil {
-		return
+		return fmt.Errorf("写入分片 %d: %w", index, err)
 	}
 
 	actualSha := acc.SumHex()
 
 	if declaredSha256 != "" && actualSha != declaredSha256 {
 		_ = s.storage.Delete(ctx, partPath)
-		return
+		return ErrSliceChecksum
 	}
 
 	if err := s.meta.UpdateOffset(ctx, sessionID, index, actualSha, written); err != nil {
-		return
+		return fmt.Errorf("更新偏移: %w", err)
 	}
+	return nil
 }
 
 // GetOffset 获取当前已接收字节偏移（断点续传用）
