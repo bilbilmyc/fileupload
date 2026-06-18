@@ -16,6 +16,8 @@ type Progress struct {
 	current   int64
 	label     string
 	startTime time.Time
+	stopCh    chan struct{}
+	done      sync.Once
 	mu        sync.Mutex
 }
 
@@ -31,6 +33,33 @@ func NewProgress(total int64, label string) *Progress {
 // Add 增加已完成的字节数。
 func (p *Progress) Add(n int64) {
 	atomic.AddInt64(&p.current, n)
+}
+
+// Start 启动后台渲染协程（每 200ms 重绘一次进度条）。
+// 用于上传等非 io.Reader 驱动的场景。
+func (p *Progress) Start() {
+	p.stopCh = make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(200 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				p.renderBar()
+			case <-p.stopCh:
+				return
+			}
+		}
+	}()
+}
+
+// Stop 停止后台渲染协程并执行最终渲染。
+func (p *Progress) Stop() {
+	p.done.Do(func() {
+		if p.stopCh != nil {
+			close(p.stopCh)
+		}
+	})
 }
 
 // renderBar 渲染一条进度行（\r 开头覆盖当前行）。

@@ -334,9 +334,9 @@ func (s *UploadService) Finalize(ctx context.Context, sessionID string) (*FileMe
 	if fileName == "" {
 		fileName = fileID
 	}
-	// 存储路径用 fileID（UUID），避免用户文件名带特殊字符/路径穿越问题
-	// 原始文件名保留在 FileMetadata.Name 中供展示
-	storagePath := fmt.Sprintf("%s/%s", session.Namespace, fileID)
+	// 存储路径用 namespace/original_path，保留原始文件名和目录结构
+	// 方便直接从存储目录拷贝文件。LocalFS 自带路径穿越防护。
+	storagePath := fmt.Sprintf("%s/%s", session.Namespace, fileName)
 	teeReader, acc := s.hasher.TeeReader(originalReader)
 
 	written, err := s.storage.Write(ctx, storagePath, teeReader)
@@ -366,11 +366,12 @@ func (s *UploadService) Finalize(ctx context.Context, sessionID string) (*FileMe
 		return nil, fmt.Errorf("写入去重记录: %w", err)
 	}
 
-		// 创建逻辑文件记录（fileName 已在上面定义）
+		// 创建逻辑文件记录
+		// Name=基本名（展示用），Path=原始路径（目录上传时含相对路径）
 		fileMeta := &FileMetadata{
 			FileID:    fileID,
 			SHA256:    actualSha,
-			Name:      fileName,
+			Name:      filepath.Base(fileName),
 			Path:      fileName,
 			Size:      written,
 			Namespace: session.Namespace,

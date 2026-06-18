@@ -208,6 +208,9 @@ type UploadOptions struct {
 	Concurrency int
 	Compress    string
 	Resume      bool
+	// FileName 自定义存储文件名。为空时使用本地文件的基本名。
+	// 目录上传时设为相对路径以保留目录结构（如 "subdir/photo.jpg"）。
+	FileName string
 }
 
 // UploadFile 上传单个文件。支持压缩、并发分片、秒传。
@@ -222,7 +225,11 @@ func (c *Client) UploadFile(ctx context.Context, localPath string, opts UploadOp
 	if err != nil {
 		return nil, err
 	}
-	fileName := info.Name()
+	// 使用自定义文件名（含相对路径）或默认基本名
+	fileName := opts.FileName
+	if fileName == "" {
+		fileName = info.Name()
+	}
 	fileSize := info.Size()
 
 	originalSHA, err := fileSHA256(localPath)
@@ -286,8 +293,10 @@ func (c *Client) uploadBytes(ctx context.Context, fileName string, data []byte, 
 		})
 	}
 
-	// 进度跟踪 — 可视化进度条
+	// 进度跟踪 — 可视化进度条（含实时速率）
 	p := NewProgress(int64(total), "Uploading")
+	p.Start()
+	defer p.Stop()
 
 	sem := make(chan struct{}, opts.Concurrency)
 	errCh := make(chan error, chunkCount)
@@ -386,7 +395,10 @@ func (c *Client) UploadDir(ctx context.Context, dirPath string, opts UploadOptio
 			return err
 		}
 		rel = filepath.ToSlash(rel)
-		fmeta, err := c.UploadFile(ctx, path, opts)
+		// 为保留存储目录结构，将相对路径作为 FileName 传给 UploadFile
+		dirOpts := opts
+		dirOpts.FileName = rel
+		fmeta, err := c.UploadFile(ctx, path, dirOpts)
 		if err != nil {
 			return err
 		}
