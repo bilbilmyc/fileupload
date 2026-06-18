@@ -46,7 +46,14 @@ func NewClient(serverURL, namespace string) *Client {
 func (c *Client) do(req *http.Request) (*http.Response, error) {
 	var lastErr error
 	for attempt := 0; attempt < 3; attempt++ {
-		// 除第一次外，每次重试需要重新构造 body（因为第一次可能已被消费）
+		// 重试时重建 body：http.Client.Do 消费后 body 不能重用
+		if attempt > 0 && req.GetBody != nil {
+			body, err := req.GetBody()
+			if err != nil {
+				return nil, err
+			}
+			req.Body = body
+		}
 		resp, err := c.HTTPClient.Do(req)
 		if err != nil {
 			lastErr = err
