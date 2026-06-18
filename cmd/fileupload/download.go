@@ -66,10 +66,23 @@ func downloadFileToFile(ctx context.Context, c *Client, fileID, outputPath, rng 
 		w = io.MultiWriter(out, h)
 	}
 
-	written, err := io.Copy(w, resp.Body)
+	// 下载进度
+	var total int64
+	if rng == "" {
+		total = resp.ContentLength
+	} else {
+		// Range 请求下 Content-Length 是实际分片大小
+		total = resp.ContentLength
+	}
+	p := NewProgress(total, "Downloading")
+	reader := NewProgressReader(resp.Body, p)
+
+	_, err = io.Copy(w, reader)
 	if err != nil {
 		return err
 	}
+
+	p.Done()
 
 	serverSHA := resp.Header.Get("X-SHA256")
 	if verify && serverSHA != "" && h != nil {
@@ -78,7 +91,6 @@ func downloadFileToFile(ctx context.Context, c *Client, fileID, outputPath, rng 
 			return fmt.Errorf("SHA-256 mismatch: got %s want %s", got, serverSHA)
 		}
 	}
-	fmt.Printf("下载完成: %s (%d 字节)\n", outputPath, written)
 	if serverSHA != "" {
 		fmt.Printf("SHA-256: %s\n", serverSHA)
 	}
@@ -102,13 +114,19 @@ func downloadDirToFile(ctx context.Context, c *Client, dirID, outputPath, format
 	}
 	defer out.Close()
 
-	written, err := io.Copy(out, resp.Body)
+	// 目录下载进度
+	p := NewProgress(resp.ContentLength, "Downloading dir")
+	reader := NewProgressReader(resp.Body, p)
+
+	_, err = io.Copy(out, reader)
 	if err != nil {
 		return err
 	}
 
+	p.Done()
+	_ = verify // 目录下载暂不支持 SHA-256 逐条目校验
+
 	treeSHA := resp.Header.Get("X-Tree-SHA256")
-	fmt.Printf("目录下载完成: %s (%d 字节)\n", outputPath, written)
 	if treeSHA != "" {
 		fmt.Printf("Tree SHA-256: %s\n", treeSHA)
 	}

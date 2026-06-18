@@ -286,10 +286,8 @@ func (c *Client) uploadBytes(ctx context.Context, fileName string, data []byte, 
 		})
 	}
 
-	// 进度跟踪
-	p := NewProgress(int64(total), func(current, total int64) {
-		fmt.Printf("\r  上传进度: %s / %s (%d%%)", humanBytes(current), humanBytes(total), current*100/total)
-	})
+	// 进度跟踪 — 可视化进度条
+	p := NewProgress(int64(total), "Uploading")
 
 	sem := make(chan struct{}, opts.Concurrency)
 	errCh := make(chan error, chunkCount)
@@ -321,7 +319,7 @@ func (c *Client) uploadBytes(ctx context.Context, fileName string, data []byte, 
 		}
 	}
 
-	fmt.Println()
+	p.Done()
 	info, err := c.Finalize(ctx, sessionID)
 	if err == nil && opts.Resume && compress != "zstd" {
 		os.Remove(resumeStatePath(originalSHA))
