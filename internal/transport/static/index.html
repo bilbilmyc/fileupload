@@ -95,6 +95,7 @@
       <label>Namespace <input type="text" id="namespace" value="demo" style="width:100px"></label>
       <label>分片 <input type="number" id="chunkSize" value="10485760" min="1024"></label>
       <label>压缩 <select id="compressType"><option value="none">无</option><option value="zstd">zstd</option></select></label>
+      <label>并发 <select id="concurrencySelect"><option value="0">auto</option><option value="1">1</option><option value="2">2</option><option value="4" selected>4</option><option value="8">8</option><option value="16">16</option></select></label>
       <label class="checkbox-label"><input type="checkbox" id="dirMode"> 📁 目录模式</label>
     </div>
     <div class="upload-zone" id="dropZone">
@@ -192,11 +193,12 @@ async function startSingleUpload(file) {
 async function startDirUpload(files) {
   const id = ++uploadIdCounter;
   const dirName = files[0].webkitRelativePath.split('/')[0];
-  addUploadItem(id, '📁 ' + dirName, files.length + ' 个文件');
+  addUploadItem(id, '📁 ' + dirName, files.length + ' 个文件（并发 ' + concurrency + '）');
   up(id, 1, '准备上传 ' + files.length + ' 个文件…');
 
   const ns = document.getElementById('namespace').value || 'demo';
-  const concurrency = 4;
+  let concurrency = parseInt(document.getElementById('concurrencySelect').value) || 0;
+  if (concurrency <= 0) concurrency = navigator.hardwareConcurrency || 4; // auto
   const entries = [];
   let completed = 0;
   let errors = 0;

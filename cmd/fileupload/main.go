@@ -63,48 +63,60 @@ func main() {
 }
 
 func printUsage() {
-	fmt.Print(`文件上传下载服务 CLI
+	fmt.Print(`fileupload — 文件上传下载 CLI
 
 用法:
-  fileupload upload <path>           上传文件或目录
-    --chunk-size 10m                   分片大小（默认 10MB）
-    --concurrency 4                    并发分片数
-    --compress zstd                    压缩格式（zstd / none，默认 zstd）
-    --server http://localhost:8080     服务端地址
-    --namespace <ns>                   namespace
-    --resume                           断点续传（默认开启）
+  fileupload <command> [参数...]
 
-  fileupload download <fileID|dirID>  下载文件或目录
-    -o <path>                          输出路径
-    --format tar.gz                    目录打包格式
-    --verify                           下载后校验 SHA-256
-    --range start-end                  分段下载
-    --server <url>
-    --namespace <ns>
+全局参数（放在命令之前或之后均可）:
+  --server <url>        服务端地址（默认 http://localhost:8080）
+  --namespace <ns>      Namespace（默认 default）
 
-  fileupload rm <fileID|dirID>        删除文件或目录
-    --server <url>
-    --namespace <ns>
+命令:
 
-  fileupload ls <dirID|/>             列目录
-    --server <url>
-    --namespace <ns>
+  upload <path>         上传文件或目录
+    --chunk-size 10m      分片大小，支持 k/m/g 后缀（默认 10MB）
+    --concurrency 4       并发分片数（默认 4）
+    --compress zstd       压缩格式 zstd|none（默认 zstd）
+    --resume              启用断点续传（默认开启）
+    示例:
+      fileupload upload data.bin
+      fileupload upload ./dir/ --concurrency 8
 
-  fileupload stat <fileID>            文件信息
-    --server <url>
-    --namespace <ns>
+  download <id>         下载文件或目录
+    -o <path>             输出路径（默认使用 fileID/dirID）
+    --format tar.gz       目录打包格式 tar.gz|tar.zst（默认 tar.gz）
+    --verify              下载后校验 SHA-256
+    --range start-end     分段下载，如 0-1048575
+    示例:
+      fileupload download abc123 -o out.bin
+      fileupload download dir_xxx -o project.tar.gz --format tar.gz
 
-  fileupload scan                     触发服务端一致性巡检
-    --server <url>
+  rm <id>               删除文件或目录
+    示例:
+      fileupload rm abc123
 
-  fileupload bench                    压测
-    --files 10
-    --size 10m
-    --concurrency 4
+  ls <id>               列目录（可传 / 或 dirID）
+    示例:
+      fileupload ls /
+      fileupload ls dir_xxx
 
-  fileupload config                   查看当前配置
+  stat <id>             查看文件或目录元信息
 
-  fileupload help                     显示帮助
+  status <sessionID>    查看上传会话进度
+
+  scan                  触发服务端一致性巡检
+
+  bench                 压测
+    --files 10            文件数量（默认 10）
+    --size 10m            每个文件大小，支持 k/m/g（默认 10MB）
+    --concurrency 4       并发数（默认 4）
+    示例:
+      fileupload bench --files 50 --size 100m --concurrency 16
+
+  config                查看当前配置
+
+  help                  显示本帮助
 `)
 }
 

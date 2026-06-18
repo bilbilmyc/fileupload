@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -55,9 +56,11 @@ func (s *UploadService) CheckExists(ctx context.Context, sha256, namespace, name
 		return nil, fmt.Errorf("查询秒传: %w", err)
 	}
 	if blob == nil {
-		return nil, nil // 未命中
+		log.Printf("[upload] 秒传未命中 sha256=%s", shaPrefix(sha256))
+		return nil, nil
 	}
 
+	log.Printf("[upload] 秒传命中 sha256=%s (%s)", shaPrefix(sha256), name)
 	// 命中：增加引用计数
 	if err := s.meta.IncrBlobRef(ctx, sha256); err != nil {
 		return nil, fmt.Errorf("增加引用计数: %w", err)
@@ -111,6 +114,7 @@ func (s *UploadService) CreateSession(ctx context.Context, sha256 string, length
 	if err := s.meta.CreateSession(ctx, session); err != nil {
 		return nil, fmt.Errorf("创建会话: %w", err)
 	}
+	log.Printf("[upload] 创建会话 %s: %s %d 字节 (ns=%s)", sessionID, fileName, length, namespace)
 	return session, nil
 }
 
@@ -182,6 +186,7 @@ func (s *UploadService) processChunkBytes(ctx context.Context, sessionID string,
 	if err := s.meta.UpdateOffset(ctx, sessionID, index, actualSha, written); err != nil {
 		return fmt.Errorf("更新偏移: %w", err)
 	}
+	log.Printf("[upload] 分片写入 %s/%d: %d 字节 (sha256=%s)", sessionID, index, written, shaPrefix(actualSha))
 	return nil
 }
 
@@ -406,6 +411,7 @@ func (s *UploadService) Finalize(ctx context.Context, sessionID string) (*FileMe
 	session.FileID = fileID
 	_ = s.meta.DeleteSession(ctx, sessionID)
 
+	log.Printf("[upload] Finalize %s → %s (%d 字节, sha256=%s, ns=%s)", sessionID, fileID, written, shaPrefix(actualSha), session.Namespace)
 	return fileMeta, nil
 }
 
@@ -461,6 +467,7 @@ func (s *UploadService) SubmitDir(ctx context.Context, manifest DirManifest, nam
 		_ = s.meta.PutFile(ctx, child)
 	}
 
+	log.Printf("[upload] 目录创建 %s (%s): %d 个子文件", root.FileID, dirName, len(manifest.Entries))
 	return root, nil
 }
 
@@ -503,6 +510,7 @@ func (s *UploadService) deleteFile(ctx context.Context, file *FileMetadata) erro
 			}
 		}
 	}
+	log.Printf("[upload] 删除文件 %s (%s)", file.FileID, file.Name)
 	return nil
 }
 
@@ -541,5 +549,14 @@ func (s *UploadService) Abort(ctx context.Context, sessionID string) error {
 	s.cleanupTempChunks(ctx, sessionID, chunks)
 
 	// 删除会话
+	log.Printf("[upload] 取消上传 %s (%s)", sessionID, session.FileName)
 	return s.meta.DeleteSession(ctx, sessionID)
+}
+
+// shaPrefix 安全截取 SHA-256 前 12 位用于日志，不足时显示全部。
+func shaPrefix(s string) string {
+	if len(s) > 12 {
+		return s[:12]
+	}
+	return s
 }

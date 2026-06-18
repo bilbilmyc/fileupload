@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"log"
 	"sort"
 	"strings"
 )
@@ -88,6 +89,7 @@ func (s *DownloadService) GetFile(ctx context.Context, fileID, namespace string,
 		return nil, fmt.Errorf("打开存储文件: %w", err)
 	}
 
+	log.Printf("[download] 文件 %s (%s): %+v offset=%d length=%d", fileID, file.Name, blob, rng.Offset, rng.Length)
 	return &FileReader{
 		File:     file,
 		Blob:     blob,

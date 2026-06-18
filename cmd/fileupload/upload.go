@@ -10,7 +10,7 @@ import (
 
 func runUpload(ctx context.Context, cfg config.Config, args []string) {
 	if len(args) < 1 {
-		fmt.Println("用法: fileupload upload <path> [--chunk-size 10m] [--concurrency 4] [--compress zstd|none] [--server <url>] [--namespace <ns>]")
+		fmt.Println("用法: fileupload upload <path> [--chunk-size 10m] [--concurrency 4] [--compress zstd|none] [--server <url>] [--namespace <ns>]\n  运行 fileupload help 查看详细帮助")
 		os.Exit(1)
 	}
 

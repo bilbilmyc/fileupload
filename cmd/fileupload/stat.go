@@ -10,7 +10,7 @@ import (
 
 func runStat(ctx context.Context, cfg config.Config, args []string) {
 	if len(args) < 1 {
-		fmt.Println("用法: fileupload stat <fileID> [--server <url>] [--namespace <ns>]")
+		fmt.Println("用法: fileupload stat <fileID> [--server <url>] [--namespace <ns>]\n  运行 fileupload help 查看详细帮助")
 		os.Exit(1)
 	}
 	id := args[0]
