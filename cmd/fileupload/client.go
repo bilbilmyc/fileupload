@@ -219,6 +219,8 @@ type UploadOptions struct {
 	// FileName 自定义存储文件名。为空时使用本地文件的基本名。
 	// 目录上传时设为相对路径以保留目录结构（如 "subdir/photo.jpg"）。
 	FileName string
+	// NoProgress 静默模式：目录上传时禁用逐文件进度条，改用 [3/50] 文件名 显示。
+	NoProgress bool
 }
 
 // UploadFile 上传单个文件。支持压缩、并发分片、秒传。
@@ -302,9 +304,13 @@ func (c *Client) uploadBytes(ctx context.Context, fileName string, data []byte, 
 	}
 
 	// 进度跟踪 — 可视化进度条（含实时速率）
-	p := NewProgress(int64(total), "Uploading")
-	p.Start()
-	defer p.Stop()
+	// 目录上传时用 [3/50] 文件名 显示，跳过逐文件 bar
+	var p *Progress
+	if !opts.NoProgress {
+		p = NewProgress(int64(total), "Uploading")
+		p.Start()
+		defer p.Stop()
+	}
 
 	sem := make(chan struct{}, opts.Concurrency)
 	errCh := make(chan error, chunkCount)
@@ -323,7 +329,7 @@ func (c *Client) uploadBytes(ctx context.Context, fileName string, data []byte, 
 		go func() {
 			defer func() { <-sem }()
 			err := c.UploadChunk(ctx, sessionID, idx, chunk, offset)
-			if err == nil {
+			if err == nil && p != nil {
 				p.Add(int64(len(chunk)))
 			}
 			errCh <- err
@@ -336,7 +342,9 @@ func (c *Client) uploadBytes(ctx context.Context, fileName string, data []byte, 
 		}
 	}
 
-	p.Done()
+	if p != nil {
+		p.Done()
+	}
 	info, err := c.Finalize(ctx, sessionID)
 	if err == nil && opts.Resume && compress != "zstd" {
 		os.Remove(resumeStatePath(originalSHA))
@@ -393,6 +401,7 @@ type clientDirEntry struct {
 }
 
 // UploadDir 并发上传目录：收集所有文件后以固定并发数上传，最后提交 manifest。
+// 自动跳过空文件（0 字节）和隐藏文件（以 . 开头），避免服务端返回"参数不合法"。
 func (c *Client) UploadDir(ctx context.Context, dirPath string, opts UploadOptions) (*FileInfo, error) {
 	// 收集文件
 	type fileTask struct {
@@ -401,7 +410,23 @@ func (c *Client) UploadDir(ctx context.Context, dirPath string, opts UploadOptio
 	}
 	var tasks []fileTask
 	err := filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() {
+		if err != nil {
+			return nil
+		}
+		// 跳过隐藏目录（.git 等）及其所有子内容
+		if info.IsDir() && len(info.Name()) > 0 && info.Name()[0] == '.' && path != dirPath {
+			return filepath.SkipDir
+		}
+		if info.IsDir() {
+			return nil
+		}
+		// 跳过隐藏文件（.DS_Store 等）
+		if len(info.Name()) > 0 && info.Name()[0] == '.' {
+			return nil
+		}
+		// 跳过空文件（0 字节服务端无法创建上传会话）
+		if info.Size() == 0 {
+			fmt.Fprintf(os.Stderr, "  跳过空文件: %s\n", path)
 			return nil
 		}
 		rel, err := filepath.Rel(dirPath, path)
@@ -414,11 +439,16 @@ func (c *Client) UploadDir(ctx context.Context, dirPath string, opts UploadOptio
 	if err != nil {
 		return nil, err
 	}
+	if len(tasks) == 0 {
+		return nil, fmt.Errorf("目录中没有可上传的文件（所有文件为空或隐藏）")
+	}
 
 	concurrency := opts.Concurrency
 	if concurrency <= 0 {
 		concurrency = 4
 	}
+	// 关闭逐文件进度条，改用 [3/N] 文件名 显示
+	opts.NoProgress = true
 	fmt.Fprintf(os.Stderr, "  上传 %d 个文件（并发 %d）\n", len(tasks), concurrency)
 
 	// 进度：atomic 计数器显示当前正在上传的文件
@@ -454,19 +484,25 @@ func (c *Client) UploadDir(ctx context.Context, dirPath string, opts UploadOptio
 	}()
 
 	var entries []clientDirEntry
-	var firstErr error
+	var errs []string
 	for range tasks {
 		r := <-results
-		if r.err != nil && firstErr == nil {
-			firstErr = r.err
+		if r.err != nil {
+			errs = append(errs, fmt.Sprintf("%s: %v", r.rel, r.err))
 		}
 		if r.fmeta != nil {
 			entries = append(entries, clientDirEntry{Path: r.rel, FileID: r.fmeta.FileID})
 		}
 	}
 	fmt.Fprintln(os.Stderr) // 换行
-	if firstErr != nil {
-		return nil, firstErr
+	if len(errs) > 0 {
+		fmt.Fprintf(os.Stderr, "  失败 %d 个文件:\n", len(errs))
+		for _, e := range errs {
+			fmt.Fprintf(os.Stderr, "    - %s\n", e)
+		}
+	}
+	if len(entries) == 0 {
+		return nil, fmt.Errorf("没有文件上传成功")
 	}
 	dirName := filepath.Base(dirPath)
 	return c.SubmitDir(ctx, dirName, entries)
