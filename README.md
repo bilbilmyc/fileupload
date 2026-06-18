@@ -1,9 +1,9 @@
 # fileupload — 文件上传下载服务
 
-[![Go](https://img.shields.io/badge/Go-1.23+-00ADD8?logo=go)](https://golang.org)
+[![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go)](https://golang.org)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-高性能、可自托管的文件上传下载服务。支持动态分片、客户端压缩、流式打包下载、SHA-256 数据校验、断点续传、秒传（内容寻址去重）。用 Go 编写，单二进制部署。
+高性能、可自托管的文件上传下载服务。支持动态分片、客户端压缩、流式打包下载、SHA-256 全链路数据校验、断点续传、秒传（内容寻址去重）。用 Go 编写，单二进制部署。
 
 ---
 
@@ -11,26 +11,25 @@
 
 | 特性 | 说明 |
 |------|------|
-| **双协议上传** | tus.io 协议 + 自定义 REST API |
+| **双协议上传** | tus.io 协议 + 自定义 REST API，共享同一领域核心 |
 | **动态分片** | 大文件自动切分，并发上传 |
 | **客户端压缩** | zstd 压缩后传输，服务端透明解压 |
 | **流式下载** | 单文件 Range 分段下载，目录 tar.gz/tar.zst 流式打包 |
 | **数据校验** | 分片级 + 整体级 SHA-256，传输与存储全链路防篡改 |
-| **秒传** | 内容寻址去重（content-addressed storage），相同文件秒级完成 |
-| **断点续传** | tus 协议原生 + REST 自实现 |
+| **秒传** | 内容寻址去重（content-addressed storage），相同内容秒级完成 |
+| **断点续传** | tus 协议原生 + REST 客户端 resume 状态文件 |
 | **并发控制** | 全局 worker 池，限制并发磁盘 IO |
-| **命名空间** | 多租户隔离（由上游 Gateway 注入） |
+| **命名空间隔离** | 多租户隔离（由上游 Gateway 注入 `X-Namespace`） |
 | **一致性巡检** | 定时/手动扫描孤儿文件、引用计数漂移 |
-| **Go CLI** | 完整命令行客户端（上传/下载/管理/压测） |
-| **Web UI** | 自带浏览器测试面板（上传/下载/文件列表） |
+| **Go CLI** | 完整命令行客户端（上传/下载/管理/压测），支持进度条 |
+| **Web UI** | 自带浏览器测试面板 |
 
 ## 快速开始
 
 ### 前提条件
 
-- Go 1.23+
-- Redis（上传会话热数据）
-- （可选）Docker Compose
+- Go 1.25+
+- Redis（上传会话热数据，启动失败则仅热数据功能受限）
 
 ### 从源码运行
 
@@ -39,9 +38,7 @@
 git clone https://github.com/mayc/casdao/fileupload.git
 cd fileupload
 
-# 确保 Redis 运行在 localhost:6379
-
-# 启动服务端
+# 启动服务端（默认监听 :8080，使用 SQLite + 本地文件系统）
 go run ./cmd/server
 
 # 另开终端 — 上传文件
@@ -62,57 +59,67 @@ docker compose up -d
 # 服务端运行在 http://localhost:8080
 ```
 
-## 配置
+## CLI 使用
 
-配置文件为 YAML 格式（默认读取当前目录下的 `fileupload.yaml`），或通过环境变量覆盖。
-
-### 完整配置项
-
-```yaml
-server:
-  addr: ":8080"              # 监听地址
-  read_timeout: 30           # 读取超时（秒）
-  write_timeout: 300         # 写入超时（秒）
-  idle_timeout: 60           # 空闲超时（秒）
-
-storage:
-  type: "local"              # 存储类型
-  data_dir: "data"           # 数据目录
-  temp_dir: "tmp"            # 临时分片目录
-
-redis:
-  addr: "localhost:6379"     # Redis 地址
-  password: ""               # 密码
-  db: 0                      # 数据库编号
-  prefix: "upload:"          # key 前缀
-
-database:
-  type: "sqlite"             # 数据库类型
-  path: "fileupload.db"      # SQLite 文件路径
-
-upload:
-  session_ttl_minutes: 60    # 会话超时（分钟）
-  default_chunk_size: 10485760  # 分片大小（字节）
-  worker_pool_size: 4        # worker 池大小
-  worker_queue_size: 100     # 排队上限
-
-download:
-  max_archive_size: 0        # 打包上限（0=不限）
-```
-
-### 环境变量覆盖
+所有子命令均支持 `--server` 指定服务端地址（默认 `http://localhost:8080`）和 `--namespace` 指定命名空间（默认 `default`）。
 
 ```bash
-FILEUPLOAD_CONFIG=/etc/fileupload/config.yaml
-FILEUPLOAD_REDIS_ADDR=redis.example.com:6379
-FILEUPLOAD_DB_PATH=/data/fileupload.db
-FILEUPLOAD_STORAGE_DATA_DIR=/data/files
-FILEUPLOAD_CHUNK_SIZE=20971520
+# === 上传 ===
+# 单文件上传（自动分片、zstd 压缩、进度条）
+fileupload upload large-file.dat --concurrency 8 --compress zstd
+
+# 上传整个目录（递归遍历 + manifest 提交）
+fileupload upload ./my-dir/
+
+# === 下载 ===
+# 单文件下载（自动 SHA-256 校验）
+fileupload download abc123 -o output.bin
+
+# 目录流式打包下载
+fileupload download dir_abc -o project.tar.gz --format tar.gz
+
+# === 信息与管理 ===
+# 文件/目录元信息
+fileupload stat abc123
+
+# 列目录
+fileupload ls /
+fileupload ls parent_dir_id
+
+# 删除文件或目录
+fileupload rm abc123
+
+# 上传会话状态查询（断点续传用）
+fileupload status sess_id
+
+# === 高级 ===
+# 服务端一致性巡检
+fileupload scan
+
+# 压测（50 个文件，每个 100MB，16 并发）
+fileupload bench --files 50 --size 100m --concurrency 16
+
+# 自定义服务端地址
+fileupload --server http://192.168.1.100:8080 upload data.bin
 ```
+
+### CLI 子命令一览
+
+| 子命令 | 功能 | 关键参数 |
+|--------|------|---------|
+| `upload` | 上传文件或目录 | `--concurrency`, `--compress`, `--chunk-size` |
+| `download` | 下载文件或目录 | `-o`, `--range`, `--format` |
+| `rm` | 删除文件或目录 | `--dir` |
+| `ls` | 列目录 | `--parent` |
+| `stat` | 查看文件/目录信息 | — |
+| `status` | 查询上传会话进度 | — |
+| `scan` | 触发服务端一致性巡检 | — |
+| `bench` | 压测 | `--files`, `--size`, `--concurrency` |
+| `config` | 查看当前配置 | — |
 
 ## API 参考
 
-### tus 协议 (可续传上传)
+### tus 协议（可续传上传）
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
@@ -128,25 +135,148 @@ FILEUPLOAD_CHUNK_SIZE=20971520
 | `POST` | `/v1/uploads/init` | 创建上传会话 |
 | `PUT` | `/v1/uploads/{id}/chunks/{index}` | 上传分片 |
 | `GET` | `/v1/uploads/{id}/status` | 查询分片进度 |
-| `POST` | `/v1/uploads/{id}/finalize` | 完成上传（合并+校验） |
-| `HEAD` | `/v1/files?sha256={hex}` | 秒传预检 |
+| `POST` | `/v1/uploads/{id}/finalize` | 完成上传（合并+校验+去重写入） |
+| `HEAD` | `/v1/files?sha256={hex}` | 秒传预检（按内容哈希去重） |
 | `GET` | `/v1/files/{id}` | 下载文件（支持 Range） |
-| `GET` | `/v1/dirs/{id}` | 下载目录（流式打包） |
+| `GET` | `/v1/dirs/{id}` | 下载目录（流式 tar.gz/tar.zst 打包） |
 | `POST` | `/v1/dirs` | 提交目录 manifest |
-| `DELETE` | `/v1/files/{id}` | 删除文件 |
+| `DELETE` | `/v1/files/{id}` | 删除文件或目录 |
 | `GET` | `/v1/ls` | 列目录 |
-| `GET` | `/v1/stat/{id}` | 文件信息 |
+| `GET` | `/v1/stat/{id}` | 文件/目录信息 |
 | `POST` | `/v1/admin/scan` | 触发一致性巡检 |
 | `GET` | `/health` | 健康检查 |
+
+### HTTP 请求头
+
+| 头 | 适用 API | 说明 |
+|------|----------|------|
+| `X-Namespace` | 全部 | 命名空间（多租户隔离，缺省为 `default`） |
+| `X-SHA256` | 上传 | 原始内容的 SHA-256（用于最终校验和秒传） |
+| `X-Compression` | 上传 | 客户端压缩格式：`none` / `zstd` |
+| `X-File-Name` | 上传 | 原始文件名 |
+| `X-Slice-SHA256` | 上传分片 | 当前分片的 SHA-256（服务端校验） |
+| `Range` | 下载 | HTTP Range 头：`bytes=0-1023` |
 
 ### 错误码
 
 | HTTP 状态码 | 含义 |
 |-------------|------|
+| 400 | 参数不合法 |
+| 404 | 资源不存在 |
+| 403 | 命名空间无权限 |
 | 460 | 分片 SHA-256 校验失败 |
 | 422 | 整体 SHA-256 校验失败 |
 | 503 | 服务忙（worker 池满） |
 | 410 | 文件已损坏 |
+
+## 配置
+
+配置文件为 YAML 格式（默认读取当前目录下的 `fileupload.yaml`），或通过环境变量覆盖。
+
+### 完整配置项
+
+```yaml
+server:
+  addr: ":8080"              # 监听地址
+  read_timeout: 30           # 读取超时（秒）
+  write_timeout: 300         # 写入超时（秒），大文件需长超时
+  idle_timeout: 60           # 空闲超时（秒）
+
+storage:
+  type: "local"              # 存储类型：local / s3（预留）
+  data_dir: "storage/data"   # 数据目录
+  temp_dir: "storage/tmp"    # 临时分片目录
+
+redis:
+  addr: "localhost:6379"     # Redis 地址
+  password: ""               # 密码
+  db: 0                      # 数据库编号
+  prefix: "upload:"          # key 前缀
+
+database:
+  type: "sqlite"             # 数据库类型：sqlite / postgres（预留）
+  path: "storage/fileupload.db"  # SQLite 文件路径
+
+upload:
+  session_ttl_minutes: 60    # 会话超时（分钟）
+  default_chunk_size: 10485760  # 分片大小（字节），10MB
+  worker_pool_size: 4        # worker 池大小
+  worker_queue_size: 100     # 排队上限
+
+download:
+  max_archive_size: 0        # 打包上限（0=不限）
+```
+
+### 环境变量覆盖
+
+```bash
+FILEUPLOAD_CONFIG=/etc/fileupload/config.yaml
+FILEUPLOAD_REDIS_ADDR=redis.example.com:6379
+FILEUPLOAD_REDIS_PASSWORD=secret
+FILEUPLOAD_DB_PATH=/data/fileupload.db
+FILEUPLOAD_STORAGE_DATA_DIR=/data/files
+FILEUPLOAD_CHUNK_SIZE=20971520
+```
+
+## 架构概览
+
+```
+客户端 (CLI / Web / SDK)
+      │ HTTP (tus + REST)
+┌─────▼─────────────────────┐
+│ 传输层 (net/http)          │
+│ tus Handler | REST Handler│
+│ 下载 Handler | 中间件     │
+└─────┬─────────────────────┘
+      ▼
+┌──────────────────────────┐
+│ 领域核心                  │
+│ UploadService / Download │
+│ WorkerPool / 领域模型    │
+└─────┬─────────────────────┘
+      │ 端口接口（port）
+┌─────▼─────────────────────┐
+│ 适配层（可插拔）           │
+│ Storage / Metadata        │
+│ Compressor / Hasher       │
+└─────┬─────────────────────┘
+      │
+  ┌───┴───┬──────────┐
+  │ 磁盘  │ Redis   │ SQLite
+```
+
+完整设计文档见 [docs/superpowers/specs/2026-06-17-fileupload-design.md](docs/superpowers/specs/2026-06-17-fileupload-design.md)
+
+## 项目结构
+
+```
+.
+├── cmd/
+│   ├── server/               # 服务端入口（HTTP 服务）
+│   └── fileupload/           # CLI 客户端（9 个子命令）
+├── internal/
+│   ├── domain/               # 领域核心（模型/端口接口/服务编排）
+│   ├── adapters/             # 适配层实现
+│   │   ├── storage/          # 本地文件系统存储
+│   │   ├── metadata/         # Redis 热数据 + SQLite 冷数据门面
+│   │   ├── compressor/       # zstd/gzip/tar 压缩
+│   │   └── hasher/           # SHA-256 哈希
+│   ├── transport/            # HTTP 传输层
+│   │   ├── router.go         # 路由注册 + 静态文件服务
+│   │   ├── tus.go            # tus/REST/下载 handler
+│   │   ├── middleware.go     # 中间件（Recover/RequestID/Namespace/RateLimit）
+│   │   └── static/           # 浏览器测试面板
+│   ├── lifecycle/            # SessionReaper + ConsistencyScanner
+│   └── config/               # 配置加载（YAML + env override）
+├── deploy/
+│   ├── docker/               # Dockerfile + Compose
+│   └── systemd/              # systemd 服务单元
+├── docs/                     # 架构文档与设计 spec
+├── Makefile                  # 编译/测试/发布
+├── fileupload.yaml           # 默认配置文件
+├── go.mod / go.sum
+└── README.md
+```
 
 ## 编译
 
@@ -177,9 +307,28 @@ build/
 └── fileupload-cli-darwin-arm64
 ```
 
+## 测试
+
+```bash
+# 全部测试
+go test ./...
+
+# 包含覆盖率
+go test -cover ./...
+
+# E2E 测试（全链路：真实 HTTP → 真实存储 → 真实数据库）
+go test -v -run TestE2E ./internal/transport/
+```
+
+项目包含 50+ 个测试，整体覆盖率约 70%：
+- 领域核心覆盖 78%
+- 传输层覆盖 76%（含全链路 E2E 测试）
+- 生命周期覆盖 89%
+- 适配层覆盖 70-93%
+
 ## 部署
 
-### systemd （Linux）
+### systemd（Linux）
 
 ```bash
 sudo cp deploy/systemd/fileupload-server.service /etc/systemd/system/
@@ -204,100 +353,7 @@ cd deploy/docker && docker compose up -d
 - Redis 启用 AOF 持久化
 - 定期执行 `fileupload scan` 或开启自动巡检
 - 数据目录和 SQLite 文件定期备份
-
-## CLI 使用
-
-```bash
-# 上传
-fileupload upload large-file.dat --concurrency 8 --compress zstd
-
-# 上传目录
-fileupload upload ./my-dir/
-
-# 下载
-fileupload download abc123 -o output.bin
-
-# 目录打包下载
-fileupload download dir_abc -o project.tar.gz --format tar.gz
-
-# 分片下载（断点续传）
-fileupload download abc123 -o partial.bin --range 0-1048575
-
-# 文件信息
-fileupload stat abc123
-
-# 列目录
-fileupload ls /
-
-# 删除
-fileupload rm abc123
-
-# 压测
-fileupload bench --files 50 --size 100m --concurrency 16
-
-# 触发服务端巡检
-fileupload scan
-```
-
-## 架构概览
-
-```
-客户端 (CLI / Web / SDK)
-      │ HTTP (tus + REST)
-┌─────▼─────────────────────┐
-│ 传输层 (net/http + chi)   │
-│ tus Handler | REST Handler│
-│ 下载 Handler | 中间件     │
-└─────┬─────────────────────┘
-      ▼
-┌──────────────────────────┐
-│ 领域核心                  │
-│ UploadService / Download │
-│  WorkerPool              │
-└─────┬─────────────────────┘
-      │ 端口接口
-┌─────▼─────────────────────┐
-│ 适配层（可插拔）           │
-│ Storage  Metadata         │
-│ Compressor  Hasher        │
-└─────┬─────────────────────┘
-      │
-  ┌───┴───┬──────────┐
-  │ 磁盘  │ Redis   │ SQLite
-```
-
-详见 [docs/architecture-fileupload-2026-06-17.md](docs/architecture-fileupload-2026-06-17.md)
-
-## 项目结构
-
-```
-.
-├── cmd/
-│   ├── server/               # 服务端入口
-│   └── fileupload/           # CLI 客户端（9 个子命令）
-├── internal/
-│   ├── domain/               # 领域核心（模型/端口/服务）
-│   ├── adapters/             # 适配层实现
-│   │   ├── storage/          # 本地文件系统
-│   │   ├── metadata/         # Redis + SQLite 门面
-│   │   ├── compressor/       # zstd/gzip/tar
-│   │   └── hasher/           # SHA-256
-│   ├── transport/            # HTTP 传输层
-│   │   ├── router.go         # 路由 + 静态文件
-│   │   ├── tus.go            # tus/REST/下载 handler
-│   │   ├── middleware.go     # 中间件
-│   │   └── static/           # 前端测试页面
-│   ├── lifecycle/            # 会话清理 + 一致性巡检
-│   └── config/               # 配置加载（YAML）
-├── deploy/
-│   ├── docker/               # Dockerfile + Compose
-│   └── systemd/              # systemd 服务单元
-├── docs/                     # 架构文档与设计 spec
-├── Makefile
-├── fileupload.yaml           # 默认配置文件
-├── go.mod / go.sum
-└── README.md
-```
+- 调整 `worker_pool_size` 和 `write_timeout` 适应大文件并发
 
 ## 开发
 
@@ -306,13 +362,9 @@ fileupload scan
 make vet
 make lint
 
-# 测试
-make test
+# 运行测试
+go test -v ./...
 
-# 构建
-make
+# 单包测试
+go test -v -run TestUpload ./internal/domain/
 ```
-
-## License
-
-MIT

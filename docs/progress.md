@@ -35,21 +35,11 @@
   - 13 个任务，涵盖共享 Client 骨架、压缩/解压、上传核心、目录 manifest、重试、进度条、断点续传、各子命令统一接入、下载校验、E2E 测试
 
 ### 阶段 4：实现（服务端 + CLI）
-- **状态：** in_progress
+- **状态：** complete
 - **CLI 完整链路（2026-06-18 完成）**
-  - Task 1: ✅ 共享 Client 骨架（client.go），含 NewClient/do/List
-  - Task 2: ✅ Stat/Delete/DeleteDir/Scan 方法
-  - Task 3: ✅ do 方法重试支持（3 次，Retry-After）
-  - Task 4: ✅ compress.go zstd 压缩/解压辅助函数
-  - Task 5: ✅ 上传核心（CheckExists/CreateSession/UploadChunk/Finalize）
-  - Task 6: ✅ 复写 upload.go 接入 Client 并发分片
-  - Task 7: ✅ UploadDir + SubmitDir 目录 manifest 提交
-  - Task 8: ✅ 断点续传（resumeState 持久化 + GetStatus + uploadMissingChunks）
-  - Task 9: ✅ progress.go 进度条 + humanBytes + 接入 uploadBytes
-  - Task 10: ✅ 所有子命令统一接入 Client（rm/ls/stat/scan/bench）
-  - Task 11: ✅ 复写 download.go 接入 Client.DownloadFile/DownloadDir + SHA-256 校验
-  - Task 12: ✅ E2E 集成测试（httptest 模拟服务端测试上传/目录上传）
-  - Task 13: 🔄 更新文档中...
+  - Task 1–12: ✅ 全部完成
+  - Task 13: ✅ 文档更新完成
+- **合并记录：** 2026-06-18 `cli-complete-linkage` → `main` 合并并推送
 - **已创建的文件：**
   - cmd/fileupload/client.go（统一 HTTP 客户端）
   - cmd/fileupload/compress.go（zstd 压缩/解压）
@@ -69,10 +59,18 @@
 ### 阶段 5：测试与验证
 - **状态：** in_progress
 - CLI 单元测试：10 个测试通过（6 Client 方法测试 + 2 压缩测试 + 2 flag 解析测试）
-- 待办：服务端测试 phase
+- 服务端单元测试：所有包通过，整体覆盖率 ~70%
+- 待办：
+  - lifecycle 补充测试（当前 35%）
+  - 服务端全链路 E2E 测试（真实 server → storage → metadata）
+  - 并发安全、超时清理验证
 
 ### 阶段 6：交付
-- **状态：** pending
+- **状态：** in_progress
+- ✅ 服务端 + CLI 双二进制编译通过
+- ✅ `go vet ./...` 干净通过
+- ✅ README 文档完善（API 参考、CLI 子命令、架构概览、项目结构、测试说明）
+- 待办：服务端启动验证（需 Redis），确认 deploy/docker 配置正确
 
 ## 测试结果
 | 测试 | 输入 | 预期结果 | 实际结果 | 状态 |
@@ -97,11 +95,11 @@
 ## 五问重启检查
 | 问题 | 答案 |
 |------|------|
-| 我在哪里？ | 阶段 4 CLI 完整链路已完成（13 个 Task 全部完成） |
-| 我要去哪里？ | 更新文档 → 继续服务端/集成测试 phase |
+| 我在哪里？ | 阶段 4 完成（所有 13 个 Task 完成 ✅），进入阶段 5 |
+| 我要去哪里？ | 补 lifecycle 测试 → 服务端 E2E 测试 → 交付验证 → 新功能 |
 | 目标是什么？ | 实现 Go 文件上传下载服务（服务端+CLI 先行） |
 | 我学到了什么？ | 见 findings.md |
-| 我做了什么？ | 见上方 CLI 完整链路执行记录 |
+| 我做了什么？ | 见上方 CLI 完整链路执行记录，cli-complete-linkage → main 合并推送 |
 
 ---
 *每个阶段完成后或遇到错误时更新此文件*

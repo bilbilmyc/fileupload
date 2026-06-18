@@ -17,6 +17,9 @@ build/
 .DS_Store
 Thumbs.db
 
+# Claude Code session data
+.claude/
+
 # 环境
 .env
 .env.local

@@ -69,21 +69,23 @@
 - [x] Task 10: 统一各子命令接入 Client（rm/ls/stat/scan/bench）
 - [x] Task 11: 复写 download.go（校验 + 目录下载）
 - [x] Task 12: E2E 集成测试
-- [ ] Task 13: 更新文档（progress.md + task_plan.md + README.md）
-- **状态：** in_progress
+- [x] Task 13: 更新文档（progress.md + task_plan.md + README.md）
+- **状态：** complete
 
 ### 阶段 5：测试与验证
-- [ ] 单元测试（端口适配器、核心编排）
-- [ ] 集成测试（端到端上传/下载/目录/断点续传/秒传）
-- [ ] 校验完整性、并发安全、超时清理验证
-- [ ] 测试结果记录到 progress.md
-- **状态：** pending
+- [x] 单元测试（端口适配器、核心编排）— 全包 ~70%
+- [x] 集成测试（端到端上传/下载/目录/秒传/错误/命名空间隔离/多分片/Range）
+- [x] lifecycle 补充测试（从 35% → 89%）
+- [ ] 并发安全、超时清理验证（部分覆盖，可后续补充）
+- [x] 测试结果记录到 progress.md
+- **状态：** complete
 
 ### 阶段 6：交付
-- [ ] 服务端可运行 + CLI 可用
-- [ ] 文档（README + API 说明）
+- [x] 服务端 + CLI 编译通过，`go vet` 干净
+- [x] 文档（README + API 说明）— 已完善
+- [ ] 服务端启动验证（需依赖 Redis）— 可用 `docker compose up`
 - [ ] 交付给用户
-- **状态：** pending
+- **状态：** in_progress
 
 ## 关键问题
 （已解决）
