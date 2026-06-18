@@ -259,15 +259,12 @@ func TestFinalize_Success(t *testing.T) {
 		t.Error("Finalize 后 file 未创建")
 	}
 
-	// 验证存储有数据（路径格式: demo/<fileID>）
-	found := false
-	for k := range storage.files {
-		if len(k) > 5 && k[:5] == "demo/" {
-			found = true
-			break
-		}
+	// 验证存储有数据（使用 mock 的 Stat 方法，线程安全）
+	_, exists, err := storage.Stat(ctx, "demo/finalize.txt")
+	if err != nil {
+		t.Fatalf("Stat error: %v", err)
 	}
-	if !found {
+	if !exists {
 		t.Error("Finalize 后存储中没有文件")
 	}
 }

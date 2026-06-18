@@ -6,12 +6,14 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"io"
+	"sync"
 	"time"
 )
 
-// ===== Mock Storage =====
+// ===== Mock Storage (thread-safe) =====
 
 type mockStorage struct {
+	mu    sync.Mutex
 	files map[string][]byte
 }
 
@@ -26,12 +28,16 @@ func (m *mockStorage) Write(_ context.Context, path string, r io.Reader) (int64,
 	if err != nil {
 		return 0, err
 	}
+	m.mu.Lock()
 	m.files[path] = data
+	m.mu.Unlock()
 	return int64(len(data)), nil
 }
 
 func (m *mockStorage) Open(_ context.Context, path string, offset, length int64) (io.ReadCloser, error) {
+	m.mu.Lock()
 	data, ok := m.files[path]
+	m.mu.Unlock()
 	if !ok {
 		return nil, ErrNotFound
 	}
@@ -47,12 +53,16 @@ func (m *mockStorage) Open(_ context.Context, path string, offset, length int64)
 }
 
 func (m *mockStorage) Delete(_ context.Context, path string) error {
+	m.mu.Lock()
 	delete(m.files, path)
+	m.mu.Unlock()
 	return nil
 }
 
 func (m *mockStorage) Stat(_ context.Context, path string) (int64, bool, error) {
+	m.mu.Lock()
 	data, ok := m.files[path]
+	m.mu.Unlock()
 	if !ok {
 		return 0, false, nil
 	}
@@ -60,13 +70,16 @@ func (m *mockStorage) Stat(_ context.Context, path string) (int64, bool, error) 
 }
 
 func (m *mockStorage) has(path string) bool {
+	m.mu.Lock()
 	_, ok := m.files[path]
+	m.mu.Unlock()
 	return ok
 }
 
-// ===== Mock Metadata =====
+// ===== Mock Metadata (thread-safe) =====
 
 type mockMetadata struct {
+	mu         sync.Mutex
 	sessions   map[string]*UploadSession
 	sessionTTL map[string]time.Duration
 	chunks     map[string][]ChunkInfo
@@ -85,11 +98,15 @@ func newMockMetadata() *mockMetadata {
 }
 
 func (m *mockMetadata) CreateSession(_ context.Context, s *UploadSession) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.sessions[s.SessionID] = s
 	return nil
 }
 
 func (m *mockMetadata) GetSession(_ context.Context, id string) (*UploadSession, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	s, ok := m.sessions[id]
 	if !ok {
 		return nil, nil
@@ -101,6 +118,8 @@ func (m *mockMetadata) GetSession(_ context.Context, id string) (*UploadSession,
 }
 
 func (m *mockMetadata) UpdateOffset(_ context.Context, id string, sliceIndex int, sliceSha string, addBytes int64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.chunks[id] = append(m.chunks[id], ChunkInfo{
 		Index:  sliceIndex,
 		SHA256: sliceSha,
@@ -110,10 +129,14 @@ func (m *mockMetadata) UpdateOffset(_ context.Context, id string, sliceIndex int
 }
 
 func (m *mockMetadata) ListChunks(_ context.Context, id string) ([]ChunkInfo, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	return append([]ChunkInfo{}, m.chunks[id]...), nil
 }
 
 func (m *mockMetadata) DeleteSession(_ context.Context, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	delete(m.sessions, id)
 	delete(m.chunks, id)
 	delete(m.sessionTTL, id)
@@ -121,6 +144,8 @@ func (m *mockMetadata) DeleteSession(_ context.Context, id string) error {
 }
 
 func (m *mockMetadata) TouchSession(_ context.Context, id string, ttl time.Duration) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.sessionTTL[id] = ttl
 	if s, ok := m.sessions[id]; ok {
 		s.ExpireAt = time.Now().Add(ttl)
@@ -129,6 +154,8 @@ func (m *mockMetadata) TouchSession(_ context.Context, id string, ttl time.Durat
 }
 
 func (m *mockMetadata) ListExpiredSessions(_ context.Context) ([]string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	var expired []string
 	for id, s := range m.sessions {
 		if s.ExpireAt.Before(time.Now()) && s.Status != SessionFinalizing {
@@ -139,6 +166,8 @@ func (m *mockMetadata) ListExpiredSessions(_ context.Context) ([]string, error) 
 }
 
 func (m *mockMetadata) GetBlobBySha(_ context.Context, sha256 string) (*ContentBlob, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	b, ok := m.blobs[sha256]
 	if !ok {
 		return nil, nil
@@ -147,11 +176,15 @@ func (m *mockMetadata) GetBlobBySha(_ context.Context, sha256 string) (*ContentB
 }
 
 func (m *mockMetadata) PutBlob(_ context.Context, b *ContentBlob) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.blobs[b.SHA256] = b
 	return nil
 }
 
 func (m *mockMetadata) IncrBlobRef(_ context.Context, sha256 string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if b, ok := m.blobs[sha256]; ok {
 		b.RefCount++
 	}
@@ -159,6 +192,8 @@ func (m *mockMetadata) IncrBlobRef(_ context.Context, sha256 string) error {
 }
 
 func (m *mockMetadata) DecrBlobRef(_ context.Context, sha256 string) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	b, ok := m.blobs[sha256]
 	if !ok {
 		return 0, nil
@@ -170,11 +205,15 @@ func (m *mockMetadata) DecrBlobRef(_ context.Context, sha256 string) (int, error
 }
 
 func (m *mockMetadata) PutFile(_ context.Context, f *FileMetadata) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.files[f.FileID] = f
 	return nil
 }
 
 func (m *mockMetadata) GetFile(_ context.Context, id string) (*FileMetadata, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	f, ok := m.files[id]
 	if !ok {
 		return nil, nil
@@ -183,6 +222,8 @@ func (m *mockMetadata) GetFile(_ context.Context, id string) (*FileMetadata, err
 }
 
 func (m *mockMetadata) GetFileByPath(_ context.Context, namespace, path string) (*FileMetadata, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	for _, f := range m.files {
 		if f.Namespace == namespace && f.Path == path {
 			return f, nil
@@ -192,6 +233,8 @@ func (m *mockMetadata) GetFileByPath(_ context.Context, namespace, path string) 
 }
 
 func (m *mockMetadata) ListChildren(_ context.Context, parentID string) ([]*FileMetadata, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	var children []*FileMetadata
 	for _, f := range m.files {
 		if f.ParentID == parentID {
@@ -202,11 +245,15 @@ func (m *mockMetadata) ListChildren(_ context.Context, parentID string) ([]*File
 }
 
 func (m *mockMetadata) DeleteFile(_ context.Context, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	delete(m.files, id)
 	return nil
 }
 
 func (m *mockMetadata) ListFilesByBlob(_ context.Context, sha256 string) ([]*FileMetadata, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	var refs []*FileMetadata
 	for _, f := range m.files {
 		if f.SHA256 == sha256 {
@@ -217,6 +264,8 @@ func (m *mockMetadata) ListFilesByBlob(_ context.Context, sha256 string) ([]*Fil
 }
 
 func (m *mockMetadata) ListRoot(_ context.Context, namespace string) ([]*FileMetadata, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	var roots []*FileMetadata
 	for _, f := range m.files {
 		if f.ParentID == "" && f.Namespace == namespace {
@@ -227,6 +276,8 @@ func (m *mockMetadata) ListRoot(_ context.Context, namespace string) ([]*FileMet
 }
 
 func (m *mockMetadata) ListAllBlobs(_ context.Context) ([]*ContentBlob, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	var blobs []*ContentBlob
 	for _, b := range m.blobs {
 		blobs = append(blobs, b)
@@ -235,6 +286,8 @@ func (m *mockMetadata) ListAllBlobs(_ context.Context) ([]*ContentBlob, error) {
 }
 
 func (m *mockMetadata) ListAllFiles(_ context.Context) ([]*FileMetadata, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	var files []*FileMetadata
 	for _, f := range m.files {
 		files = append(files, f)
@@ -243,11 +296,15 @@ func (m *mockMetadata) ListAllFiles(_ context.Context) ([]*FileMetadata, error) 
 }
 
 func (m *mockMetadata) hasBlob(sha256 string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	_, ok := m.blobs[sha256]
 	return ok
 }
 
 func (m *mockMetadata) hasFile(id string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	_, ok := m.files[id]
 	return ok
 }

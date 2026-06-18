@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"io"
+	"sync"
 	"time"
 
 	"github.com/mayc/casdao/fileupload/internal/domain"
@@ -68,20 +69,28 @@ func (m *mockMeta) ListAllBlobs(_ context.Context) ([]*domain.ContentBlob, error
 func (m *mockMeta) ListAllFiles(_ context.Context) ([]*domain.FileMetadata, error) {
 	var f []*domain.FileMetadata; for _, v := range m.files { f = append(f, v) }; return f, nil }
 
-// mockStore implements domain.Storage
-type mockStore struct{ files map[string][]byte }
+// mockStore implements domain.Storage (thread-safe via sync.Mutex)
+type mockStore struct {
+	mu    sync.Mutex
+	files map[string][]byte
+}
 
 func newMockStore() *mockStore { return &mockStore{files: make(map[string][]byte)} }
 
 func (m *mockStore) Write(_ context.Context, path string, r io.Reader) (int64, error) {
-	d, e := io.ReadAll(r); if e != nil { return 0, e }; m.files[path] = d; return int64(len(d)), nil }
+	d, e := io.ReadAll(r); if e != nil { return 0, e }
+	m.mu.Lock(); m.files[path] = d; m.mu.Unlock()
+	return int64(len(d)), nil }
 func (m *mockStore) Open(_ context.Context, path string, off, length int64) (io.ReadCloser, error) {
-	d, ok := m.files[path]; if !ok { return nil, domain.ErrNotFound }; s, e := int(off), len(d)
+	m.mu.Lock(); d, ok := m.files[path]; m.mu.Unlock()
+	if !ok { return nil, domain.ErrNotFound }; s, e := int(off), len(d)
 	if length > 0 && s+int(length) < e { e = s + int(length) }; if s >= len(d) { return nil, domain.ErrInvalidArgument }
 	return io.NopCloser(bytes.NewReader(d[s:e])), nil }
-func (m *mockStore) Delete(_ context.Context, path string) error { delete(m.files, path); return nil }
+func (m *mockStore) Delete(_ context.Context, path string) error {
+	m.mu.Lock(); delete(m.files, path); m.mu.Unlock(); return nil }
 func (m *mockStore) Stat(_ context.Context, path string) (int64, bool, error) {
-	d, ok := m.files[path]; if !ok { return 0, false, nil }; return int64(len(d)), true, nil }
+	m.mu.Lock(); d, ok := m.files[path]; m.mu.Unlock()
+	if !ok { return 0, false, nil }; return int64(len(d)), true, nil }
 
 // mockCompr implements domain.Compressor
 type mockCompr struct{}
