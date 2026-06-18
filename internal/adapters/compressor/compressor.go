@@ -9,7 +9,7 @@ import (
 	"io"
 
 	"github.com/klauspost/compress/zstd"
-	"github.com/mayc/casdao/fileupload/internal/domain"
+	"github.com/bilbilmyc/fileupload/internal/domain"
 )
 
 // Compressor 压缩/解压/归档实现

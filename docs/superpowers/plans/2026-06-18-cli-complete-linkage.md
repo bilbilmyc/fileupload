@@ -1586,7 +1586,7 @@ func downloadDir(ctx context.Context, c *Client, dirID, outputPath, format strin
 }
 ```
 
-需要 imports：`context` `crypto/sha256` `encoding/hex` `fmt` `hash` `io` `os` `strings` `github.com/mayc/casdao/fileupload/internal/config`。
+需要 imports：`context` `crypto/sha256` `encoding/hex` `fmt` `hash` `io` `os` `strings` `github.com/bilbilmyc/fileupload/internal/config`。
 
 - [ ] **Step 3: Build and test**
 

@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mayc/casdao/fileupload/internal/config"
+	"github.com/bilbilmyc/fileupload/internal/config"
 )
 
 func runBench(ctx context.Context, cfg config.Config, args []string) {

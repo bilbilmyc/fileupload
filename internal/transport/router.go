@@ -6,7 +6,7 @@ import (
 	"io/fs"
 	"net/http"
 
-	"github.com/mayc/casdao/fileupload/internal/domain"
+	"github.com/bilbilmyc/fileupload/internal/domain"
 )
 
 //go:embed static/*

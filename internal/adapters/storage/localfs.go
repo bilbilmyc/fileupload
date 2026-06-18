@@ -9,7 +9,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/mayc/casdao/fileupload/internal/domain"
+	"github.com/bilbilmyc/fileupload/internal/domain"
 )
 
 // LocalFS 本地文件系统存储实现

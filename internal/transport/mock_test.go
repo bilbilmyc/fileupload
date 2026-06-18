@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mayc/casdao/fileupload/internal/domain"
+	"github.com/bilbilmyc/fileupload/internal/domain"
 )
 
 // mockMeta implements domain.Metadata

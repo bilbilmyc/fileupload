@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/mayc/casdao/fileupload/internal/domain"
+	"github.com/bilbilmyc/fileupload/internal/domain"
 )
 
 // Facade Metadata 门面，路由请求到 RedisStore（热）或 SQLiteStore（冷）

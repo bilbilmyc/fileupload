@@ -35,7 +35,7 @@
 
 ```bash
 # 克隆项目
-git clone https://github.com/mayc/casdao/fileupload.git
+git clone https://github.com/bilbilmyc/fileupload.git
 cd fileupload
 
 # 启动服务端（默认监听 :8080，使用 SQLite + 本地文件系统）

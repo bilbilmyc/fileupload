@@ -8,7 +8,7 @@ import (
 	"hash"
 	"io"
 
-	"github.com/mayc/casdao/fileupload/internal/domain"
+	"github.com/bilbilmyc/fileupload/internal/domain"
 )
 
 // SHA256Hasher SHA-256 哈希实现

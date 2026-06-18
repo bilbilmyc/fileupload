@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/mayc/casdao/fileupload/internal/config"
+	"github.com/bilbilmyc/fileupload/internal/config"
 )
 
 func runScan(ctx context.Context, cfg config.Config) {

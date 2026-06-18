@@ -22,11 +22,11 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
 
-	"github.com/mayc/casdao/fileupload/internal/adapters/compressor"
-	"github.com/mayc/casdao/fileupload/internal/adapters/hasher"
-	"github.com/mayc/casdao/fileupload/internal/adapters/metadata"
-	"github.com/mayc/casdao/fileupload/internal/adapters/storage"
-	"github.com/mayc/casdao/fileupload/internal/domain"
+	"github.com/bilbilmyc/fileupload/internal/adapters/compressor"
+	"github.com/bilbilmyc/fileupload/internal/adapters/hasher"
+	"github.com/bilbilmyc/fileupload/internal/adapters/metadata"
+	"github.com/bilbilmyc/fileupload/internal/adapters/storage"
+	"github.com/bilbilmyc/fileupload/internal/domain"
 )
 
 // e2eFixture 全链路集成测试的测试夹具

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mayc/casdao/fileupload/internal/domain"
+	"github.com/bilbilmyc/fileupload/internal/domain"
 )
 
 func newTestSQLite(t *testing.T) *SQLiteStore {

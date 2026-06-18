@@ -10,7 +10,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/mayc/casdao/fileupload/internal/config"
+	"github.com/bilbilmyc/fileupload/internal/config"
 )
 
 func runDownload(ctx context.Context, cfg config.Config, args []string) {

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mayc/casdao/fileupload/internal/domain"
+	"github.com/bilbilmyc/fileupload/internal/domain"
 )
 
 // ===== In-memory mock Metadata for lifecycle tests =====

@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mayc/casdao/fileupload/internal/domain"
+	"github.com/bilbilmyc/fileupload/internal/domain"
 )
 
 // ctxKey 用于 context 的键类型

@@ -1,4 +1,4 @@
-module github.com/mayc/casdao/fileupload
+module github.com/bilbilmyc/fileupload
 
 go 1.25.5
 
