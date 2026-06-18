@@ -3,11 +3,15 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -167,6 +171,298 @@ func (c *Client) Scan(ctx context.Context) (map[string]any, error) {
 		return nil, err
 	}
 	return res, nil
+}
+
+// UploadOptions 上传选项。
+type UploadOptions struct {
+	ChunkSize   int64
+	Concurrency int
+	Compress    string
+	Resume      bool
+}
+
+// UploadFile 上传单个文件。支持压缩、并发分片、秒传。
+func (c *Client) UploadFile(ctx context.Context, localPath string, opts UploadOptions) (*FileInfo, error) {
+	f, err := os.Open(localPath)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	info, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	fileName := info.Name()
+	fileSize := info.Size()
+
+	originalSHA, err := fileSHA256(localPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if opts.Compress == "zstd" && fileSize > 0 {
+		data, err := io.ReadAll(f)
+		if err != nil {
+			return nil, err
+		}
+		compressed, err := compressBuffer(data, "zstd")
+		if err != nil {
+			return nil, err
+		}
+		return c.uploadBytes(ctx, fileName, compressed, originalSHA, "zstd", opts)
+	}
+
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return nil, err
+	}
+	return c.uploadBytes(ctx, fileName, data, originalSHA, "none", opts)
+}
+
+// uploadBytes 将内存中的字节上传到服务端，含秒传、并发分片。
+func (c *Client) uploadBytes(ctx context.Context, fileName string, data []byte, originalSHA, compress string, opts UploadOptions) (*FileInfo, error) {
+	exists, err := c.CheckExists(ctx, originalSHA, fileName)
+	if err != nil {
+		return nil, err
+	}
+	if exists != nil {
+		return exists, nil
+	}
+
+	if opts.ChunkSize <= 0 {
+		opts.ChunkSize = 10 * 1024 * 1024
+	}
+	if opts.Concurrency <= 0 {
+		opts.Concurrency = 4
+	}
+
+	sessionID, err := c.CreateSession(ctx, int64(len(data)), originalSHA, compress, opts.ChunkSize, fileName)
+	if err != nil {
+		return nil, err
+	}
+
+	total := len(data)
+	chunkCount := total / int(opts.ChunkSize)
+	if total%int(opts.ChunkSize) != 0 {
+		chunkCount++
+	}
+
+	sem := make(chan struct{}, opts.Concurrency)
+	errCh := make(chan error, chunkCount)
+
+	for i := 0; i < chunkCount; i++ {
+		start := i * int(opts.ChunkSize)
+		end := start + int(opts.ChunkSize)
+		if end > total {
+			end = total
+		}
+		idx := i
+		offset := int64(start)
+		chunk := data[start:end]
+
+		sem <- struct{}{}
+		go func() {
+			defer func() { <-sem }()
+			errCh <- c.UploadChunk(ctx, sessionID, idx, chunk, offset)
+		}()
+	}
+
+	for i := 0; i < chunkCount; i++ {
+		if err := <-errCh; err != nil {
+			return nil, err
+		}
+	}
+
+	return c.Finalize(ctx, sessionID)
+}
+
+// fileSHA256 计算文件的 SHA-256 十六进制字符串。
+func fileSHA256(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// SubmitDir 提交目录 manifest，创建目录记录。
+func (c *Client) SubmitDir(ctx context.Context, entries []clientDirEntry) (*FileInfo, error) {
+	body, _ := json.Marshal(clientDirManifest{Entries: entries})
+	u := fmt.Sprintf("%s/v1/dirs?namespace=%s", c.ServerURL, url.QueryEscape(c.Namespace))
+	req, _ := http.NewRequestWithContext(ctx, "POST", u, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("submit dir failed (%d): %s", resp.StatusCode, string(body))
+	}
+	var info FileInfo
+	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
+		return nil, err
+	}
+	return &info, nil
+}
+
+// clientDirManifest 目录 manifest 结构。
+type clientDirManifest struct {
+	Entries []clientDirEntry `json:"entries"`
+}
+
+// clientDirEntry 目录中单个文件的条目。
+type clientDirEntry struct {
+	Path   string `json:"path"`
+	FileID string `json:"file_id"`
+}
+
+// UploadDir 上传目录：递归上传每个文件后提交 manifest。
+func (c *Client) UploadDir(ctx context.Context, dirPath string, opts UploadOptions) (*FileInfo, error) {
+	var entries []clientDirEntry
+	err := filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(dirPath, path)
+		if err != nil {
+			return err
+		}
+		rel = filepath.ToSlash(rel)
+		fmeta, err := c.UploadFile(ctx, path, opts)
+		if err != nil {
+			return err
+		}
+		entries = append(entries, clientDirEntry{Path: rel, FileID: fmeta.FileID})
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return c.SubmitDir(ctx, entries)
+}
+
+// DownloadFile 下载单个文件，返回 HTTP 响应（调用者负责关闭 Body）。
+func (c *Client) DownloadFile(ctx context.Context, fileID, rng string) (*http.Response, error) {
+	u := fmt.Sprintf("%s/v1/files/%s?namespace=%s", c.ServerURL, url.PathEscape(fileID), url.QueryEscape(c.Namespace))
+	req, _ := http.NewRequestWithContext(ctx, "GET", u, nil)
+	if rng != "" {
+		req.Header.Set("Range", "bytes="+rng)
+	}
+	resp, err := c.do(req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		return nil, fmt.Errorf("download failed (%d): %s", resp.StatusCode, string(body))
+	}
+	return resp, nil
+}
+
+// DownloadDir 下载目录打包文件，返回 HTTP 响应（调用者负责关闭 Body）。
+func (c *Client) DownloadDir(ctx context.Context, dirID, format string) (*http.Response, error) {
+	u := fmt.Sprintf("%s/v1/dirs/%s?format=%s&namespace=%s", c.ServerURL, url.PathEscape(dirID), url.QueryEscape(format), url.QueryEscape(c.Namespace))
+	req, _ := http.NewRequestWithContext(ctx, "GET", u, nil)
+	resp, err := c.do(req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		return nil, fmt.Errorf("download dir failed (%d): %s", resp.StatusCode, string(body))
+	}
+	return resp, nil
+}
+
+func (c *Client) uploadMissingChunks(ctx context.Context, sessionID string, data []byte, chunkSize int64, concurrency int) error {
+	status, total, err := c.GetStatus(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	_ = total
+	got := make(map[int]bool)
+	for _, c := range status {
+		got[c.Index] = true
+	}
+
+	totalLen := len(data)
+	chunkCount := totalLen / int(chunkSize)
+	if totalLen%int(chunkSize) != 0 {
+		chunkCount++
+	}
+
+	sem := make(chan struct{}, concurrency)
+	errCh := make(chan error, chunkCount)
+	sent := 0
+
+	for i := 0; i < chunkCount; i++ {
+		if got[i] {
+			continue
+		}
+		start := i * int(chunkSize)
+		end := start + int(chunkSize)
+		if end > totalLen {
+			end = totalLen
+		}
+		idx := i
+		offset := int64(start)
+		chunk := data[start:end]
+
+		sem <- struct{}{}
+		sent++
+		go func() {
+			defer func() { <-sem }()
+			errCh <- c.UploadChunk(ctx, sessionID, idx, chunk, offset)
+		}()
+	}
+
+	for i := 0; i < sent; i++ {
+		if err := <-errCh; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ChunkStatus 单个分片状态。
+type ChunkStatus struct {
+	Index  int   `json:"index"`
+	Offset int64 `json:"offset"`
+	Size   int64 `json:"size"`
+}
+
+// GetStatus 查询上传会话的当前状态（已收到的分片列表及总大小）。
+func (c *Client) GetStatus(ctx context.Context, sessionID string) ([]ChunkStatus, int64, error) {
+	u := fmt.Sprintf("%s/v1/uploads/%s/status?namespace=%s", c.ServerURL, url.PathEscape(sessionID), url.QueryEscape(c.Namespace))
+	req, _ := http.NewRequestWithContext(ctx, "GET", u, nil)
+	resp, err := c.do(req)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, 0, fmt.Errorf("get status failed (%d): %s", resp.StatusCode, string(body))
+	}
+	var result struct {
+		Chunks  []ChunkStatus `json:"chunks"`
+		Total   int64         `json:"total"`
+		Session string        `json:"session"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, 0, err
+	}
+	return result.Chunks, result.Total, nil
 }
 
 // FileInfo 上传完成后的文件元信息。
