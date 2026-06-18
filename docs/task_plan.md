@@ -4,7 +4,7 @@
 设计并实现一个 Go 语言文件上传下载服务，支持文件/目录上传下载、动态分片、客户端压缩/服务端解压、流式打包下载、SHA-256 校验、分片级并发、断点续传、秒传等业界常见功能；首批交付「服务端 + Go CLI」，后续迭代 Web UI 与多语言 SDK。
 
 ## 当前阶段
-阶段 2（设计进行中 —— 已完成架构方案与第 1 节分层设计，待继续第 2 节起）
+阶段 4（实现中 —— CLI 完整链路已完成，进行后续服务端/集成测试）
 
 ## 已确认决策（来自 brainstorming 对话）
 
@@ -41,28 +41,36 @@
 
 ### 阶段 2：设计（brainstorming 设计呈现）
 - [x] 第 1 节：系统架构与分层（三层：传输层 / 领域核心 / 适配层）—— 用户已选方案 A
-- [x] 第 2 节：上传数据流 + 元数据模型（秒传预检/tus创建/并发分片/Finalize；Redis热+DB冷元数据；content_blobs去重/files目录树；目录manifest；namespace隔离）—— 用户确认
-- [x] 第 3 节：下载数据流 + 流式打包（单文件带X-SHA256+Range；目录io.Pipe流式tar→zstd/gzip；X-Tree-SHA256；HTTP Range纳入首批）—— 用户确认
-- [x] 第 4 节：压缩/解压编排 + SHA-256 校验（存储只存原始；X-SHA256=原始内容哈希；分片/整体/秒传/下载四点校验；Compressor/Hasher端口）—— 用户确认
-- [x] 第 5 节：并发与 worker 池 + 断点续传 + 秒传（全局worker池+会话级并发；分片乱序落盘+Redis Lua原子offset；tus/REST续传；content_blobs引用计数去重）—— 用户确认
-- [x] 第 6 节：端口接口定义（Storage/Metadata/Compressor/Hasher，接口够用，后续按需补充）—— 用户确认
-- [x] 第 7 节：生命周期（超时清理/一致性巡检）+ 错误处理（SessionReaper定时清理；ConsistencyScanner五项检查默认安全修复+隔离；手动删除引用计数；领域错误→HTTP映射表）—— 用户确认
-- [x] 第 8 节：测试策略 + CLI 设计（TDD四层测试；CLI命令结构+共享pkg库；项目目录结构）—— 用户确认
-- [x] 写入 spec：docs/superpowers/specs/2026-06-17-fileupload-design.md（含 10 节 + 后续迭代 + 开放问题）
-- [x] spec 自审 + 用户审阅（自审通过：无占位符/路径已修正一致/范围聚焦/歧义已显式列开放问题）
-- **状态：** in_progress
+- [x] 第 2 节：上传数据流 + 元数据模型
+- [x] 第 3 节：下载数据流 + 流式打包
+- [x] 第 4 节：压缩/解压编排 + SHA-256 校验
+- [x] 第 5 节：并发与 worker 池 + 断点续传 + 秒传
+- [x] 第 6 节：端口接口定义
+- [x] 第 7 节：生命周期 + 错误处理
+- [x] 第 8 节：测试策略 + CLI 设计
+- [x] 写入 spec：docs/superpowers/specs/2026-06-17-fileupload-design.md
+- [x] spec 自审 + 用户审阅
+- **状态：** complete
 
 ### 阶段 3：实现规划（writing-plans）
-- [ ] 设计批准后，调用 writing-plans skill 产出实现计划
-- **状态：** pending
+- [x] 产出 CLI 完整链路实现计划（13 个任务）
+- **状态：** complete
 
 ### 阶段 4：实现（服务端 + CLI）
-- [ ] 按 writing-plans 产出的计划逐步执行（TDD）
-- [ ] 项目结构、端口接口、适配器实现
-- [ ] tus handler、REST handler、下载 handler
-- [ ] UploadService / DownloadService 核心
-- [ ] Go CLI（上传/下载/目录递归/断点续传/进度）
-- **状态：** pending
+- [x] Task 1: Client 骨架（client.go，NewClient/do/List）
+- [x] Task 2: Stat/Delete/DeleteDir/Scan 方法
+- [x] Task 3: do 重试（3 次，Retry-After）
+- [x] Task 4: compress.go（zstd 压缩/解压）
+- [x] Task 5: 上传核心（CheckExists/CreateSession/UploadChunk/Finalize）
+- [x] Task 6: 复写 upload.go（并发分片 + 客户端压缩）
+- [x] Task 7: 目录上传（UploadDir + SubmitDir）
+- [x] Task 8: 断点续传（resumeState + GetStatus）
+- [x] Task 9: 进度条（progress.go）
+- [x] Task 10: 统一各子命令接入 Client（rm/ls/stat/scan/bench）
+- [x] Task 11: 复写 download.go（校验 + 目录下载）
+- [x] Task 12: E2E 集成测试
+- [ ] Task 13: 更新文档（progress.md + task_plan.md + README.md）
+- **状态：** in_progress
 
 ### 阶段 5：测试与验证
 - [ ] 单元测试（端口适配器、核心编排）
@@ -78,20 +86,20 @@
 - **状态：** pending
 
 ## 关键问题
-1. 客户端压缩用什么格式上传？（待第 4 节确认：tar.zstd？单文件 zstd？）
-2. 目录上传时客户端如何打包多个分片会话？（待第 2 节确认：目录=多文件会话集合 + manifest？）
-3. 「网关注入用户身份头」是否影响存储路径隔离？（待第 2 节确认命名空间）
+（已解决）
 
 ## 已做决策
 | 决策 | 理由 |
 |------|------|
 | 架构用方案 A（分层+共享核心） | 避免两协议逻辑重复；端口抽象天然支持可插拔存储/DB；为未来 SDK 复用铺路 |
 | 服务端+CLI 先行 | 范围聚焦，首批交付可用核心，Web UI/SDK 后续迭代 |
+| CLI 共享 Client 放 cmd/fileupload/ | 当前无 SDK 需求，后续如需 pkg/ 可 refactor |
 
 ## 遇到的错误
 | 错误 | 尝试次数 | 解决方案 |
 |------|---------|---------|
 | Bash classifier 暂时不可用 | 1 | 改用文件读写工具（Read/Write），不受影响 |
+| Task 4 压缩测试数据量过小 | 1 | 增大至 100 倍重复数据 |
 
 ## 备注
 - 做重大决策前重新读取此计划（注意力操纵）
