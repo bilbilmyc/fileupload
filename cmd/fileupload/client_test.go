@@ -1,10 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -91,5 +94,25 @@ func TestClientRetry(t *testing.T) {
 	}
 	if attempts != 2 {
 		t.Fatalf("expected 2 attempts, got %d", attempts)
+	}
+}
+
+func TestCompressZstd(t *testing.T) {
+	in := []byte(strings.Repeat("hello world hello world ", 100))
+	out, err := compressBuffer(in, "zstd")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) >= len(in) {
+		t.Fatalf("compression did not reduce size: %d >= %d", len(out), len(in))
+	}
+
+	r, err := decompressReader(bytes.NewReader(out), "zstd")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _ := io.ReadAll(r)
+	if !bytes.Equal(got, in) {
+		t.Fatalf("roundtrip failed")
 	}
 }
