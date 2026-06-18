@@ -101,6 +101,7 @@ func (s *DownloadService) GetFile(ctx context.Context, fileID, namespace string,
 // DirWalker 目录遍历结果，含 manifest 哈希
 type DirWalker struct {
 	DirID       string
+	Name        string // 目录名（用于归档前缀）
 	Entries     []DirEntryInfo
 	TreeSHA256  string // X-Tree-SHA256
 	TotalSize   int64
@@ -152,6 +153,7 @@ func (s *DownloadService) GetDirManifest(ctx context.Context, dirID, namespace s
 
 	return &DirWalker{
 		DirID:      dirID,
+		Name:       dir.Name,
 		Entries:    entries,
 		TreeSHA256: treeHash,
 		TotalSize:  totalSize,
@@ -187,9 +189,11 @@ func (s *DownloadService) StreamDir(ctx context.Context, dw *DirWalker, format C
 				continue
 			}
 
-			if err := archiveWriter.AddFile(ctx, entry.Path, entry.Size, reader); err != nil {
+			// 归档路径加上目录名前缀：skills/subdir/file.txt
+			archivePath := dw.Name + "/" + entry.Path
+			if err := archiveWriter.AddFile(ctx, archivePath, entry.Size, reader); err != nil {
 				reader.Close()
-				pw.CloseWithError(fmt.Errorf("写入归档条目 %s: %w", entry.Path, err))
+				pw.CloseWithError(fmt.Errorf("写入归档条目 %s: %w", archivePath, err))
 				return
 			}
 			reader.Close()
@@ -212,9 +216,14 @@ func (s *DownloadService) walkDir(ctx context.Context, parentID, prefix string, 
 		return err
 	}
 	for _, child := range children {
-		relPath := child.Name
-		if prefix != "" {
-			relPath = prefix + "/" + child.Name
+		// 优先使用 child.Path（完整相对路径，由 SubmitDir 存储），
+		// 回退到递归构建的 prefix + Name（手动的目录树）。
+		relPath := child.Path
+		if relPath == "" || relPath == "/" {
+			relPath = child.Name
+			if prefix != "" {
+				relPath = prefix + "/" + child.Name
+			}
 		}
 		if child.IsDir {
 			if err := s.walkDir(ctx, child.FileID, relPath, entries); err != nil {
