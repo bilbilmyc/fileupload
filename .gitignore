@@ -4,7 +4,7 @@ build/
 /fileupload
 
 # 运行时数据
-storage/
+/storage/
 
 # 编辑器
 .idea/
