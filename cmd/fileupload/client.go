@@ -383,9 +383,14 @@ type clientDirEntry struct {
 	FileID string `json:"file_id"`
 }
 
-// UploadDir 上传目录：递归上传每个文件后提交 manifest。
+// UploadDir 上传目录：并发上传每个文件后提交 manifest。
 func (c *Client) UploadDir(ctx context.Context, dirPath string, opts UploadOptions) (*FileInfo, error) {
-	var entries []clientDirEntry
+	// 先收集所有文件
+	type fileTask struct {
+		path string
+		rel  string
+	}
+	var tasks []fileTask
 	err := filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() {
 			return nil
@@ -394,19 +399,58 @@ func (c *Client) UploadDir(ctx context.Context, dirPath string, opts UploadOptio
 		if err != nil {
 			return err
 		}
-		rel = filepath.ToSlash(rel)
-		// 为保留存储目录结构，将相对路径作为 FileName 传给 UploadFile
-		dirOpts := opts
-		dirOpts.FileName = rel
-		fmeta, err := c.UploadFile(ctx, path, dirOpts)
-		if err != nil {
-			return err
-		}
-		entries = append(entries, clientDirEntry{Path: rel, FileID: fmeta.FileID})
+		tasks = append(tasks, fileTask{path: path, rel: filepath.ToSlash(rel)})
 		return nil
 	})
 	if err != nil {
 		return nil, err
+	}
+
+	// 并发上传（默认 4 个 worker）
+	concurrency := opts.Concurrency
+	if concurrency <= 0 {
+		concurrency = 4
+	}
+	type result struct {
+		rel    string
+		fmeta  *FileInfo
+		err    error
+	}
+	sem := make(chan struct{}, concurrency)
+	results := make(chan result, len(tasks))
+
+	for _, t := range tasks {
+		sem <- struct{}{}
+		task := t
+		go func() {
+			defer func() { <-sem }()
+			dirOpts := opts
+			dirOpts.FileName = task.rel
+			fmeta, err := c.UploadFile(ctx, task.path, dirOpts)
+			results <- result{rel: task.rel, fmeta: fmeta, err: err}
+		}()
+	}
+
+	// 等待所有上传完成
+	go func() {
+		for i := 0; i < cap(sem); i++ {
+			sem <- struct{}{}
+		}
+	}()
+
+	var entries []clientDirEntry
+	var firstErr error
+	for range tasks {
+		r := <-results
+		if r.err != nil && firstErr == nil {
+			firstErr = r.err
+		}
+		if r.fmeta != nil {
+			entries = append(entries, clientDirEntry{Path: r.rel, FileID: r.fmeta.FileID})
+		}
+	}
+	if firstErr != nil {
+		return nil, firstErr
 	}
 	return c.SubmitDir(ctx, entries)
 }
