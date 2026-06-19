@@ -37,6 +37,14 @@ func TestLoad_NoConfigFile(t *testing.T) {
 }
 
 func TestLoad_FromYAML(t *testing.T) {
+	// 清理 CI 环境中可能干扰的环境变量
+	for _, k := range []string{"FILEUPLOAD_SERVER_ADDR", "FILEUPLOAD_REDIS_ADDR", "FILEUPLOAD_CHUNK_SIZE", "FILEUPLOAD_SESSION_TTL", "FILEUPLOAD_DB_PATH", "FILEUPLOAD_STORAGE_DATA_DIR"} {
+		if v := os.Getenv(k); v != "" {
+			os.Unsetenv(k)
+			t.Cleanup(func() { os.Setenv(k, v) })
+		}
+	}
+
 	dir := t.TempDir()
 	yamlContent := `
 server:
