@@ -317,6 +317,7 @@ async function startDirUpload(files) {
   }
 }
 
+async function uploadFile(file, uploadId, customName) {
 
   // 计算 SHA-256（秒传预检用），失败不阻塞上传
   let sha256 = '';
