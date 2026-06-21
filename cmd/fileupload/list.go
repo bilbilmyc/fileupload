@@ -4,16 +4,32 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/bilbilmyc/fileupload/internal/config"
 )
 
 func runList(ctx context.Context, cfg config.Config, args []string) {
-	parentID := "/"
-	if len(args) > 0 {
-		parentID = args[0]
+	// 从 args 中分离 flags 和位置参数
+	var positional []string
+	var flagArgs []string
+	for i := 0; i < len(args); i++ {
+		if strings.HasPrefix(args[i], "--") {
+			flagArgs = append(flagArgs, args[i])
+			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "--") {
+				flagArgs = append(flagArgs, args[i+1])
+				i++
+			}
+		} else {
+			positional = append(positional, args[i])
+		}
 	}
-	flags := parseFlags(args[1:])
+
+	parentID := ""
+	if len(positional) > 0 {
+		parentID = positional[0]
+	}
+	flags := parseFlags(flagArgs)
 	c := newClientFromFlags(flags, cfg)
 
 	res, err := c.List(ctx, parentID)
