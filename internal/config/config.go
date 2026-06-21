@@ -32,9 +32,19 @@ type ServerConfig struct {
 
 // StorageConfig 存储配置
 type StorageConfig struct {
-	Type    string `json:"type" yaml:"type"`
-	DataDir string `json:"data_dir" yaml:"data_dir"`
-	TempDir string `json:"temp_dir" yaml:"temp_dir"`
+	Type    string `json:"type" yaml:"type"`        // local / s3
+	DataDir string `json:"data_dir" yaml:"data_dir"` // local 模式数据目录
+	TempDir string `json:"temp_dir" yaml:"temp_dir"`  // 临时分片目录
+	S3      S3Config `json:"s3" yaml:"s3"`            // S3 模式配置
+}
+
+// S3Config S3 存储后端配置
+type S3Config struct {
+	Bucket         string `json:"bucket" yaml:"bucket"`
+	Region         string `json:"region" yaml:"region"`
+	Endpoint       string `json:"endpoint" yaml:"endpoint"`
+	Prefix         string `json:"prefix" yaml:"prefix"`
+	ForcePathStyle bool   `json:"force_path_style" yaml:"force_path_style"`
 }
 
 // RedisConfig Redis 配置
