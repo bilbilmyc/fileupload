@@ -92,7 +92,10 @@ jobs:
           name: ${{ env.APP_NAME }}-${{ matrix.bin_name }}-${{ matrix.goos }}-${{ matrix.goarch }}
           path: build/${{ env.APP_NAME }}-${{ matrix.bin_name }}-${{ matrix.goos }}-${{ matrix.goarch }}
 
-
+      - name: Rename binary for Dockerfile
+        run: |
+          mv build/${{ env.APP_NAME }}-${{ matrix.bin_name }}-linux-${{ steps.arch.outputs.goarch }} 
+             build/${{ env.APP_NAME }}-${{ matrix.bin_name }}
   # ========================================
   # Docker 镜像构建（使用 build job 预编译产物，无需 QEMU 模拟编译）
   # ========================================
@@ -125,6 +128,11 @@ jobs:
           name: ${{ env.APP_NAME }}-${{ matrix.bin_name }}-linux-${{ steps.arch.outputs.goarch }}
           path: build/
 
+      - name: Rename binary for Dockerfile
+        run: |
+          mv build/${{ env.APP_NAME }}-${{ matrix.bin_name }}-linux-${{ steps.arch.outputs.goarch }} 
+             build/${{ env.APP_NAME }}-${{ matrix.bin_name }}
+
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
@@ -148,7 +156,7 @@ jobs:
         with:
           context: .
           file: deploy/docker/Dockerfile.dist
-          build-args: BINARY=${{ matrix.component }}
+          build-args: BINARY=${{ matrix.bin_name }}
           platforms: ${{ matrix.platform }}
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
@@ -170,6 +178,11 @@ jobs:
           pattern: ${{ env.APP_NAME }}-*
           merge-multiple: true
           path: build/
+
+      - name: Rename binary for Dockerfile
+        run: |
+          mv build/${{ env.APP_NAME }}-${{ matrix.bin_name }}-linux-${{ steps.arch.outputs.goarch }} 
+             build/${{ env.APP_NAME }}-${{ matrix.bin_name }}
 
       - name: Generate checksums
         working-directory: build
