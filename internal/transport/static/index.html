@@ -8,7 +8,7 @@
   :root {
     --bg: #f5f7fa; --card: #fff; --border: #e2e8f0;
     --primary: #3b82f6; --primary-hover: #2563eb;
-    --success: #22c55e; --danger: #ef4444;
+    --success: #22c55e; --danger: #ef4444; --warning: #f59e0b;
     --text: #1e293b; --text2: #64748b; --radius: 8px;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -19,7 +19,7 @@
   .subtitle { color: var(--text2); margin-bottom: 24px; font-size: 0.9rem; }
   .card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; margin-bottom: 16px; }
   .card h2 { font-size: 1.1rem; margin-bottom: 12px; }
-  .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+  .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px; }
   .card-header h2 { margin-bottom: 0; }
 
   .upload-zone { border: 2px dashed var(--border); border-radius: var(--radius);
@@ -33,15 +33,24 @@
     border-radius: 5px; overflow: hidden; margin: 4px 0; }
   .progress-bar .fill { height: 100%; background: linear-gradient(90deg, var(--primary), #818cf8);
     width: 0%; transition: width 0.3s ease; border-radius: 5px; }
+  .progress-bar .fill.error { background: linear-gradient(90deg, var(--danger), #f87171); }
 
   .status { font-size: 0.85rem; color: var(--text2); }
   .status.success { color: var(--success); }
   .status.error { color: var(--danger); }
+  .status.warning { color: var(--warning); }
 
   .upload-item { padding: 10px 12px; border: 1px solid var(--border);
     border-radius: var(--radius); margin-bottom: 8px; background: #fafbfc; }
-  .upload-item .name { font-weight: 500; font-size: 0.9rem; word-break: break-all; }
+  .upload-item .name { font-weight: 500; font-size: 0.9rem; word-break: break-all; display: flex; align-items: center; gap: 6px; }
   .upload-item .meta { font-size: 0.8rem; color: var(--text2); margin: 2px 0; }
+  .upload-item .sub-items { margin-top: 6px; padding-left: 16px; font-size: 0.8rem; max-height: 200px; overflow-y: auto; }
+  .upload-item .sub-item { padding: 2px 0; display: flex; gap: 8px; align-items: center; }
+  .upload-item .sub-item .bullet { flex-shrink: 0; }
+  .upload-item .sub-item .sub-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .upload-item .sub-item .sub-status { flex-shrink: 0; font-size: 0.75rem; }
+  .upload-item .sub-item .sub-status.ok { color: var(--success); }
+  .upload-item .sub-item .sub-status.fail { color: var(--danger); }
 
   .tree-node { padding: 6px 0; border-bottom: 1px solid var(--border); }
   .tree-node:last-child { border-bottom: none; }
@@ -81,12 +90,25 @@
   .empty-state { text-align: center; padding: 24px; color: var(--text2); font-size: 0.9rem; }
   .search-box { padding: 6px 12px; border: 1px solid var(--border);
     border-radius: 6px; font-size: 0.85rem; width: 160px; }
+
+  .badge { display: inline-block; padding: 1px 8px; border-radius: 10px;
+    font-size: 0.72rem; font-weight: 500; }
+  .badge.ok { background: #dcfce7; color: #166534; }
+  .badge.err { background: #fef2f2; color: #991b1b; }
+
+  @media (max-width: 640px) {
+    body { padding: 12px; }
+    .card { padding: 12px; }
+    .config-row { gap: 8px; }
+    .config-row label { width: calc(50% - 8px); }
+    .config-row input, .config-row select { width: 100%; }
+  }
 </style>
 </head>
 <body>
 <div class="container">
   <h1>📦 fileupload</h1>
-  <p class="subtitle">管理面板</p>
+  <p class="subtitle">管理面板 · <span id="serverStatus" style="color:var(--text2)">检查中…</span></p>
   <div id="toast" class="toast"></div>
 
   <div class="card">
@@ -109,7 +131,7 @@
   <div class="card">
     <div class="card-header">
       <h2>📋 文件</h2>
-      <div style="display:flex; gap:8px; align-items:center;">
+      <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
         <input type="text" id="fileFilter" class="search-box" placeholder="筛选…" oninput="renderFileTree()">
         <button class="btn btn-sm" onclick="loadFileTree()">🔄</button>
         <button class="btn btn-sm btn-danger" onclick="deleteAll()">🗑 清空</button>
@@ -126,6 +148,19 @@ function toast(msg, type = 'success') {
   el.textContent = msg; el.className = 'toast ' + type + ' show';
   setTimeout(() => el.classList.remove('show'), 3000);
 }
+
+// ====== health check ======
+async function checkHealth() {
+  try {
+    const r = await fetch('/health');
+    if (r.ok) document.getElementById('serverStatus').innerHTML = '<span style="color:var(--success)">●</span> 在线';
+    else document.getElementById('serverStatus').innerHTML = '<span style="color:var(--danger)">●</span> 异常';
+  } catch(e) {
+    document.getElementById('serverStatus').innerHTML = '<span style="color:var(--danger)">●</span> 离线';
+  }
+}
+setInterval(checkHealth, 15000);
+checkHealth();
 
 // ====== file input ======
 const dropZone = document.getElementById('dropZone');
@@ -194,34 +229,59 @@ async function startDirUpload(files) {
   const id = ++uploadIdCounter;
   const dirName = files[0].webkitRelativePath.split('/')[0];
   addUploadItem(id, '📁 ' + dirName, files.length + ' 个文件（并发 ' + concurrency + '）');
-  up(id, 1, '准备上传 ' + files.length + ' 个文件…');
 
   const ns = document.getElementById('namespace').value || 'demo';
   let concurrency = parseInt(document.getElementById('concurrencySelect').value) || 0;
-  if (concurrency <= 0) concurrency = navigator.hardwareConcurrency || 4; // auto
+  if (concurrency <= 0) concurrency = navigator.hardwareConcurrency || 4;
   const entries = [];
-  let completed = 0;
-  let errors = 0;
+  let completed = 0, errors = 0;
+  const fileResults = [];
 
-  // 用 concurrency 个 worker 并发上传
+  // 展开子文件列表
+  const itemsEl = document.createElement('div');
+  itemsEl.className = 'sub-items';
+  files.forEach((f, i) => {
+    const relPath = f.webkitRelativePath.substring(dirName.length + 1);
+    fileResults.push({ idx: i, relPath, status: 'pending' });
+    itemsEl.insertAdjacentHTML('beforeend',
+      `<div class="sub-item" id="dsub-${id}-${i}">
+        <span class="bullet">●</span>
+        <span class="sub-name">${esc(relPath)}</span>
+        <span class="sub-status" id="ds-${id}-${i}">等待</span>
+      </div>`);
+  });
+  document.getElementById(`up-${id}`).appendChild(itemsEl);
+
+  function updateFileStatus(i, status, detail) {
+    const el = document.getElementById(`ds-${id}-${i}`);
+    if (!el) return;
+    el.textContent = detail || status;
+    el.className = 'sub-status ' + (status === 'ok' ? 'ok' : status === 'fail' ? 'fail' : '');
+    const bullet = el.closest('.sub-item')?.querySelector('.bullet');
+    if (bullet) bullet.textContent = status === 'ok' ? '✓' : status === 'fail' ? '✗' : '●';
+  }
+
   async function worker(queue) {
     for (let idx of queue) {
       const f = files[idx];
-      const relPath = f.webkitRelativePath.substring(dirName.length + 1);
+      const relPath = fileResults[idx].relPath;
+      updateFileStatus(idx, 'uploading', '上传中…');
       try {
         const fileID = await uploadFile(f, null, relPath);
         if (fileID) entries.push({ path: relPath, file_id: fileID });
+        fileResults[idx].status = 'ok';
         completed++;
+        updateFileStatus(idx, 'ok', '完成');
       } catch (e) {
         errors++;
-        console.error('上传失败:', relPath, e);
+        fileResults[idx].status = 'fail';
+        updateFileStatus(idx, 'fail', e.message.slice(0, 40));
       }
       const pct = 2 + (completed / files.length) * 90;
-      up(id, pct, `[${completed}/${files.length}] ${errors ? errors + ' 错误' : ''}`);
+      up(id, pct, `[${completed}/${files.length}] 失败 ${errors}`);
     }
   }
 
-  // 启动 concurrency 个并发 worker
   const chunkSize = Math.ceil(files.length / concurrency);
   const workers = [];
   for (let i = 0; i < concurrency; i++) {
@@ -233,13 +293,12 @@ async function startDirUpload(files) {
   await Promise.all(workers);
 
   if (entries.length === 0) {
-    up(id, 0, '❌ 没有文件上传成功', false);
-    toast('目录上传失败: 所有文件都失败了', 'error');
+    up(id, 0, '❌ 所有文件上传失败', false);
+    toast('目录上传失败', 'error');
     return;
   }
 
-  // 提交 manifest（带上目录名）
-  up(id, 95, '提交 manifest…');
+  up(id, 95, `提交 manifest（${entries.length} 个文件）…`);
   try {
     const resp = await fetch('/v1/dirs', {
       method: 'POST',
@@ -248,8 +307,9 @@ async function startDirUpload(files) {
     });
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     const data = await resp.json();
-    up(id, 100, `✅ 目录上传完成! DirID: ${data.file_id}`, true);
-    toast(`📁 "${dirName}" 上传完成 (${entries.length} 个文件)`, 'success');
+    const summary = errors > 0 ? ` (${errors} 个失败)` : '';
+    up(id, 100, `✅ 完成! DirID: ${data.file_id}${summary}`, true);
+    toast(`📁 "${dirName}" 上传完成 (${entries.length}/${files.length})`, errors > 0 ? 'error' : 'success');
     setTimeout(loadFileTree, 500);
   } catch (e) {
     up(id, 0, '❌ ' + e.message, false);
@@ -264,7 +324,6 @@ async function uploadFile(file, uploadId, customName) {
   if (uploadId) up(uploadId, 0, '计算 SHA-256…');
   const sha256 = await computeSHA256(file);
 
-  // 秒传
   if (uploadId) up(uploadId, 1, '秒传预检…');
   const checkResp = await fetch(`/v1/files?sha256=${sha256}&name=${encodeURIComponent(customName)}`, {
     method: 'HEAD', headers: { 'X-Namespace': ns }
@@ -273,7 +332,6 @@ async function uploadFile(file, uploadId, customName) {
     try { const d = await checkResp.json(); if (uploadId) up(uploadId, 100, '✅ 秒传命中', true); return d.file_id; } catch(e) {}
   }
 
-  // 创建会话
   if (uploadId) up(uploadId, 2, '创建会话…');
   const initResp = await fetch(`/v1/uploads/init?size=${file.size}`, {
     method: 'POST',
@@ -285,7 +343,6 @@ async function uploadFile(file, uploadId, customName) {
   const chunkSize = initData.chunk_size || parseInt(document.getElementById('chunkSize').value) || 10485760;
   const totalChunks = Math.ceil(file.size / chunkSize);
 
-  // 分片上传
   let uploadedBytes = 0;
   const startTime = Date.now();
   for (let i = 0; i < totalChunks; i++) {
@@ -296,7 +353,7 @@ async function uploadFile(file, uploadId, customName) {
       method: 'PUT', body: buf,
       headers: { 'X-Slice-SHA256': sliceSHA, 'Content-Type': 'application/octet-stream', 'X-Namespace': ns }
     });
-    if (!r.ok) throw new Error(`分片 ${i+1}/${totalChunks} 失败`);
+    if (!r.ok) throw new Error(`分片 ${i+1}/${totalChunks} 失败 (HTTP ${r.status})`);
 
     uploadedBytes += buf.byteLength;
     if (uploadId) {
@@ -307,10 +364,9 @@ async function uploadFile(file, uploadId, customName) {
     }
   }
 
-  // Finalize
   if (uploadId) up(uploadId, 96, '合并中…');
   const finalResp = await fetch(`/v1/uploads/${sessionID}/finalize`, { method: 'POST', headers: { 'X-Namespace': ns } });
-  if (!finalResp.ok) throw new Error('Finalize 失败');
+  if (!finalResp.ok) throw new Error('Finalize 失败 (HTTP ' + finalResp.status + ')');
   const finalData = await finalResp.json();
 
   if (uploadId) up(uploadId, 100, `✅ ${finalData.file_id.slice(0,12)}…`, true);
@@ -327,14 +383,12 @@ async function sha256Hex(buf) {
 }
 function hex(u8) { return Array.from(u8).map(b => b.toString(16).padStart(2,'0')).join(''); }
 
-// ====== file tree (递归加载) ======
+// ====== file tree ======
 let flatFiles = [];
 
 async function loadFileTree() {
   const ns = document.getElementById('namespace').value || 'demo';
   document.getElementById('fileTree').innerHTML = '<div class="empty-state">加载中…</div>';
-
-  // 加载根目录所有文件（flat list），由 renderFileTree 按 path 构建虚拟目录树
   const resp = await fetch(`/v1/ls?namespace=${ns}`);
   if (!resp.ok) { document.getElementById('fileTree').innerHTML = '<div class="empty-state">加载失败</div>'; return; }
   const data = await resp.json();
@@ -346,63 +400,48 @@ async function loadFileTree() {
   renderFileTree();
 }
 
-async function renderFileTree() {
+function renderFileTree() {
   const el = document.getElementById('fileTree');
   const filter = (document.getElementById('fileFilter').value || '').toLowerCase();
-
   if (flatFiles.length === 0) { el.innerHTML = '<div class="empty-state">尚无文件</div>'; return; }
 
-  // 过滤
   let list = flatFiles;
   if (filter) list = flatFiles.filter(f => f.name.toLowerCase().includes(filter) || f.path.toLowerCase().includes(filter));
 
-  // 从 Path 字段构建虚拟目录树（按 / 分隔）
-  // 如 path="skills/understand/languages/python.md" → 三层嵌套
   const tree = { children: {} };
-
   for (const f of list) {
-    // 跳过目录节点自身（path="/"），其内容通过子文件的 path 体现
     if (f.isDir) continue;
     const parts = f.path.split('/');
     let node = tree;
     for (let i = 0; i < parts.length - 1; i++) {
       const seg = parts[i];
-      if (!seg) continue; // 跳过空段（如 path 起始的 /）
+      if (!seg) continue;
       if (!node.children[seg]) {
         node.children[seg] = { _virtual: true, name: seg, children: {} };
       }
       node = node.children[seg];
     }
-    // 最后一个 segment 是文件名
     node.children[f.name] = { ...f, _virtual: false };
   }
 
-  // 递归渲染树
   function renderNode(node, depth) {
     const indent = depth * 20;
-    // 先渲染目录（虚拟 + 真实），再渲染文件
     const dirs = [];
     const files = [];
     for (const [name, child] of Object.entries(node.children)) {
-      if (child._virtual) {
-        dirs.push(child);
-      } else if (!child.isDir) {
-        files.push(child);
-      } else {
-        dirs.push(child); // 真实目录节点
-      }
+      if (child._virtual) dirs.push(child);
+      else if (!child.isDir) files.push(child);
+      else dirs.push(child);
     }
 
     let html = '';
     for (const d of dirs) {
       const childHtml = renderNode(d, depth + 1);
       const hasKids = Object.keys(d.children).length > 0;
-      // 虚拟目录名从 path 段推断，没有实际 DirID 可下载
-      const isVirtual = d._virtual;
       html += `<div class="tree-node" style="padding-left:${indent}px">
         <div class="tree-row">
           <span class="icon">📁</span>
-          <span class="name" title="${isVirtual ? '虚拟目录' : esc(d.name)}">${esc(d.name)}</span>
+          <span class="name" title="${esc(d.name)}">${esc(d.name)}</span>
           <span class="meta">${hasKids ? Object.keys(d.children).length + '项' : ''}</span>
           <span class="actions">${d.id ? `<button class="btn btn-sm" onclick="downloadFile('${d.id}','${esc(d.name)}','tar.gz')">⬇ tar.gz</button>` : ''}${d.id ? `<button class="btn btn-sm btn-danger" onclick="deleteFile('${d.id}')">🗑</button>` : ''}</span>
         </div>
@@ -469,21 +508,13 @@ async function downloadFile(id, name, format) {
     const reader = resp.body.getReader();
     const chunks = [];
     let received = 0;
-    let lastUpdate = Date.now();
-    let lastBytes = 0;
 
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
       chunks.push(value);
       received += value.length;
-      const now = Date.now();
-      if (now - lastUpdate > 200 || received >= total) {
-        const speed = fmtSize((received - lastBytes) / ((now - lastUpdate) / 1000));
-        lastUpdate = now; lastBytes = received;
-        up(dlId, total > 0 ? received/total*100 : 0,
-          `${fmtSize(received)}${total > 0 ? '/'+fmtSize(total) : ''} · ${speed}/s`);
-      }
+      up(dlId, total > 0 ? received/total*100 : 0, `${fmtSize(received)}${total > 0 ? '/'+fmtSize(total) : ''}`);
     }
 
     const a = document.createElement('a');
