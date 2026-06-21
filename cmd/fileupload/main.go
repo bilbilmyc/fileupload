@@ -45,6 +45,8 @@ func main() {
 		runDelete(ctx, cfg, os.Args[2:])
 	case "ls":
 		runList(ctx, cfg, os.Args[2:])
+		case "status":
+			runStatus(ctx, cfg, os.Args[2:])
 	case "stat":
 		runStat(ctx, cfg, os.Args[2:])
 	case "scan":
