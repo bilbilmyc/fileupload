@@ -18,7 +18,7 @@ RUN if [ "$BINARY" = "server" ]; then \
     fi
 
 # 预编译二进制（由 CI build job 交叉编译产出）
-COPY build/fileupload-${BINARY} /usr/local/bin/fileupload-${BINARY}
+COPY fileupload-${BINARY} /usr/local/bin/fileupload-${BINARY}
 
 # 默认配置文件（仅 server 需要）
 COPY fileupload.yaml /etc/fileupload/fileupload.yaml

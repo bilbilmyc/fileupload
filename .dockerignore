@@ -5,6 +5,7 @@
 # 构建产物
 build/
 *.exe
+*.exe
 *.exe~
 
 # 编辑器

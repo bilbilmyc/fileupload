@@ -125,7 +125,7 @@ jobs:
           path: build/
 
       - name: Rename binary for Dockerfile
-        run: mv build/${{ env.APP_NAME }}-${{ matrix.bin_name }}-linux-${{ steps.arch.outputs.goarch }} build/${{ env.APP_NAME }}-${{ matrix.bin_name }}
+        run: cp build/${{ env.APP_NAME }}-${{ matrix.bin_name }}-linux-${{ steps.arch.outputs.goarch }} ./${{ env.APP_NAME }}-${{ matrix.bin_name }}
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
