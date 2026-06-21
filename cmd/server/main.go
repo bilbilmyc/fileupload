@@ -50,6 +50,12 @@ func main() {
 		log.Fatalf("初始化本地存储: %v", err)
 	}
 
+	// 1b. 临时分片存储
+	tempFS, err := storage.NewLocalFS(cfg.Storage.TempDir)
+	if err != nil {
+		log.Fatalf("初始化临时存储: %v", err)
+	}
+
 	// 2. Redis 热数据
 	rdb := redis.NewClient(&redis.Options{
 		Addr:     cfg.Redis.Addr,
@@ -91,7 +97,7 @@ func main() {
 		TempDir:         cfg.Storage.TempDir,
 		DefaultChunkSize: cfg.Upload.DefaultChunkSize,
 	}
-	uploadSvc := domain.NewUploadService(metaFacade, localFS, compress, hasher, workerPool, uploadCfg)
+	uploadSvc := domain.NewUploadService(metaFacade, localFS, tempFS, compress, hasher, workerPool, uploadCfg)
 
 	downloadCfg := domain.DownloadConfig{
 		DataDir: cfg.Storage.DataDir,

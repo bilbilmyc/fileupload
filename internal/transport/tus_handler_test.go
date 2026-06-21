@@ -31,7 +31,7 @@ func newTestFixtures(t *testing.T) (*domain.UploadService, *domain.DownloadServi
 		TempDir:          "tmp",
 		DefaultChunkSize: 1024 * 1024,
 	}
-	uploadSvc := domain.NewUploadService(meta, storage, compress, hasher, pool, ucfg)
+	uploadSvc := domain.NewUploadService(meta, storage, storage, compress, hasher, pool, ucfg)
 
 	dcfg := domain.DownloadConfig{DataDir: "data"}
 	downloadSvc := domain.NewDownloadService(meta, storage, compress, hasher, dcfg)

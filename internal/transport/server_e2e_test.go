@@ -55,6 +55,13 @@ func newE2EFixture(t *testing.T) *e2eFixture {
 		t.Fatalf("NewLocalFS: %v", err)
 	}
 
+	// 2b. 临时分片存储
+	tempFS, err := storage.NewLocalFS(tempDir)
+	if err != nil {
+		t.Fatalf("NewLocalFS(tempDir): %v", err)
+	}
+
+
 	// 3. miniredis（无需外部 Redis 进程）
 	mr, err := miniredis.Run()
 	if err != nil {
@@ -90,7 +97,7 @@ func newE2EFixture(t *testing.T) *e2eFixture {
 		DefaultChunkSize: 1024 * 1024,
 	}
 	workerPool := domain.NewSimpleWorkerPool(4, 10)
-	uploadSvc := domain.NewUploadService(metaFacade, localFS, compress, hasher, workerPool, uploadCfg)
+	uploadSvc := domain.NewUploadService(metaFacade, localFS, tempFS, compress, hasher, workerPool, uploadCfg)
 
 	downloadCfg := domain.DownloadConfig{DataDir: dataDir}
 	downloadSvc := domain.NewDownloadService(metaFacade, localFS, compress, hasher, downloadCfg)

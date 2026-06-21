@@ -15,12 +15,13 @@ import (
 // 处理上传会话生命周期、秒传预检、分片追加、Finalize 合并+解压+校验、
 // content_blobs 去重写入、目录 manifest 提交、删除去重。
 type UploadService struct {
-	meta    Metadata
-	storage Storage
-	compress Compressor
-	hasher  Hasher
-	pool    WorkerPool
-	cfg     UploadConfig
+	meta        Metadata
+	storage     Storage
+	tempStorage Storage // 临时分片专用存储（根目录 = TempDir）
+	compress    Compressor
+	hasher      Hasher
+	pool        WorkerPool
+	cfg         UploadConfig
 }
 
 // UploadConfig 上传服务配置
@@ -32,14 +33,15 @@ type UploadConfig struct {
 }
 
 // NewUploadService 创建上传服务
-func NewUploadService(meta Metadata, storage Storage, compress Compressor, hasher Hasher, pool WorkerPool, cfg UploadConfig) *UploadService {
+func NewUploadService(meta Metadata, storage Storage, tempStorage Storage, compress Compressor, hasher Hasher, pool WorkerPool, cfg UploadConfig) *UploadService {
 	return &UploadService{
-		meta:    meta,
-		storage: storage,
-		compress: compress,
-		hasher:  hasher,
-		pool:    pool,
-		cfg:     cfg,
+		meta:        meta,
+		storage:     storage,
+		tempStorage: tempStorage,
+		compress:    compress,
+		hasher:      hasher,
+		pool:        pool,
+		cfg:         cfg,
 	}
 }
 
@@ -167,11 +169,11 @@ func (s *UploadService) AppendChunk(ctx context.Context, sessionID string, index
 
 // processChunkBytes 处理已读入内存的分片数据（在 worker 池中执行）。
 func (s *UploadService) processChunkBytes(ctx context.Context, sessionID string, _ string, index int, chunkData []byte, declaredSha256 string) error {
-	partPath := filepath.Join(s.cfg.TempDir, sessionID, fmt.Sprintf("%d.part", index))
+	relPath := sessionID + "/" + fmt.Sprintf("%d.part", index)
 
 	teeReader, acc := s.hasher.TeeReader(bytes.NewReader(chunkData))
 
-	written, err := s.storage.Write(ctx, partPath, teeReader)
+	written, err := s.tempStorage.Write(ctx, relPath, teeReader)
 	if err != nil {
 		return fmt.Errorf("写入分片 %d: %w", index, err)
 	}
@@ -179,7 +181,7 @@ func (s *UploadService) processChunkBytes(ctx context.Context, sessionID string,
 	actualSha := acc.SumHex()
 
 	if declaredSha256 != "" && actualSha != declaredSha256 {
-		_ = s.storage.Delete(ctx, partPath)
+		_ = s.tempStorage.Delete(ctx, relPath)
 		return ErrSliceChecksum
 	}
 
@@ -365,8 +367,8 @@ func (s *UploadService) Finalize(ctx context.Context, sessionID string) (*FileMe
 	pr, pw := io.Pipe()
 	go func() {
 		for _, chunk := range chunks {
-			partPath := filepath.Join(s.cfg.TempDir, sessionID, fmt.Sprintf("%d.part", chunk.Index))
-			r, err := s.storage.Open(ctx, partPath, 0, 0)
+			relPath := sessionID + "/" + fmt.Sprintf("%d.part", chunk.Index)
+			r, err := s.tempStorage.Open(ctx, relPath, 0, 0)
 			if err != nil {
 				pw.CloseWithError(fmt.Errorf("打开分片 %d: %w", chunk.Index, err))
 				return
@@ -462,8 +464,8 @@ func (s *UploadService) Finalize(ctx context.Context, sessionID string) (*FileMe
 // cleanupTempChunks 异步清理临时分片文件
 func (s *UploadService) cleanupTempChunks(ctx context.Context, sessionID string, chunks []ChunkInfo) {
 	for _, chunk := range chunks {
-		partPath := filepath.Join(s.cfg.TempDir, sessionID, fmt.Sprintf("%d.part", chunk.Index))
-		_ = s.storage.Delete(ctx, partPath)
+		relPath := sessionID + "/" + fmt.Sprintf("%d.part", chunk.Index)
+		_ = s.tempStorage.Delete(ctx, relPath)
 	}
 }
 

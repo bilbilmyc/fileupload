@@ -25,7 +25,7 @@ func newTestUploadService(t *testing.T) (*UploadService, *mockMetadata, *mockSto
 		DefaultChunkSize: 1024 * 1024,
 	}
 
-	svc := NewUploadService(meta, storage, compress, hasher, pool, cfg)
+	svc := NewUploadService(meta, storage, storage, compress, hasher, pool, cfg)
 	return svc, meta, storage
 }
 
