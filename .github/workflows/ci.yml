@@ -127,6 +127,9 @@ jobs:
       - name: Rename binary for Dockerfile
         run: cp build/${{ env.APP_NAME }}-${{ matrix.bin_name }}-linux-${{ steps.arch.outputs.goarch }} ./${{ env.APP_NAME }}-${{ matrix.bin_name }}
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
