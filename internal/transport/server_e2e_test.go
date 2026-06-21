@@ -93,7 +93,6 @@ func newE2EFixture(t *testing.T) *e2eFixture {
 	uploadCfg := domain.UploadConfig{
 		SessionTTL:       time.Hour,
 		DataDir:          dataDir,
-		TempDir:          tempDir,
 		DefaultChunkSize: 1024 * 1024,
 	}
 	workerPool := domain.NewSimpleWorkerPool(4, 10)

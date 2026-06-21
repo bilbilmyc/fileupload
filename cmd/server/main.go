@@ -94,7 +94,6 @@ func main() {
 	uploadCfg := domain.UploadConfig{
 		SessionTTL:      cfg.Upload.SessionTTL(),
 		DataDir:         cfg.Storage.DataDir,
-		TempDir:         cfg.Storage.TempDir,
 		DefaultChunkSize: cfg.Upload.DefaultChunkSize,
 	}
 	uploadSvc := domain.NewUploadService(metaFacade, localFS, tempFS, compress, hasher, workerPool, uploadCfg)

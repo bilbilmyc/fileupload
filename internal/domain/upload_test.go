@@ -21,7 +21,6 @@ func newTestUploadService(t *testing.T) (*UploadService, *mockMetadata, *mockSto
 	cfg := UploadConfig{
 		SessionTTL:       time.Hour,
 		DataDir:          "data",
-		TempDir:          "tmp",
 		DefaultChunkSize: 1024 * 1024,
 	}
 

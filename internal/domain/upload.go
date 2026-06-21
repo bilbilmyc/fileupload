@@ -26,10 +26,9 @@ type UploadService struct {
 
 // UploadConfig 上传服务配置
 type UploadConfig struct {
-	SessionTTL      time.Duration // 会话无活动超时
-	DataDir         string        // 数据目录（data/<namespace>/<fileID>）
-	TempDir         string        // 临时分片目录
-	DefaultChunkSize int64        // 默认分片大小
+	SessionTTL       time.Duration // 会话无活动超时
+	DataDir          string        // 数据目录（data/<namespace>/<fileID>）
+	DefaultChunkSize int64         // 默认分片大小
 }
 
 // NewUploadService 创建上传服务
