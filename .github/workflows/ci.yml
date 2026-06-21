@@ -92,16 +92,25 @@ jobs:
           name: ${{ env.APP_NAME }}-${{ matrix.bin_name }}-${{ matrix.goos }}-${{ matrix.goarch }}
           path: build/${{ env.APP_NAME }}-${{ matrix.bin_name }}-${{ matrix.goos }}-${{ matrix.goarch }}
 
+
   # ========================================
   # Docker 镜像构建（使用 build job 预编译产物，无需 QEMU 模拟编译）
   # ========================================
   docker:
-    name: Docker (${{ matrix.platform }})
+    name: Docker (${{ matrix.component }} / ${{ matrix.platform }})
     needs: [build]
     runs-on: ubuntu-latest
     strategy:
       matrix:
         platform: [linux/amd64, linux/arm64]
+        component: [server, fileupload]
+        include:
+          - component: server
+            bin_name: server
+            image_name: server
+          - component: fileupload
+            bin_name: cli
+            image_name: cli
     steps:
       - uses: actions/checkout@v4
 
@@ -113,7 +122,7 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          name: ${{ env.APP_NAME }}-server-linux-${{ steps.arch.outputs.goarch }}
+          name: ${{ env.APP_NAME }}-${{ matrix.bin_name }}-linux-${{ steps.arch.outputs.goarch }}
           path: build/
 
       - name: Log in to GitHub Container Registry
@@ -127,7 +136,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository }}/server
+          images: ghcr.io/${{ github.repository }}/${{ matrix.image_name }}
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
@@ -139,12 +148,12 @@ jobs:
         with:
           context: .
           file: deploy/docker/Dockerfile.dist
+          build-args: BINARY=${{ matrix.component }}
           platforms: ${{ matrix.platform }}
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          # 预编译二进制，无需 GHA cache（基础镜像层由 Docker Hub 缓存）
-          cache-from: type=registry,ref=ghcr.io/${{ github.repository }}/server:latest
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository }}/${{ matrix.image_name }}:latest
           cache-to: type=inline
 
   # ========================================
