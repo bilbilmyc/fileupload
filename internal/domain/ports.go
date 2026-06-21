@@ -3,6 +3,7 @@ package domain
 import (
 	"context"
 	"io"
+	"io/fs"
 	"time"
 )
 
@@ -26,6 +27,10 @@ type Storage interface {
 
 	// Stat 获取文件信息（大小、是否存在）
 	Stat(ctx context.Context, path string) (size int64, exists bool, err error)
+
+	// Walk 遍历存储，fn 收到的是相对于 root 的路径。
+	// 用于一致性巡检、批量列举等场景。
+	Walk(ctx context.Context, fn func(path string, info fs.FileInfo) error) error
 }
 
 // ---------- Metadata 端口 ----------

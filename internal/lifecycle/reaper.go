@@ -5,7 +5,7 @@ package lifecycle
 
 import (
 	"context"
-	"fmt"
+	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
@@ -195,37 +195,20 @@ func (s *ConsistencyScanner) scanOrphanFiles(ctx context.Context, report *Scanne
 	if s.meta == nil {
 		return
 	}
-	// 数据目录下的所有 namespace
-	dataDir := s.dataDir
-	nsEntries, err := os.ReadDir(dataDir)
-	if err != nil {
-		return
-	}
-
-	for _, nsEntry := range nsEntries {
-		if !nsEntry.IsDir() {
-			continue
+	// 使用 storage.Walk 遍历存储，与后端实现解耦
+	s.storage.Walk(ctx, func(path string, info fs.FileInfo) error {
+		if info.IsDir() {
+			return nil // 跳过目录本身
 		}
-		nsDir := filepath.Join(dataDir, nsEntry.Name())
-		fileEntries, err := os.ReadDir(nsDir)
-		if err != nil {
-			continue
+		// path = "namespace/fileID"
+		// 提取 fileID（基础文件名，跨平台）
+		fileID := filepath.Base(path)
+		dbFile, err := s.meta.GetFile(ctx, fileID)
+		if err != nil || dbFile == nil {
+			report.OrphanFiles = append(report.OrphanFiles, path)
 		}
-
-		for _, f := range fileEntries {
-			if f.IsDir() {
-				continue
-			}
-			// 检查 DB 是否有对应文件记录
-			// 按文件名（不含扩展名？实际上 fileID = 文件名）
-			fileID := f.Name()
-			dbFile, err := s.meta.GetFile(ctx, fileID)
-			if err != nil || dbFile == nil {
-				report.OrphanFiles = append(report.OrphanFiles,
-					fmt.Sprintf("data/%s/%s", nsEntry.Name(), fileID))
-			}
-		}
-	}
+		return nil
+	})
 }
 
 func (s *ConsistencyScanner) scanMetadataOrphans(ctx context.Context, report *ScannerReport) {

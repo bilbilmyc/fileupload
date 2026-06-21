@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"io"
+	"io/fs"
 	"sync"
 	"time"
 )
@@ -75,6 +76,26 @@ func (m *mockStorage) has(path string) bool {
 	m.mu.Unlock()
 	return ok
 }
+
+func (m *mockStorage) Walk(_ context.Context, fn func(path string, info fs.FileInfo) error) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for path, data := range m.files {
+		if err := fn(path, mockFileInfo{name: path, size: int64(len(data))}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+type mockFileInfo struct{ name string; size int64 }
+
+func (m mockFileInfo) Name() string       { return m.name }
+func (m mockFileInfo) Size() int64        { return m.size }
+func (m mockFileInfo) Mode() fs.FileMode  { return 0 }
+func (m mockFileInfo) ModTime() time.Time { return time.Time{} }
+func (m mockFileInfo) IsDir() bool        { return false }
+func (m mockFileInfo) Sys() any           { return nil }
 
 // ===== Mock Metadata (thread-safe) =====
 

@@ -259,29 +259,3 @@ func TestContainsPathTraversal(t *testing.T) {
 	}
 }
 
-func TestSplitPath(t *testing.T) {
-	tests := []struct {
-		path string
-		want []string
-	}{
-		{"", nil},
-		{"a", []string{"a"}},
-		{"a/b/c", []string{"a", "b", "c"}},
-		{"/a/b/", []string{"a", "b"}},
-		{"single", []string{"single"}},
-	}
-	for _, tt := range tests {
-		t.Run(tt.path, func(t *testing.T) {
-			got := splitPath(tt.path)
-			if len(got) != len(tt.want) {
-				t.Errorf("splitPath = %v, want %v", got, tt.want)
-				return
-			}
-			for i := range got {
-				if got[i] != tt.want[i] {
-					t.Errorf("splitPath[%d] = %s, want %s", i, got[i], tt.want[i])
-				}
-			}
-		})
-	}
-}

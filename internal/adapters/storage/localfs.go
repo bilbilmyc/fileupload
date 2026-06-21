@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/bilbilmyc/fileupload/internal/domain"
 )
@@ -190,33 +191,13 @@ func (s *LocalFS) Root() string {
 
 // containsPathTraversal 检查路径是否含 .. 遍历
 func containsPathTraversal(path string) bool {
-	// 按分隔符分解，检查是否有 ..
-	parts := splitPath(path)
+	// 统一分隔符为 / 后再检查（Windows 上 filepath.Clean 会转 \）
+	normalized := strings.ReplaceAll(path, "\\", "/")
+	parts := strings.Split(normalized, "/")
 	for _, part := range parts {
 		if part == ".." {
 			return true
 		}
 	}
 	return false
-}
-
-// splitPath 按 / 分隔路径
-func splitPath(path string) []string {
-	if path == "" {
-		return nil
-	}
-	var parts []string
-	start := 0
-	for i := 0; i < len(path); i++ {
-		if path[i] == '/' {
-			if i > start {
-				parts = append(parts, path[start:i])
-			}
-			start = i + 1
-		}
-	}
-	if start < len(path) {
-		parts = append(parts, path[start:])
-	}
-	return parts
 }

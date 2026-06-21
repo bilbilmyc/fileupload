@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/bilbilmyc/fileupload/internal/adapters/storage"
 	"github.com/bilbilmyc/fileupload/internal/domain"
 )
 
@@ -139,7 +141,27 @@ func (m *mockStorage) Stat(_ context.Context, path string) (int64, bool, error) 
 	return int64(len(data)), true, nil
 }
 
-// ===== Tests =====
+func (m *mockStorage) Walk(_ context.Context, fn func(path string, info fs.FileInfo) error) error {
+	for path := range m.files {
+		if err := fn(path, mockFileInfo{name: path, size: int64(len(m.files[path]))}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// mockFileInfo 实现 fs.FileInfo，供 mockStorage.Walk 使用
+type mockFileInfo struct {
+	name string
+	size int64
+}
+
+func (m mockFileInfo) Name() string       { return m.name }
+func (m mockFileInfo) Size() int64        { return m.size }
+func (m mockFileInfo) Mode() fs.FileMode  { return 0 }
+func (m mockFileInfo) ModTime() time.Time { return time.Time{} }
+func (m mockFileInfo) IsDir() bool        { return false }
+func (m mockFileInfo) Sys() any           { return nil }
 
 func TestNewSessionReaper(t *testing.T) {
 	r := NewSessionReaper(nil, nil, "/tmp", time.Minute)
@@ -319,12 +341,14 @@ func TestScanner_ScanOrphanFiles(t *testing.T) {
 	dataDir := t.TempDir()
 	dir := t.TempDir()
 
-	// Create a file in data dir that has no metadata record
-	nsDir := filepath.Join(dataDir, "default")
-	os.MkdirAll(nsDir, 0755)
-	os.WriteFile(filepath.Join(nsDir, "orphan-file-id"), []byte("content"), 0644)
+	// 用 real LocalFS + storage.Write 创建文件
+	st, err := storage.NewLocalFS(dataDir)
+	if err != nil {
+		t.Fatalf("NewLocalFS: %v", err)
+	}
+	st.Write(context.Background(), "default/orphan-file-id", bytes.NewReader([]byte("content")))
 
-	s := NewConsistencyScanner(meta, newMockStorage(), dataDir, dir)
+	s := NewConsistencyScanner(meta, st, dataDir, dir)
 	result, err := s.Scan(context.Background())
 	if err != nil {
 		t.Fatalf("Scan error = %v", err)
@@ -340,19 +364,20 @@ func TestScanner_ScanOrphanFiles_WithExistingRecord(t *testing.T) {
 	dataDir := t.TempDir()
 	dir := t.TempDir()
 
-	// Create a file AND a metadata record — should not be orphan
-	nsDir := filepath.Join(dataDir, "default")
-	os.MkdirAll(nsDir, 0755)
-	fileID := "known-file-id"
-	os.WriteFile(filepath.Join(nsDir, fileID), []byte("content"), 0644)
+	// 用 real LocalFS + storage.Write 创建文件
+	st, err := storage.NewLocalFS(dataDir)
+	if err != nil {
+		t.Fatalf("NewLocalFS: %v", err)
+	}
+	st.Write(context.Background(), "default/known-file-id", bytes.NewReader([]byte("content")))
 	meta.PutFile(context.Background(), &domain.FileMetadata{
-		FileID: fileID,
+		FileID: "known-file-id",
 		SHA256: "abc",
 		Name:   "test.txt",
 		Size:   7,
 	})
 
-	s := NewConsistencyScanner(meta, newMockStorage(), dataDir, dir)
+	s := NewConsistencyScanner(meta, st, dataDir, dir)
 	result, err := s.Scan(context.Background())
 	if err != nil {
 		t.Fatalf("Scan error = %v", err)
@@ -470,17 +495,19 @@ func TestScanner_ScanRefCount_Clean(t *testing.T) {
 
 func TestScanner_ScanFull(t *testing.T) {
 	meta := newMockMeta()
-	storage := newMockStorage()
 	dataDir := t.TempDir()
 	tempDir := t.TempDir()
+
+	st, err := storage.NewLocalFS(dataDir)
+	if err != nil {
+		t.Fatalf("NewLocalFS: %v", err)
+	}
 
 	// Orphan parts in temp dir
 	os.WriteFile(filepath.Join(tempDir, "lonely.part"), []byte("x"), 0644)
 
 	// Orphan file on disk (no metadata record)
-	nsDir := filepath.Join(dataDir, "default")
-	os.MkdirAll(nsDir, 0755)
-	os.WriteFile(filepath.Join(nsDir, "orphan-file"), []byte("data"), 0644)
+	st.Write(context.Background(), "default/orphan-file", bytes.NewReader([]byte("data")))
 
 	// Metadata orphan (blob but no file)
 	meta.PutBlob(context.Background(), &domain.ContentBlob{
@@ -488,15 +515,15 @@ func TestScanner_ScanFull(t *testing.T) {
 	})
 
 	// Ref count drift — blob has valid storage, so no metadata orphan
-	storage.Write(context.Background(), "default/drift-file", bytes.NewReader([]byte("x")))
+	st.Write(context.Background(), "default/drift-file", bytes.NewReader([]byte("x")))
 	meta.PutBlob(context.Background(), &domain.ContentBlob{
 		SHA256: "drift", StoragePath: "default/drift-file", RefCount: 3, Size: 1,
 	})
 	meta.PutFile(context.Background(), &domain.FileMetadata{
-		FileID: "f1", SHA256: "drift", Name: "f1.txt",
+		FileID: "drift-file", SHA256: "drift", Name: "drift.txt",
 	})
 
-	s := NewConsistencyScanner(meta, storage, dataDir, tempDir)
+	s := NewConsistencyScanner(meta, st, dataDir, tempDir)
 	result, err := s.Scan(context.Background())
 	if err != nil {
 		t.Fatalf("Scan error = %v", err)
