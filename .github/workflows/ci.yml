@@ -63,7 +63,12 @@ jobs:
       matrix:
         goos: [linux, darwin]
         goarch: [amd64, arm64]
-        component: [server, cli]
+        component: [server, fileupload]
+        include:
+          - component: server
+            bin_name: server
+          - component: fileupload
+            bin_name: cli
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -75,13 +80,13 @@ jobs:
         run: |
           CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} \
             go build -ldflags="-s -w" \
-            -o build/${{ env.APP_NAME }}-${{ matrix.component }}-${{ matrix.goos }}-${{ matrix.goarch }} \
+            -o build/${{ env.APP_NAME }}-${{ matrix.bin_name }}-${{ matrix.goos }}-${{ matrix.goarch }} \
             ./cmd/${{ matrix.component }}
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.APP_NAME }}-${{ matrix.component }}-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: build/${{ env.APP_NAME }}-${{ matrix.component }}-${{ matrix.goos }}-${{ matrix.goarch }}
+          name: ${{ env.APP_NAME }}-${{ matrix.bin_name }}-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: build/${{ env.APP_NAME }}-${{ matrix.bin_name }}-${{ matrix.goos }}-${{ matrix.goarch }}
 
   # ========================================
   # Docker 镜像构建
