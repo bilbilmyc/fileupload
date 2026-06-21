@@ -106,10 +106,10 @@ jobs:
         include:
           - component: server
             bin_name: server
-            image_name: server
+            image_name: fileupload-server
           - component: fileupload
             bin_name: cli
-            image_name: cli
+            image_name: fileupload-cli
     steps:
       - uses: actions/checkout@v4
 
@@ -141,7 +141,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository }}/${{ matrix.image_name }}
+          images: ghcr.io/${{ github.repository_owner }}/${{ matrix.image_name }}
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
@@ -158,7 +158,7 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=registry,ref=ghcr.io/${{ github.repository }}/${{ matrix.image_name }}:latest
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository_owner }}/${{ matrix.image_name }}:latest
           cache-to: type=inline
 
   # ========================================
