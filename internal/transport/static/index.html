@@ -317,21 +317,20 @@ async function startDirUpload(files) {
   }
 }
 
-async function uploadFile(file, uploadId, customName) {
-  const ns = document.getElementById('namespace').value || 'demo';
-  const compress = document.getElementById('compressType').value;
 
+  // 计算 SHA-256（秒传预检用），失败不阻塞上传
+  let sha256 = '';
   if (uploadId) up(uploadId, 0, '计算 SHA-256…');
-  const sha256 = await computeSHA256(file);
+  try { sha256 = await computeSHA256(file); } catch(e) { console.warn('SHA-256 跳过', e); }
 
-  if (uploadId) up(uploadId, 1, '秒传预检…');
-  const checkResp = await fetch(`/v1/files?sha256=${sha256}&name=${encodeURIComponent(customName)}`, {
-    method: 'HEAD', headers: { 'X-Namespace': ns }
-  });
-  if (checkResp.status === 200) {
-    try { const d = await checkResp.json(); if (uploadId) up(uploadId, 100, '✅ 秒传命中', true); return d.file_id; } catch(e) {}
+  // 秒传预检
+  if (sha256) {
+    if (uploadId) up(uploadId, 1, '秒传预检…');
+    try {
+      const r = await fetch('/v1/files?sha256=' + sha256 + '&name=' + encodeURIComponent(customName), { method: 'HEAD', headers: { 'X-Namespace': ns } });
+      if (r.status === 200 && uploadId) { up(uploadId, 100, '✅ 秒传命中', true); try { const d = await r.json(); return d.file_id; } catch(e) {} }
+    } catch(e) { console.warn('秒传跳过', e); }
   }
-
   if (uploadId) up(uploadId, 2, '创建会话…');
   const initResp = await fetch(`/v1/uploads/init?size=${file.size}`, {
     method: 'POST',
