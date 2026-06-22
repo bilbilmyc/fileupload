@@ -203,6 +203,15 @@ func (m *mockMetadata) PutBlob(_ context.Context, b *ContentBlob) error {
 	return nil
 }
 
+func (m *mockMetadata) UpdateBlobStorage(_ context.Context, sha256 string, storagePath string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if b, ok := m.blobs[sha256]; ok {
+		b.StoragePath = storagePath
+	}
+	return nil
+}
+
 func (m *mockMetadata) IncrBlobRef(_ context.Context, sha256 string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

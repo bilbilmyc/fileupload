@@ -107,6 +107,11 @@ func (s *SQLiteStore) PutBlob(_ context.Context, b *domain.ContentBlob) error {
 }
 
 // IncrBlobRef 增加引用计数
+func (s *SQLiteStore) UpdateBlobStorage(_ context.Context, sha256 string, storagePath string) error {
+	_, err := s.db.Exec(`UPDATE content_blobs SET storage_path = ? WHERE sha256 = ?`, storagePath, sha256)
+	return err
+}
+
 func (s *SQLiteStore) IncrBlobRef(_ context.Context, sha256 string) error {
 	res, err := s.db.Exec(
 		`UPDATE content_blobs SET ref_count = ref_count + 1 WHERE sha256 = ?`,

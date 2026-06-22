@@ -97,6 +97,10 @@ func (f *Facade) ListRoot(ctx context.Context, namespace string) ([]*domain.File
 	return f.cold.ListRoot(ctx, namespace)
 }
 
+func (f *Facade) UpdateBlobStorage(ctx context.Context, sha256 string, storagePath string) error {
+	return f.cold.UpdateBlobStorage(ctx, sha256, storagePath)
+}
+
 func (f *Facade) SetFileTags(ctx context.Context, fileID string, tags []string) error {
 	return f.cold.SetFileTags(ctx, fileID, tags)
 }

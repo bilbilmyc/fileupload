@@ -69,6 +69,7 @@ func (m *mockMeta) PutBlob(_ context.Context, b *domain.ContentBlob) error {
 	m.blobs[b.SHA256] = b
 	return nil
 }
+func (m *mockMeta) UpdateBlobStorage(_ context.Context, _ string, _ string) error { return nil }
 func (m *mockMeta) IncrBlobRef(_ context.Context, _ string) error { return nil }
 func (m *mockMeta) DecrBlobRef(_ context.Context, _ string) (int, error) { return 0, nil }
 func (m *mockMeta) PutFile(_ context.Context, f *domain.FileMetadata) error {
@@ -286,6 +287,7 @@ func (e *errorMeta) TouchSession(_ context.Context, _ string, _ time.Duration) e
 func (e *errorMeta) ListExpiredSessions(_ context.Context) ([]string, error) { return nil, fmt.Errorf("list error") }
 func (e *errorMeta) GetBlobBySha(_ context.Context, _ string) (*domain.ContentBlob, error) { return nil, nil }
 func (e *errorMeta) PutBlob(_ context.Context, _ *domain.ContentBlob) error { return nil }
+func (e *errorMeta) UpdateBlobStorage(_ context.Context, _ string, _ string) error { return nil }
 func (e *errorMeta) IncrBlobRef(_ context.Context, _ string) error { return nil }
 func (e *errorMeta) DecrBlobRef(_ context.Context, _ string) (int, error) { return 0, nil }
 func (e *errorMeta) PutFile(_ context.Context, _ *domain.FileMetadata) error { return nil }

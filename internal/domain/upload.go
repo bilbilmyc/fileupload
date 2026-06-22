@@ -557,6 +557,25 @@ func (s *UploadService) SubmitDir(ctx context.Context, manifest DirManifest, nam
 
 		// 更新已有记录的父目录和路径
 		_ = s.meta.ReparentFile(ctx, entry.FileID, &parentID, entry.Path)
+
+		// 将物理文件从扁平路径搬到层级路径，方便运维直接拷贝
+		if parentFile.SHA256 != "" {
+			blob, err := s.meta.GetBlobBySha(ctx, parentFile.SHA256)
+			if err == nil && blob != nil {
+				hierPath := fmt.Sprintf("%s/%s", namespace, entry.Path)
+				if blob.StoragePath != hierPath {
+					reader, rErr := s.storage.Open(ctx, blob.StoragePath, 0, 0)
+					if rErr == nil {
+						_, wErr := s.storage.Write(ctx, hierPath, reader)
+						reader.Close()
+						if wErr == nil {
+							_ = s.storage.Delete(ctx, blob.StoragePath)
+							_ = s.meta.UpdateBlobStorage(ctx, parentFile.SHA256, hierPath)
+						}
+					}
+				}
+			}
+		}
 	}
 
 	log.Printf("[upload] 目录创建 %s (%s): %d 个子文件, %d 个子目录", root.FileID, dirName, len(manifest.Entries), len(dirPaths))

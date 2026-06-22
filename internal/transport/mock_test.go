@@ -47,6 +47,8 @@ func (m *mockMeta) GetBlobBySha(_ context.Context, sha string) (*domain.ContentB
 	b, ok := m.blobs[sha]; if !ok { return nil, nil }; return b, nil }
 func (m *mockMeta) PutBlob(_ context.Context, b *domain.ContentBlob) error {
 	m.blobs[b.SHA256] = b; return nil }
+func (m *mockMeta) UpdateBlobStorage(_ context.Context, sha string, path string) error {
+	if b, ok := m.blobs[sha]; ok { b.StoragePath = path }; return nil }
 func (m *mockMeta) IncrBlobRef(_ context.Context, sha string) error {
 	if b, ok := m.blobs[sha]; ok { b.RefCount++ }; return nil }
 func (m *mockMeta) DecrBlobRef(_ context.Context, sha string) (int, error) {
