@@ -27,7 +27,7 @@ export default function Files() {
     loading,
     search,
     page,
-    currentDir,
+    parentID,
     selectedRowKeys,
     stats,
     breadcrumbItems,
@@ -211,18 +211,7 @@ export default function Files() {
         <div className="flex flex-col gap-4">
           {/* Stats + Breadcrumb */}
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              {currentDir !== '/' && (
-                <button
-                  onClick={navigateUp}
-                  className="text-xs text-blue-500 hover:text-blue-700 border border-blue-200 rounded px-2 py-0.5"
-                  title="返回上一级"
-                >
-                  ↑ 上一级
-                </button>
-              )}
-              <BreadcrumbNav items={breadcrumbItems} />
-            </div>
+            <BreadcrumbNav items={breadcrumbItems} />
             <StatsBar
               dirs={stats.dirs}
               files={stats.files}
@@ -263,9 +252,11 @@ export default function Files() {
               pageSize={50}
               total={filteredFiles.length}
               selectedRowKeys={selectedRowKeys}
+              parentFileId={parentID}
               onPageChange={setPage}
               onSelectionChange={setSelectedRowKeys}
               onNavigateToDir={navigateToDir}
+              onNavigateUp={navigateUp}
               onDownload={handleDownload}
               onDelete={handleDelete}
             />
