@@ -19,10 +19,29 @@ all: clean web server cli
 
 # ---- 前端 ----
 
+WEB_DIST_PLACEHOLDER := web/dist/index.html
+
+.PHONY: web-deps
+web-deps:
+	@if [ ! -d "web/node_modules" ]; then \
+		echo "▸ 安装前端依赖"; \
+		cd web && npm install; \
+	else \
+		echo "▸ 前端依赖已存在，跳过 npm install"; \
+	fi
+
 .PHONY: web
-web:
+web: web-deps
 	@echo "▸ 构建前端"
+	@cd web && npm run build
+	@echo "▸ 恢复占位 index.html（构建产物不追踪）"
+	@printf '<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/><title>fileupload 管理面板</title></head><body><div style="padding:48px;font-family:sans-serif;text-align:center;color:#64748b;"><h1>📦 fileupload</h1><p>前端尚未构建。</p><p>请运行：<code style="background:#f1f5f9;padding:4px 8px;border-radius:4px;">cd web && npm install && npm run build</code></p><p>然后重启服务端。</p></div></body></html>' > $(WEB_DIST_PLACEHOLDER)
+
+.PHONY: web-force
+web-force:
+	@echo "▸ 强制重新安装前端依赖"
 	@cd web && npm install && npm run build
+	@printf '<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/><title>fileupload 管理面板</title></head><body><div style="padding:48px;font-family:sans-serif;text-align:center;color:#64748b;"><h1>📦 fileupload</h1><p>前端尚未构建。</p><p>请运行：<code style="background:#f1f5f9;padding:4px 8px;border-radius:4px;">cd web && npm install && npm run build</code></p><p>然后重启服务端。</p></div></body></html>' > $(WEB_DIST_PLACEHOLDER)
 
 .PHONY: web-dev
 web-dev:
