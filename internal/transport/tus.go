@@ -519,9 +519,16 @@ func (h *RESTHandler) ListDir(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// 获取祖先链（面包屑导航用）
+	var ancestors []*domain.FileMetadata
+	if dir != nil && dir.ParentID != "" {
+		ancestors, _ = h.downloadSvc.GetAncestors(r.Context(), dir.ParentID)
+	}
+
 	respondJSON(w, http.StatusOK, map[string]any{
-		"dir":      dir,
-		"children": children,
+		"dir":       dir,
+		"children":  children,
+		"ancestors": ancestors,
 	})
 }
 

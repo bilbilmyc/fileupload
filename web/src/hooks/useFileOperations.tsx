@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react'
+import { useState, useMemo, useCallback, useRef } from 'react'
 import { message } from 'antd'
 import * as api from '../api/client'
 import type { FileItem } from '../api/client'
@@ -15,6 +15,7 @@ export function useFileOperations(_namespace?: string) {
   const [files, setFiles] = useState<FileItem[]>([])
   const [loading, setLoading] = useState(false)
   const [currentDir, setCurrentDir] = useState<string>('/')
+  const requestIdRef = useRef(0) // 用于丢弃过期请求的结果
   const [parentName, setParentName] = useState<string>('')
   const [parentID, setParentID] = useState<string | null>(null)
   const [ancestors, setAncestors] = useState<FileItem[]>([]) // 上级目录 ID，用于"上一级"
@@ -23,9 +24,12 @@ export function useFileOperations(_namespace?: string) {
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([])
 
   const loadFiles = useCallback(async () => {
+    const requestId = ++requestIdRef.current
     setLoading(true)
     try {
       const res = await api.listFiles(currentDir, search || undefined)
+      // 检查是否是最新的请求——过期请求的结果丢弃，防止竞态覆盖正确状态
+      if (requestId !== requestIdRef.current) return
       setFiles(res.children || [])
       if (res.dir && typeof res.dir === 'object' && 'name' in res.dir) {
         const d = res.dir as any
