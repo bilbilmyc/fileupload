@@ -342,6 +342,70 @@ func TestSQLiteStore_ListAll(t *testing.T) {
 	}
 }
 
+func TestSQLiteStore_FileTags(t *testing.T) {
+	s := newTestSQLite(t)
+	ctx := context.Background()
+
+	// 先创建一个文件
+	file := &domain.FileMetadata{
+		FileID:    "tag-file-1",
+		Name:      "test.txt",
+		Path:      "test.txt",
+		Size:      100,
+		Namespace: "demo",
+		CreatedAt: time.Now(),
+	}
+	if err := s.PutFile(ctx, file); err != nil {
+		t.Fatalf("PutFile error = %v", err)
+	}
+
+	// 初始无标签
+	tags, err := s.GetFileTags(ctx, file.FileID)
+	if err != nil {
+		t.Fatalf("GetFileTags error = %v", err)
+	}
+	if len(tags) != 0 {
+		t.Fatalf("初始标签数 = %d, want 0", len(tags))
+	}
+
+	// 设置标签
+	expected := []string{"important", "work"}
+	if err := s.SetFileTags(ctx, file.FileID, expected); err != nil {
+		t.Fatalf("SetFileTags error = %v", err)
+	}
+
+	// 读取标签
+	tags, err = s.GetFileTags(ctx, file.FileID)
+	if err != nil {
+		t.Fatalf("GetFileTags error = %v", err)
+	}
+	if len(tags) != 2 {
+		t.Fatalf("标签数 = %d, want 2", len(tags))
+	}
+	if tags[0] != "important" || tags[1] != "work" {
+		t.Errorf("标签 = %v, want [important work]", tags)
+	}
+
+	// 覆盖标签
+	updated := []string{"archive"}
+	if err := s.SetFileTags(ctx, file.FileID, updated); err != nil {
+		t.Fatalf("SetFileTags error = %v", err)
+	}
+	tags, _ = s.GetFileTags(ctx, file.FileID)
+	if len(tags) != 1 || tags[0] != "archive" {
+		t.Errorf("覆盖后标签 = %v, want [archive]", tags)
+	}
+
+	// 删除标签
+	if err := s.DeleteFileTags(ctx, file.FileID); err != nil {
+		t.Fatalf("DeleteFileTags error = %v", err)
+	}
+	tags, _ = s.GetFileTags(ctx, file.FileID)
+	if len(tags) != 0 {
+		t.Errorf("删除后标签数 = %d, want 0", len(tags))
+	}
+}
+
 func TestSQLiteStore_Migrate_Idempotent(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "migrate.db")

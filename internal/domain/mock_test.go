@@ -284,6 +284,46 @@ func (m *mockMetadata) ListFilesByBlob(_ context.Context, sha256 string) ([]*Fil
 	return refs, nil
 }
 
+func (m *mockMetadata) SetFileTags(_ context.Context, fileID string, tags []string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if f, ok := m.files[fileID]; ok {
+		f.Tags = append([]string{}, tags...)
+	}
+	return nil
+}
+
+func (m *mockMetadata) GetFileTags(_ context.Context, fileID string) ([]string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if f, ok := m.files[fileID]; ok {
+		return append([]string{}, f.Tags...), nil
+	}
+	return nil, nil
+}
+
+func (m *mockMetadata) DeleteFileTags(_ context.Context, fileID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if f, ok := m.files[fileID]; ok {
+		f.Tags = nil
+	}
+	return nil
+}
+
+func (m *mockMetadata) UpdateFileParent(_ context.Context, fileID string, parentID *string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if f, ok := m.files[fileID]; ok {
+		if parentID == nil {
+			f.ParentID = ""
+		} else {
+			f.ParentID = *parentID
+		}
+	}
+	return nil
+}
+
 func (m *mockMetadata) ListRoot(_ context.Context, namespace string) ([]*FileMetadata, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

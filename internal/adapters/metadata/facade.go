@@ -97,6 +97,22 @@ func (f *Facade) ListRoot(ctx context.Context, namespace string) ([]*domain.File
 	return f.cold.ListRoot(ctx, namespace)
 }
 
+func (f *Facade) SetFileTags(ctx context.Context, fileID string, tags []string) error {
+	return f.cold.SetFileTags(ctx, fileID, tags)
+}
+
+func (f *Facade) GetFileTags(ctx context.Context, fileID string) ([]string, error) {
+	return f.cold.GetFileTags(ctx, fileID)
+}
+
+func (f *Facade) DeleteFileTags(ctx context.Context, fileID string) error {
+	return f.cold.DeleteFileTags(ctx, fileID)
+}
+
+func (f *Facade) UpdateFileParent(ctx context.Context, fileID string, parentID *string) error {
+	return f.cold.UpdateFileParent(ctx, fileID, parentID)
+}
+
 func (f *Facade) ListAllBlobs(ctx context.Context) ([]*domain.ContentBlob, error) {
 	return f.cold.ListAllBlobs(ctx)
 }

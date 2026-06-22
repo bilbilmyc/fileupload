@@ -3,10 +3,12 @@ package compressor
 
 import (
 	"archive/tar"
+	"archive/zip"
 	"compress/gzip"
 	"context"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/klauspost/compress/zstd"
 	"github.com/bilbilmyc/fileupload/internal/domain"
@@ -98,7 +100,7 @@ func (c *Compressor) NewArchiveWriter(_ context.Context, w io.Writer, format dom
 		}, nil
 
 	case domain.CompZip:
-		return nil, fmt.Errorf("zip 流式归档暂不支持，请使用 tar.gz 或 tar.zst")
+		return &zipArchiveWriter{zw: zip.NewWriter(w)}, nil
 
 	default:
 		return nil, fmt.Errorf("不支持的归档格式: %s", format)
@@ -110,6 +112,33 @@ type tarArchiveWriter struct {
 	tw  *tar.Writer
 	cw  io.Closer
 	fmt domain.CompressionFormat
+}
+
+// zipArchiveWriter zip 归档写入器
+type zipArchiveWriter struct {
+	zw *zip.Writer
+}
+
+func (w *zipArchiveWriter) AddFile(_ context.Context, name string, size int64, content io.Reader) error {
+	hdr := &zip.FileHeader{
+		Name:   name,
+		Method: zip.Deflate,
+	}
+	hdr.SetMode(0644)
+	hdr.Modified = time.Now()
+
+	fw, err := w.zw.CreateHeader(hdr)
+	if err != nil {
+		return fmt.Errorf("创建 zip 条目 %s: %w", name, err)
+	}
+	if _, err := io.Copy(fw, content); err != nil {
+		return fmt.Errorf("写入 zip 条目 %s: %w", name, err)
+	}
+	return nil
+}
+
+func (w *zipArchiveWriter) Close() error {
+	return w.zw.Close()
 }
 
 // AddFile 写入一个文件条目

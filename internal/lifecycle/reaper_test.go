@@ -95,6 +95,10 @@ func (m *mockMeta) ListFilesByBlob(_ context.Context, sha string) ([]*domain.Fil
 	return refs, nil
 }
 func (m *mockMeta) ListRoot(_ context.Context, _ string) ([]*domain.FileMetadata, error) { return nil, nil }
+func (m *mockMeta) SetFileTags(_ context.Context, _ string, _ []string) error { return nil }
+func (m *mockMeta) GetFileTags(_ context.Context, _ string) ([]string, error) { return nil, nil }
+func (m *mockMeta) DeleteFileTags(_ context.Context, _ string) error { return nil }
+func (m *mockMeta) UpdateFileParent(_ context.Context, _ string, _ *string) error { return nil }
 func (m *mockMeta) ListAllBlobs(_ context.Context) ([]*domain.ContentBlob, error) {
 	var blobs []*domain.ContentBlob
 	for _, b := range m.blobs {
@@ -290,6 +294,10 @@ func (e *errorMeta) ListChildren(_ context.Context, _ string) ([]*domain.FileMet
 func (e *errorMeta) DeleteFile(_ context.Context, _ string) error { return nil }
 func (e *errorMeta) ListFilesByBlob(_ context.Context, _ string) ([]*domain.FileMetadata, error) { return nil, nil }
 func (e *errorMeta) ListRoot(_ context.Context, _ string) ([]*domain.FileMetadata, error) { return nil, nil }
+func (e *errorMeta) SetFileTags(_ context.Context, _ string, _ []string) error { return nil }
+func (e *errorMeta) GetFileTags(_ context.Context, _ string) ([]string, error) { return nil, nil }
+func (e *errorMeta) DeleteFileTags(_ context.Context, _ string) error { return nil }
+func (e *errorMeta) UpdateFileParent(_ context.Context, _ string, _ *string) error { return nil }
 func (e *errorMeta) ListAllBlobs(_ context.Context) ([]*domain.ContentBlob, error) { return nil, fmt.Errorf("fail") }
 func (e *errorMeta) ListAllFiles(_ context.Context) ([]*domain.FileMetadata, error) { return nil, nil }
 

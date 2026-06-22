@@ -2,6 +2,7 @@ package compressor
 
 import (
 	"archive/tar"
+	"archive/zip"
 	"bytes"
 	"compress/gzip"
 	"context"
@@ -220,13 +221,62 @@ func TestNewArchiveWriter_TarZst(t *testing.T) {
 	}
 }
 
-func TestNewArchiveWriter_UnsupportedFormat(t *testing.T) {
+func TestNewArchiveWriter_Zip(t *testing.T) {
 	c := mustNewCompressor(t)
 	ctx := context.Background()
 
-	_, err := c.NewArchiveWriter(ctx, io.Discard, domain.CompZip)
-	if err == nil {
-		t.Error("zip 格式应该返回错误（暂不支持）")
+	var buf bytes.Buffer
+	aw, err := c.NewArchiveWriter(ctx, &buf, domain.CompZip)
+	if err != nil {
+		t.Fatalf("NewArchiveWriter(zip) error = %v", err)
+	}
+
+	// 写入两个文件
+	if err := aw.AddFile(ctx, "hello.txt", 11, strings.NewReader("hello world")); err != nil {
+		t.Fatalf("AddFile(hello.txt) error = %v", err)
+	}
+	if err := aw.AddFile(ctx, "sub/file.bin", 5, strings.NewReader("12345")); err != nil {
+		t.Fatalf("AddFile(file.bin) error = %v", err)
+	}
+	if err := aw.Close(); err != nil {
+		t.Fatalf("Close error = %v", err)
+	}
+
+	if buf.Len() == 0 {
+		t.Fatal("zip 归档为空")
+	}
+
+	// 用 archive/zip 验证
+	zr, err := zip.NewReader(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
+	if err != nil {
+		t.Fatalf("zip.NewReader error = %v", err)
+	}
+	if len(zr.File) != 2 {
+		t.Fatalf("zip 文件数 = %d, want 2", len(zr.File))
+	}
+
+	// 验证 hello.txt
+	f1 := zr.File[0]
+	if f1.Name != "hello.txt" {
+		t.Errorf("第一个文件名 = %s, want hello.txt", f1.Name)
+	}
+	rc1, _ := f1.Open()
+	got1, _ := io.ReadAll(rc1)
+	rc1.Close()
+	if string(got1) != "hello world" {
+		t.Errorf("hello.txt 内容 = %s, want 'hello world'", got1)
+	}
+
+	// 验证 sub/file.bin
+	f2 := zr.File[1]
+	if f2.Name != "sub/file.bin" {
+		t.Errorf("第二个文件名 = %s, want sub/file.bin", f2.Name)
+	}
+	rc2, _ := f2.Open()
+	got2, _ := io.ReadAll(rc2)
+	rc2.Close()
+	if string(got2) != "12345" {
+		t.Errorf("file.bin 内容 = %s, want '12345'", got2)
 	}
 }
 

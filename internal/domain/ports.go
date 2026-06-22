@@ -61,6 +61,14 @@ type Metadata interface {
 	DeleteFile(ctx context.Context, id string) error
 	ListFilesByBlob(ctx context.Context, sha256 string) ([]*FileMetadata, error) // 引用统计
 
+	// 标签管理
+	SetFileTags(ctx context.Context, fileID string, tags []string) error
+	GetFileTags(ctx context.Context, fileID string) ([]string, error)
+	DeleteFileTags(ctx context.Context, fileID string) error
+
+	// 批量管理
+	UpdateFileParent(ctx context.Context, fileID string, parentID *string) error // parentID nil → 根目录
+
 	// 列目录（根目录 children 为空）
 	ListRoot(ctx context.Context, namespace string) ([]*FileMetadata, error)
 

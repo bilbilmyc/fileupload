@@ -55,6 +55,13 @@ func (s *SQLiteStore) migrate() error {
 		`CREATE INDEX IF NOT EXISTS idx_files_namespace_parent ON files(namespace, parent_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_files_sha256 ON files(sha256)`,
 		`CREATE INDEX IF NOT EXISTS idx_files_path ON files(namespace, path)`,
+		`CREATE TABLE IF NOT EXISTS file_tags (
+			file_id    TEXT NOT NULL REFERENCES files(file_id) ON DELETE CASCADE,
+			tag        TEXT NOT NULL,
+			created_at TEXT NOT NULL DEFAULT (datetime('now')),
+			PRIMARY KEY (file_id, tag)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_file_tags_tag ON file_tags(tag)`,
 	}
 
 	for _, q := range queries {
@@ -250,6 +257,73 @@ func (s *SQLiteStore) ListAllFiles(_ context.Context) ([]*domain.FileMetadata, e
 	}
 	defer rows.Close()
 	return scanFiles(rows)
+}
+
+// ========== 标签管理 ==========
+
+func (s *SQLiteStore) SetFileTags(_ context.Context, fileID string, tags []string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("开启事务: %w", err)
+	}
+	defer tx.Rollback()
+
+	// 清除旧标签
+	if _, err := tx.Exec(`DELETE FROM file_tags WHERE file_id = ?`, fileID); err != nil {
+		return fmt.Errorf("清除旧标签: %w", err)
+	}
+
+	// 写入新标签
+	for _, tag := range tags {
+		if tag == "" {
+			continue
+		}
+		if _, err := tx.Exec(
+			`INSERT OR IGNORE INTO file_tags (file_id, tag, created_at) VALUES (?, ?, datetime('now'))`,
+			fileID, tag,
+		); err != nil {
+			return fmt.Errorf("写入标签 %s: %w", tag, err)
+		}
+	}
+
+	return tx.Commit()
+}
+
+func (s *SQLiteStore) GetFileTags(_ context.Context, fileID string) ([]string, error) {
+	rows, err := s.db.Query(
+		`SELECT tag FROM file_tags WHERE file_id = ? ORDER BY tag`, fileID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("查询标签: %w", err)
+	}
+	defer rows.Close()
+
+	var tags []string
+	for rows.Next() {
+		var tag string
+		if err := rows.Scan(&tag); err != nil {
+			return nil, fmt.Errorf("扫描标签: %w", err)
+		}
+		tags = append(tags, tag)
+	}
+	return tags, rows.Err()
+}
+
+func (s *SQLiteStore) DeleteFileTags(_ context.Context, fileID string) error {
+	_, err := s.db.Exec(`DELETE FROM file_tags WHERE file_id = ?`, fileID)
+	return err
+}
+
+// ========== 批量管理 ==========
+
+func (s *SQLiteStore) UpdateFileParent(_ context.Context, fileID string, parentID *string) error {
+	var res error
+	if parentID == nil {
+		_, res = s.db.Exec(`UPDATE files SET parent_id = NULL WHERE file_id = ?`, fileID)
+	} else {
+		_, res = s.db.Exec(`UPDATE files SET parent_id = ? WHERE file_id = ?`, *parentID, fileID)
+	}
+	return res
 }
 
 // Close 关闭数据库连接

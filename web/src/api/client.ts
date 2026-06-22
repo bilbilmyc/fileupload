@@ -22,6 +22,7 @@ export interface FileItem {
   sha256?: string
   is_dir: boolean
   parent_id?: string
+  tags?: string[]
   created_at: string
 }
 
@@ -140,4 +141,39 @@ export function downloadDirUrl(id: string, format: string = 'tar.gz'): string {
 export async function submitDir(name: string, entries: { path: string; file_id: string }[]): Promise<{ file_id: string }> {
   const r = await axiosInstance.post('/v1/dirs', { name, entries })
   return r.data
+}
+
+// ========== 批量操作 ==========
+
+export interface BatchDeleteResult {
+  success: number
+  failed: number
+}
+
+export async function batchDelete(ids: string[]): Promise<BatchDeleteResult> {
+  const r = await axiosInstance.post('/v1/batch/delete', { ids })
+  return r.data
+}
+
+export async function batchDownload(ids: string[], format: string = 'zip'): Promise<Blob> {
+  const r = await axiosInstance.post('/v1/batch/download', { ids, format }, {
+    responseType: 'blob',
+  })
+  return r.data
+}
+
+export function batchDownloadUrl(): string {
+  return '/v1/batch/download'
+}
+
+export async function batchMove(ids: string[], targetDirId: string): Promise<void> {
+  await axiosInstance.post('/v1/batch/move', { ids, target_dir_id: targetDirId })
+}
+
+export async function batchCopy(ids: string[], targetDirId: string): Promise<void> {
+  await axiosInstance.post('/v1/batch/copy', { ids, target_dir_id: targetDirId })
+}
+
+export async function batchSetTags(ids: string[], tags: string[]): Promise<void> {
+  await axiosInstance.post('/v1/batch/tags', { ids, tags })
 }

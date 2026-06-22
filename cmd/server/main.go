@@ -150,6 +150,8 @@ func main() {
 	}
 	downloadSvc := domain.NewDownloadService(metaFacade, localFS, compress, hasher, downloadCfg)
 
+	batchSvc := domain.NewBatchService(uploadSvc, downloadSvc, metaFacade, localFS, compress)
+
 	// === 后台任务 ===
 
 	reaper := lifecycle.NewSessionReaper(metaFacade, localFS, cfg.Storage.TempDir, time.Minute)
@@ -176,7 +178,8 @@ func main() {
 	tusHandler := transport.NewTusHandler(uploadSvc)
 	restHandler := transport.NewRESTHandler(uploadSvc, downloadSvc)
 	downloadHandler := transport.NewDownloadHandler(downloadSvc)
-	router := transport.NewRouter(mw, tusHandler, restHandler, downloadHandler, uploadSvc, scanner, healthChecker)
+	batchHandler := transport.NewBatchHandler(batchSvc)
+	router := transport.NewRouter(mw, tusHandler, restHandler, downloadHandler, batchHandler, uploadSvc, scanner, healthChecker)
 
 	// 首次启动时执行一次快速巡检
 	go func() {

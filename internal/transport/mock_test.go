@@ -63,6 +63,16 @@ func (m *mockMeta) DeleteFile(_ context.Context, id string) error {
 	delete(m.files, id); return nil }
 func (m *mockMeta) ListFilesByBlob(_ context.Context, sha string) ([]*domain.FileMetadata, error) {
 	var r []*domain.FileMetadata; for _, f := range m.files { if f.SHA256 == sha { r = append(r, f) } }; return r, nil }
+func (m *mockMeta) SetFileTags(_ context.Context, fileID string, tags []string) error {
+	if f, ok := m.files[fileID]; ok { f.Tags = append([]string{}, tags...) }; return nil }
+func (m *mockMeta) GetFileTags(_ context.Context, fileID string) ([]string, error) {
+	if f, ok := m.files[fileID]; ok { return append([]string{}, f.Tags...), nil }; return nil, nil }
+func (m *mockMeta) DeleteFileTags(_ context.Context, fileID string) error {
+	if f, ok := m.files[fileID]; ok { f.Tags = nil }; return nil }
+func (m *mockMeta) UpdateFileParent(_ context.Context, fileID string, parentID *string) error {
+	if f, ok := m.files[fileID]; ok {
+		if parentID == nil { f.ParentID = "" } else { f.ParentID = *parentID }
+	}; return nil }
 func (m *mockMeta) ListRoot(_ context.Context, ns string) ([]*domain.FileMetadata, error) {
 	var r []*domain.FileMetadata; for _, f := range m.files { if f.ParentID == "" && f.Namespace == ns { r = append(r, f) } }; return r, nil }
 func (m *mockMeta) ListAllBlobs(_ context.Context) ([]*domain.ContentBlob, error) {

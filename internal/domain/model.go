@@ -73,6 +73,7 @@ type FileMetadata struct {
 	Namespace string    `json:"namespace"`
 	IsDir     bool      `json:"is_dir"`
 	ParentID  string    `json:"parent_id,omitempty"` // 自引用目录树
+	Tags      []string  `json:"tags,omitempty"`      // 文件标签
 	CreatedAt time.Time `json:"created_at"`
 }
 

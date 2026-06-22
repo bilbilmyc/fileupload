@@ -16,6 +16,7 @@ type Router struct {
 	tus        *TusHandler
 	rest       *RESTHandler
 	download   *DownloadHandler
+	batch      *BatchHandler
 	uploadSvc  *domain.UploadService
 	scanner    Scanner
 	health     HealthChecker
@@ -32,13 +33,14 @@ type HealthChecker interface {
 }
 
 // NewRouter 创建路由器并注册所有路由
-func NewRouter(mw *Middleware, tus *TusHandler, rest *RESTHandler, download *DownloadHandler, uploadSvc *domain.UploadService, scanner Scanner, health HealthChecker) *Router {
+func NewRouter(mw *Middleware, tus *TusHandler, rest *RESTHandler, download *DownloadHandler, batch *BatchHandler, uploadSvc *domain.UploadService, scanner Scanner, health HealthChecker) *Router {
 	r := &Router{
 		mux:        http.NewServeMux(),
 		middleware: mw,
 		tus:        tus,
 		rest:       rest,
 		download:   download,
+		batch:      batch,
 		uploadSvc:  uploadSvc,
 		scanner:    scanner,
 		health:     health,
@@ -86,6 +88,13 @@ func (r *Router) registerRoutes() {
 
 	// === 秒传预检 ===
 	r.mux.HandleFunc("HEAD /v1/files", r.handleCheckExists)
+
+	// === 批量操作 ===
+	r.mux.HandleFunc("POST /v1/batch/delete", r.batch.BatchDelete)
+	r.mux.HandleFunc("POST /v1/batch/download", r.batch.BatchDownload)
+	r.mux.HandleFunc("POST /v1/batch/move", r.batch.BatchMove)
+	r.mux.HandleFunc("POST /v1/batch/copy", r.batch.BatchCopy)
+	r.mux.HandleFunc("POST /v1/batch/tags", r.batch.BatchTags)
 
 	// === 管理 ===
 	r.mux.HandleFunc("POST /v1/admin/scan", r.handleAdminScan)
