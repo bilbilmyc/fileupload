@@ -391,7 +391,7 @@ func TestSubmitDir(t *testing.T) {
 	}
 
 	// 验证子节点
-	children, _ := meta.ListChildren(ctx, dir.FileID)
+	children, _ := meta.ListChildren(ctx, dir.FileID, "")
 	if len(children) != 1 {
 		t.Errorf("children count = %d, want 1", len(children))
 	}
@@ -429,7 +429,7 @@ func TestSubmitDir_NestedStructure(t *testing.T) {
 	}
 
 	// 验证根目录直接子节点：subdir, other, d.txt
-	rootChildren, _ := meta.ListChildren(ctx, dir.FileID)
+	rootChildren, _ := meta.ListChildren(ctx, dir.FileID, "")
 	if len(rootChildren) != 3 {
 		t.Fatalf("根目录子节点数 = %d, want 3 (subdir, other, d.txt)", len(rootChildren))
 	}
@@ -455,7 +455,7 @@ func TestSubmitDir_NestedStructure(t *testing.T) {
 	}
 
 	// 验证 subdir 的子节点：a.txt, nested
-	subdirChildren, _ := meta.ListChildren(ctx, subdirID)
+	subdirChildren, _ := meta.ListChildren(ctx, subdirID, "")
 	if len(subdirChildren) != 2 {
 		t.Fatalf("subdir 子节点数 = %d, want 2 (a.txt, nested)", len(subdirChildren))
 	}
@@ -473,7 +473,7 @@ func TestSubmitDir_NestedStructure(t *testing.T) {
 	}
 
 	// 验证 nested 的子节点：b.txt
-	nestedChildren, _ := meta.ListChildren(ctx, nestedID)
+	nestedChildren, _ := meta.ListChildren(ctx, nestedID, "")
 	if len(nestedChildren) != 1 {
 		t.Fatalf("nested 子节点数 = %d, want 1 (b.txt)", len(nestedChildren))
 	}
@@ -482,13 +482,13 @@ func TestSubmitDir_NestedStructure(t *testing.T) {
 	}
 
 	// 验证 other 的子节点：c.txt
-	otherChildren, _ := meta.ListChildren(ctx, otherID)
+	otherChildren, _ := meta.ListChildren(ctx, otherID, "")
 	if len(otherChildren) != 1 || otherChildren[0].Name != "c.txt" {
 		t.Error("other 子节点应为 c.txt")
 	}
 
 	// 验证原文件不再孤立在根目录（SubmitDir 应复用记录而非新建）
-	rootOrphans, _ := meta.ListRoot(ctx, "demo")
+	rootOrphans, _ := meta.ListRoot(ctx, "demo", "")
 	for _, orphan := range rootOrphans {
 		if orphan.FileID == "f1" || orphan.FileID == "f2" || orphan.FileID == "f3" || orphan.FileID == "f4" {
 			t.Errorf("原文件 %s 不应再出现在根目录, parentID=%s", orphan.FileID, orphan.ParentID)

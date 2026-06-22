@@ -626,7 +626,7 @@ func (s *UploadService) deleteFile(ctx context.Context, file *FileMetadata) erro
 }
 
 func (s *UploadService) deleteDir(ctx context.Context, dir *FileMetadata, namespace string) error {
-	children, err := s.meta.ListChildren(ctx, dir.FileID)
+	children, err := s.meta.ListChildren(ctx, dir.FileID, "")
 	if err != nil {
 		return fmt.Errorf("列举子节点: %w", err)
 	}

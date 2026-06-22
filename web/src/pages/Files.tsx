@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext'
 import * as api from '../api/client'
 import { useFileOperations } from '../hooks/useFileOperations'
 import { useUpload } from '../hooks/useUpload'
+import ErrorBoundary from '../components/ErrorBoundary'
 import TopBar from '../components/TopBar'
 import BreadcrumbNav from '../components/BreadcrumbNav'
 import StatsBar from '../components/StatsBar'
@@ -15,6 +16,7 @@ import SettingsModal from '../components/SettingsModal'
 import DirectoryPicker from '../components/DirectoryPicker'
 import BatchTagEditor from '../components/BatchTagEditor'
 import BatchHistoryPanel, { useBatchHistory } from '../components/BatchHistoryPanel'
+import FilePreview from '../components/FilePreview'
 
 const { Content } = Layout
 
@@ -66,6 +68,7 @@ export default function Files() {
   const [dirPickerMode, setDirPickerMode] = useState<'move' | 'copy'>('move')
   const [tagEditorOpen, setTagEditorOpen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
+  const [previewFile, setPreviewFile] = useState<{ id: string; name: string; size: number } | null>(null)
 
   // Initial load
   useEffect(() => {
@@ -76,6 +79,10 @@ export default function Files() {
   useEffect(() => {
     loadFiles()
   }, [namespace]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handlePreview = useCallback((record: { file_id: string; name: string; size: number }) => {
+    setPreviewFile({ id: record.file_id, name: record.name, size: record.size })
+  }, [])
 
   const selectedFiles = filteredFiles.filter(f => selectedRowKeys.includes(f.file_id))
 
@@ -119,29 +126,15 @@ export default function Files() {
     })
   }, [selectedRowKeys, selectedFiles, loadFiles, addRecord])
 
-  const handleBatchDownload = useCallback(async (format: string) => {
+  const handleBatchDownload = useCallback((format: string) => {
     if (selectedRowKeys.length === 0) return
-    try {
-      const ids = selectedRowKeys as string[]
-      const response = await fetch('/v1/batch/download', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ids, format }),
-      })
-      if (!response.ok) throw new Error('下载失败')
-      const blob = await response.blob()
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `batch.${format}`
-      a.click()
-      URL.revokeObjectURL(url)
-      addRecord({ type: 'download', fileCount: ids.length, status: 'success', detail: `格式: ${format}` })
-      message.success('打包下载完成')
-    } catch (e: any) {
-      addRecord({ type: 'download', fileCount: selectedRowKeys.length, status: 'failed', detail: e.message })
-      message.error(`批量下载失败: ${e.message}`)
-    }
+    const ids = selectedRowKeys as string[]
+    const ns = localStorage.getItem('fileupload_namespace') || 'default'
+    // 使用 GET 流式下载，浏览器原生处理文件流，不占用前端内存
+    const url = `/v1/batch/download?ids=${ids.join(',')}&format=${format}&namespace=${encodeURIComponent(ns)}`
+    window.open(url, '_blank')
+    addRecord({ type: 'download', fileCount: ids.length, status: 'success', detail: `格式: ${format}` })
+    message.success('打包下载已开始')
   }, [selectedRowKeys, addRecord])
 
   const handleBatchMove = useCallback(() => {
@@ -199,7 +192,7 @@ export default function Files() {
   }, [selectedRowKeys, loadFiles, addRecord])
 
   return (
-    <Layout className="min-h-screen bg-gray-50">
+    <Layout className="min-h-screen bg-gray-50 dark:bg-gray-900">
       <TopBar
         search={search}
         onSearchChange={setSearch}
@@ -207,10 +200,10 @@ export default function Files() {
         onOpenSettings={() => setConfigOpen(true)}
       />
 
-      <Content className="px-6 py-4" style={{ maxWidth: 1200, margin: '0 auto' }}>
-        <div className="flex flex-col gap-4">
+      <Content className="px-3 sm:px-6 py-3 sm:py-4" style={{ maxWidth: 1200, margin: '0 auto' }}>
+        <div className="flex flex-col gap-3 sm:gap-4">
           {/* Stats + Breadcrumb */}
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
             <BreadcrumbNav items={breadcrumbItems} />
             <StatsBar
               dirs={stats.dirs}
@@ -229,7 +222,7 @@ export default function Files() {
           />
 
           {/* File Table */}
-          <div className="bg-white rounded-lg shadow-sm p-3">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm p-3">
             <div className="flex items-center justify-between mb-3 px-1">
               <div className="flex items-center gap-2">
                 <FolderOpenOutlined className="text-amber-500" />
@@ -242,24 +235,27 @@ export default function Files() {
                 onClick={() => setHistoryOpen(true)}
                 className="text-gray-400"
               >
-                操作历史
+                <span className="hidden sm:inline">操作历史</span>
               </Button>
             </div>
-            <FileTable
-              files={paginatedFiles}
-              loading={loading}
-              page={page}
-              pageSize={50}
-              total={filteredFiles.length}
-              selectedRowKeys={selectedRowKeys}
-              parentFileId={parentID}
-              onPageChange={setPage}
-              onSelectionChange={setSelectedRowKeys}
-              onNavigateToDir={navigateToDir}
-              onNavigateUp={navigateUp}
-              onDownload={handleDownload}
-              onDelete={handleDelete}
-            />
+            <ErrorBoundary title="文件列表异常">
+              <FileTable
+                files={paginatedFiles}
+                loading={loading}
+                page={page}
+                pageSize={50}
+                total={filteredFiles.length}
+                selectedRowKeys={selectedRowKeys}
+                parentFileId={parentID}
+                onPageChange={setPage}
+                onSelectionChange={setSelectedRowKeys}
+                onNavigateToDir={navigateToDir}
+                onNavigateUp={navigateUp}
+                onDownload={handleDownload}
+                onDelete={handleDelete}
+                onPreview={handlePreview}
+              />
+            </ErrorBoundary>
             <BatchToolbar
               selectedCount={selectedRowKeys.length}
               onCancel={() => setSelectedRowKeys([])}
@@ -308,6 +304,17 @@ export default function Files() {
         history={batchHistory}
         onClear={() => { /* history auto-managed via hook */ }}
       />
+
+      {/* File Preview */}
+      {previewFile && (
+        <FilePreview
+          fileId={previewFile.id}
+          fileName={previewFile.name}
+          fileSize={previewFile.size}
+          open={!!previewFile}
+          onClose={() => setPreviewFile(null)}
+        />
+      )}
     </Layout>
   )
 }

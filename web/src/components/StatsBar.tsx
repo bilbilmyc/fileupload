@@ -15,7 +15,7 @@ interface StatsBarProps {
 
 export default function StatsBar({ dirs, files, totalSize }: StatsBarProps) {
   return (
-    <Space size="large" className="text-xs text-gray-400">
+    <Space size="small" className="text-xs text-gray-400 flex-wrap">
       <span>{dirs} 个目录</span>
       <span>{files} 个文件</span>
       <span>共 {formatBytes(totalSize)}</span>

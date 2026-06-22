@@ -245,7 +245,7 @@ func TestListDir_Root(t *testing.T) {
 		Size: 200, Namespace: "demo", CreatedAt: now,
 	})
 
-	dir, children, err := svc.ListDir(ctx, "/", "demo")
+	dir, children, err := svc.ListDir(ctx, "/", "demo", "")
 	if err != nil {
 		t.Fatalf("ListDir(root) error = %v", err)
 	}
@@ -268,7 +268,7 @@ func TestListDir_Parent(t *testing.T) {
 	meta.PutFile(ctx, &FileMetadata{FileID: "c1", Name: "c1.txt", Path: "c1", Size: 10, Namespace: "demo", ParentID: "mydir", CreatedAt: now})
 	meta.PutFile(ctx, &FileMetadata{FileID: "c2", Name: "c2.txt", Path: "c2", Size: 20, Namespace: "demo", ParentID: "mydir", CreatedAt: now})
 
-	parent, children, err := svc.ListDir(ctx, "mydir", "demo")
+	parent, children, err := svc.ListDir(ctx, "mydir", "demo", "")
 	if err != nil {
 		t.Fatalf("ListDir error = %v", err)
 	}
@@ -284,7 +284,7 @@ func TestListDir_NotFound(t *testing.T) {
 	svc, _, _ := newTestDownloadService(t)
 	ctx := context.Background()
 
-	_, _, err := svc.ListDir(ctx, "no-such", "ns")
+	_, _, err := svc.ListDir(ctx, "no-such", "ns", "")
 	if err != ErrNotFound {
 		t.Errorf("ListDir(no such) err = %v, want ErrNotFound", err)
 	}

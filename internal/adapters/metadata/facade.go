@@ -81,8 +81,8 @@ func (f *Facade) GetFileByPath(ctx context.Context, namespace, path string) (*do
 	return f.cold.GetFileByPath(ctx, namespace, path)
 }
 
-func (f *Facade) ListChildren(ctx context.Context, parentID string) ([]*domain.FileMetadata, error) {
-	return f.cold.ListChildren(ctx, parentID)
+func (f *Facade) ListChildren(ctx context.Context, parentID string, search string) ([]*domain.FileMetadata, error) {
+	return f.cold.ListChildren(ctx, parentID, search)
 }
 
 func (f *Facade) DeleteFile(ctx context.Context, id string) error {
@@ -93,8 +93,8 @@ func (f *Facade) ListFilesByBlob(ctx context.Context, sha256 string) ([]*domain.
 	return f.cold.ListFilesByBlob(ctx, sha256)
 }
 
-func (f *Facade) ListRoot(ctx context.Context, namespace string) ([]*domain.FileMetadata, error) {
-	return f.cold.ListRoot(ctx, namespace)
+func (f *Facade) ListRoot(ctx context.Context, namespace string, search string) ([]*domain.FileMetadata, error) {
+	return f.cold.ListRoot(ctx, namespace, search)
 }
 
 func (f *Facade) UpdateBlobStorage(ctx context.Context, sha256 string, storagePath string) error {

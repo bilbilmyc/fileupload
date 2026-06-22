@@ -262,13 +262,15 @@ func (m *mockMetadata) GetFileByPath(_ context.Context, namespace, path string) 
 	return nil, nil
 }
 
-func (m *mockMetadata) ListChildren(_ context.Context, parentID string) ([]*FileMetadata, error) {
+func (m *mockMetadata) ListChildren(_ context.Context, parentID string, search string) ([]*FileMetadata, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var children []*FileMetadata
 	for _, f := range m.files {
 		if f.ParentID == parentID {
-			children = append(children, f)
+			if search == "" || containsIgnoreCase(f.Name, search) {
+				children = append(children, f)
+			}
 		}
 	}
 	return children, nil
@@ -347,13 +349,15 @@ func (m *mockMetadata) UpdateFileParent(_ context.Context, fileID string, parent
 	return nil
 }
 
-func (m *mockMetadata) ListRoot(_ context.Context, namespace string) ([]*FileMetadata, error) {
+func (m *mockMetadata) ListRoot(_ context.Context, namespace string, search string) ([]*FileMetadata, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var roots []*FileMetadata
 	for _, f := range m.files {
 		if f.ParentID == "" && f.Namespace == namespace {
-			roots = append(roots, f)
+			if search == "" || containsIgnoreCase(f.Name, search) {
+				roots = append(roots, f)
+			}
 		}
 	}
 	return roots, nil
@@ -377,6 +381,34 @@ func (m *mockMetadata) ListAllFiles(_ context.Context) ([]*FileMetadata, error) 
 		files = append(files, f)
 	}
 	return files, nil
+}
+
+// containsIgnoreCase 检查 s 是否包含 substr（大小写不敏感）
+func containsIgnoreCase(s, substr string) bool {
+	if len(s) < len(substr) {
+		return false
+	}
+	// 简单的写法，用 strings 包但 mock 文件通常不会引入它
+	for i := 0; i <= len(s)-len(substr); i++ {
+		match := true
+		for j := 0; j < len(substr); j++ {
+			sc, tc := s[i+j], substr[j]
+			if sc >= 'A' && sc <= 'Z' {
+				sc += 32
+			}
+			if tc >= 'A' && tc <= 'Z' {
+				tc += 32
+			}
+			if sc != tc {
+				match = false
+				break
+			}
+		}
+		if match {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *mockMetadata) hasBlob(sha256 string) bool {

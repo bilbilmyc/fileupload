@@ -285,7 +285,7 @@ func (s *BatchService) BatchCopy(ctx context.Context, ids []string, targetDirID 
 
 // copyDirChildren 递归复制目录子节点
 func (s *BatchService) copyDirChildren(ctx context.Context, sourceDirID, targetDirID, namespace string, now time.Time) error {
-	children, err := s.meta.ListChildren(ctx, sourceDirID)
+	children, err := s.meta.ListChildren(ctx, sourceDirID, "")
 	if err != nil {
 		return err
 	}

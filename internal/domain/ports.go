@@ -57,7 +57,7 @@ type Metadata interface {
 	PutFile(ctx context.Context, f *FileMetadata) error
 	GetFile(ctx context.Context, id string) (*FileMetadata, error)
 	GetFileByPath(ctx context.Context, namespace, path string) (*FileMetadata, error)
-	ListChildren(ctx context.Context, parentID string) ([]*FileMetadata, error)
+	ListChildren(ctx context.Context, parentID string, search string) ([]*FileMetadata, error)
 	DeleteFile(ctx context.Context, id string) error
 	ListFilesByBlob(ctx context.Context, sha256 string) ([]*FileMetadata, error) // 引用统计
 
@@ -72,7 +72,7 @@ type Metadata interface {
 	ReparentFile(ctx context.Context, fileID string, parentID *string, path string) error // 更新父目录+路径
 
 	// 列目录（根目录 children 为空）
-	ListRoot(ctx context.Context, namespace string) ([]*FileMetadata, error)
+	ListRoot(ctx context.Context, namespace string, search string) ([]*FileMetadata, error)
 
 	// 一致性巡检
 	ListAllBlobs(ctx context.Context) ([]*ContentBlob, error)

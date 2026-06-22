@@ -3,8 +3,11 @@ import {
   ReloadOutlined,
   SettingOutlined,
   SearchOutlined,
+  MoonOutlined,
+  SunOutlined,
 } from '@ant-design/icons'
 import { useAuth } from '../context/AuthContext'
+import { useTheme } from '../context/ThemeContext'
 
 const { Title, Text } = Typography
 
@@ -22,37 +25,45 @@ export default function TopBar({
   onOpenSettings,
 }: TopBarProps) {
   const { namespace, setNamespace, isAuthenticated, logout } = useAuth()
+  const { mode, toggle } = useTheme()
 
   return (
     <header
-      className="bg-white px-6 flex items-center justify-between shadow-sm border-b border-gray-200"
+      className="bg-white dark:bg-gray-800 px-6 flex items-center justify-between shadow-sm border-b border-gray-200 dark:border-gray-700"
       style={{ height: 56, lineHeight: '56px' }}
     >
       <div className="flex items-center gap-3">
-        <Title level={5} className="!mb-0 text-gray-800">
+        <Title level={5} className="!mb-0 text-gray-800 dark:text-gray-100">
           📦 fileupload
         </Title>
-        <Text className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded">
+        <Text className="text-xs text-gray-400 bg-gray-100 dark:bg-gray-700 dark:text-gray-400 px-2 py-0.5 rounded">
           dev
         </Text>
       </div>
-      <Space size="middle">
+      <Space size="small" wrap>
         <Input
           size="small"
           prefix={<SearchOutlined className="text-gray-400" />}
-          placeholder="搜索文件..."
+          placeholder="搜索..."
           value={search}
           onChange={(e) => onSearchChange(e.target.value)}
-          style={{ width: 200 }}
+          className="!w-[120px] sm:!w-[200px]"
           allowClear
         />
         <Input
           size="small"
-          placeholder="Namespace"
+          placeholder="NS"
           value={namespace}
           onChange={(e) => setNamespace(e.target.value)}
-          style={{ width: 120 }}
+          className="!w-[80px] sm:!w-[120px]"
         />
+        <Tooltip title={mode === 'dark' ? '切换亮色模式' : '切换暗色模式'}>
+          <Button
+            type="text"
+            icon={mode === 'dark' ? <SunOutlined /> : <MoonOutlined />}
+            onClick={toggle}
+          />
+        </Tooltip>
         <Tooltip title="刷新">
           <Button type="text" icon={<ReloadOutlined />} onClick={onRefresh} />
         </Tooltip>

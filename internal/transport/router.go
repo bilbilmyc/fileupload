@@ -78,6 +78,7 @@ func (r *Router) registerRoutes() {
 	// === 下载 ===
 	r.mux.HandleFunc("GET /v1/files/{id}", r.download.GetFile)
 	r.mux.HandleFunc("GET /v1/dirs/{id}", r.download.GetDir)
+		r.mux.HandleFunc("GET /v1/preview/{id}", r.download.GetPreview)
 
 	// === 目录管理 ===
 	r.mux.HandleFunc("POST /v1/dirs", r.rest.SubmitDir)
@@ -92,6 +93,7 @@ func (r *Router) registerRoutes() {
 	// === 批量操作 ===
 	r.mux.HandleFunc("POST /v1/batch/delete", r.batch.BatchDelete)
 	r.mux.HandleFunc("POST /v1/batch/download", r.batch.BatchDownload)
+		r.mux.HandleFunc("GET /v1/batch/download", r.batch.BatchDownloadGet)
 	r.mux.HandleFunc("POST /v1/batch/move", r.batch.BatchMove)
 	r.mux.HandleFunc("POST /v1/batch/copy", r.batch.BatchCopy)
 	r.mux.HandleFunc("POST /v1/batch/tags", r.batch.BatchTags)

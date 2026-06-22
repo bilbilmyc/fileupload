@@ -147,13 +147,13 @@ func TestFacadeBlobFileCRUD(t *testing.T) {
 	}
 	f.PutFile(ctx, child)
 
-	children, _ := f.ListChildren(ctx, "facade-dir")
+	children, _ := f.ListChildren(ctx, "facade-dir", "")
 	if len(children) != 1 {
 		t.Errorf("children = %d, want 1", len(children))
 	}
 
 	// ListRoot（facade-f1 和 facade-dir 都是根节点）
-	roots, _ := f.ListRoot(ctx, "demo")
+	roots, _ := f.ListRoot(ctx, "demo", "")
 	if len(roots) != 2 {
 		t.Errorf("roots = %d, want 2 (facade-f1 + facade-dir)", len(roots))
 	}

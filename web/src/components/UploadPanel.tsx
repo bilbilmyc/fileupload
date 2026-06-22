@@ -25,25 +25,33 @@ export default function UploadPanel({
   const doneCount = uploadTasks.filter(t => t.status === 'done' || t.status === 'error').length
   const allDone = doneCount === uploadTasks.length && uploadTasks.length > 0
 
-  const renderTaskIcon = (status: string) => {
+  const renderTaskIcon = (status: string, _retryCount?: number) => {
     switch (status) {
       case 'done': return <CheckCircleOutlined className="text-green-500 text-xs" />
       case 'error': return <CloseCircleOutlined className="text-red-500 text-xs" />
+      case 'retrying': return <Spin size="small" className="text-orange-500" />
       default: return <Spin size="small" className="text-blue-500" />
     }
   }
 
   return (
-    <div className="bg-white rounded-lg shadow-sm p-4">
+    <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm p-3 sm:p-4">
       {/* Upload Bar */}
-      <div className="flex items-center gap-3 mb-3">
-        <div className="flex items-center gap-1.5 text-sm font-medium text-gray-700 min-w-[60px]">
-          <UploadOutlined className="text-blue-500" />
-          <span>上传</span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <Text className="text-xs text-gray-400">目录模式</Text>
-          <Switch size="small" checked={dirMode} onChange={onDirModeChange} />
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3 mb-3">
+        <div className="flex items-center gap-2 sm:gap-3">
+          <div className="flex items-center gap-1.5 text-sm font-medium text-gray-700 dark:text-gray-300 shrink-0">
+            <UploadOutlined className="text-blue-500" />
+            <span>上传</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <Text className="text-xs text-gray-400">目录模式</Text>
+            <Switch size="small" checked={dirMode} onChange={onDirModeChange} />
+          </div>
+          {allDone && (
+            <Button size="small" type="text" onClick={onClearDone} className="text-xs text-gray-400 ml-auto sm:ml-0">
+              <ClearOutlined /> 清除
+            </Button>
+          )}
         </div>
         <div className="flex-1">
           <Dragger
@@ -56,15 +64,10 @@ export default function UploadPanel({
           >
             <div className="flex items-center justify-center gap-2 text-xs text-gray-400">
               <InboxOutlined className="text-base" />
-              <span>点击或拖拽文件{dirMode ? '夹' : ''}到此处</span>
+              <span className="truncate">点击或拖拽文件{dirMode ? '夹' : ''}到此处</span>
             </div>
           </Dragger>
         </div>
-        {allDone && (
-          <Button size="small" type="text" onClick={onClearDone} className="text-xs text-gray-400">
-            <ClearOutlined /> 清除
-          </Button>
-        )}
       </div>
 
       {/* Upload Task List */}
@@ -78,12 +81,13 @@ export default function UploadPanel({
           </div>
           {uploadTasks.map((t) => (
             <div key={t.id} className="flex items-center gap-2 py-0.5">
-              {renderTaskIcon(t.status)}
+              {renderTaskIcon(t.status, t.retryCount)}
               <div className="flex-1 min-w-0">
                 <div className="flex justify-between items-center text-xs">
                   <span className="truncate text-gray-600">{t.name}</span>
                   <span className="text-gray-400 shrink-0 ml-2">
                     {t.status === 'error' ? t.error || '失败'
+                      : t.status === 'retrying' ? t.error || `重试中 ${t.retryCount}/${3}`
                       : t.status === 'done' ? ''
                       : t.speed || ''}
                   </span>
@@ -93,7 +97,7 @@ export default function UploadPanel({
                   size="small"
                   status={t.status === 'error' ? 'exception' : undefined}
                   showInfo={true}
-                  strokeColor={t.status === 'done' ? '#52c41a' : undefined}
+                  strokeColor={t.status === 'done' ? '#52c41a' : t.status === 'retrying' ? '#faad14' : undefined}
                   format={(pct) => t.status === 'error' ? '' : t.status === 'done' ? '' : `${pct}%`}
                   style={{ margin: 0 }}
                 />

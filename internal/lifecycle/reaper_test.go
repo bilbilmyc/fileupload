@@ -84,7 +84,7 @@ func (m *mockMeta) GetFile(_ context.Context, id string) (*domain.FileMetadata, 
 	return f, nil
 }
 func (m *mockMeta) GetFileByPath(_ context.Context, _, _ string) (*domain.FileMetadata, error) { return nil, nil }
-func (m *mockMeta) ListChildren(_ context.Context, _ string) ([]*domain.FileMetadata, error) { return nil, nil }
+func (m *mockMeta) ListChildren(_ context.Context, _ string, _ string) ([]*domain.FileMetadata, error) { return nil, nil }
 func (m *mockMeta) DeleteFile(_ context.Context, _ string) error { return nil }
 func (m *mockMeta) ListFilesByBlob(_ context.Context, sha string) ([]*domain.FileMetadata, error) {
 	var refs []*domain.FileMetadata
@@ -95,7 +95,7 @@ func (m *mockMeta) ListFilesByBlob(_ context.Context, sha string) ([]*domain.Fil
 	}
 	return refs, nil
 }
-func (m *mockMeta) ListRoot(_ context.Context, _ string) ([]*domain.FileMetadata, error) { return nil, nil }
+func (m *mockMeta) ListRoot(_ context.Context, _ string, _ string) ([]*domain.FileMetadata, error) { return nil, nil }
 func (m *mockMeta) SetFileTags(_ context.Context, _ string, _ []string) error { return nil }
 func (m *mockMeta) GetFileTags(_ context.Context, _ string) ([]string, error) { return nil, nil }
 func (m *mockMeta) DeleteFileTags(_ context.Context, _ string) error { return nil }
@@ -293,10 +293,10 @@ func (e *errorMeta) DecrBlobRef(_ context.Context, _ string) (int, error) { retu
 func (e *errorMeta) PutFile(_ context.Context, _ *domain.FileMetadata) error { return nil }
 func (e *errorMeta) GetFile(_ context.Context, _ string) (*domain.FileMetadata, error) { return nil, nil }
 func (e *errorMeta) GetFileByPath(_ context.Context, _, _ string) (*domain.FileMetadata, error) { return nil, nil }
-func (e *errorMeta) ListChildren(_ context.Context, _ string) ([]*domain.FileMetadata, error) { return nil, nil }
+func (e *errorMeta) ListChildren(_ context.Context, _ string, _ string) ([]*domain.FileMetadata, error) { return nil, nil }
 func (e *errorMeta) DeleteFile(_ context.Context, _ string) error { return nil }
 func (e *errorMeta) ListFilesByBlob(_ context.Context, _ string) ([]*domain.FileMetadata, error) { return nil, nil }
-func (e *errorMeta) ListRoot(_ context.Context, _ string) ([]*domain.FileMetadata, error) { return nil, nil }
+func (e *errorMeta) ListRoot(_ context.Context, _ string, _ string) ([]*domain.FileMetadata, error) { return nil, nil }
 func (e *errorMeta) SetFileTags(_ context.Context, _ string, _ []string) error { return nil }
 func (e *errorMeta) GetFileTags(_ context.Context, _ string) ([]string, error) { return nil, nil }
 func (e *errorMeta) DeleteFileTags(_ context.Context, _ string) error { return nil }

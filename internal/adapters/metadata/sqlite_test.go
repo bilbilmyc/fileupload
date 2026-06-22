@@ -198,7 +198,7 @@ func TestSQLiteStore_DirectoryTree(t *testing.T) {
 	}
 
 	// ListChildren
-	listed, err := s.ListChildren(ctx, "dir-001")
+	listed, err := s.ListChildren(ctx, "dir-001", "")
 	if err != nil {
 		t.Fatalf("ListChildren error = %v", err)
 	}
@@ -224,7 +224,7 @@ func TestSQLiteStore_ListRoot(t *testing.T) {
 	}
 
 	// 查询 demo namespace 的根节点
-	roots, err := s.ListRoot(ctx, "demo")
+	roots, err := s.ListRoot(ctx, "demo", "")
 	if err != nil {
 		t.Fatalf("ListRoot error = %v", err)
 	}

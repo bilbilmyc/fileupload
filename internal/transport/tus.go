@@ -314,6 +314,130 @@ func (h *DownloadHandler) GetFile(w http.ResponseWriter, r *http.Request) {
 	io.Copy(w, fileReader.Reader)
 }
 
+// GetPreview GET /v1/preview/{id} — 文件预览（流式、内联、正确 Content-Type）
+func (h *DownloadHandler) GetPreview(w http.ResponseWriter, r *http.Request) {
+	fileID := extractPathID(r.URL.Path, "/v1/preview/")
+	if fileID == "" {
+		respondError(w, http.StatusBadRequest, domain.ErrInvalidArgument)
+		return
+	}
+	namespace := GetNamespace(r.Context())
+
+	rng := parseRangeHeader(r.Header.Get("Range"))
+
+	fileReader, err := h.downloadSvc.GetFile(r.Context(), fileID, namespace, rng)
+	if err != nil {
+		respondError(w, domainErrorToStatus(err), err)
+		return
+	}
+	defer fileReader.Reader.Close()
+
+	// 根据文件扩展名确定 MIME 类型
+	mimeType := guessMimeType(fileReader.File.Name)
+
+	w.Header().Set("Content-Type", mimeType)
+	w.Header().Set("X-SHA256", fileReader.Blob.SHA256)
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+	// 内联展示而非下载
+	w.Header().Set("Content-Disposition", "inline; filename=\""+fileReader.File.Name+"\"")
+
+	if rng.IsZero() {
+		w.Header().Set("Content-Length", strconv.FormatInt(fileReader.Blob.Size, 10))
+		w.WriteHeader(http.StatusOK)
+	} else {
+		w.Header().Set("Content-Range", formatContentRange(rng.Offset, rng.Length, fileReader.FileSize))
+		w.Header().Set("Content-Length", strconv.FormatInt(rng.Length, 10))
+		w.WriteHeader(http.StatusPartialContent)
+	}
+
+	io.Copy(w, fileReader.Reader)
+}
+
+// guessMimeType 根据文件名猜测 MIME 类型
+func guessMimeType(name string) string {
+	dotIdx := strings.LastIndex(name, ".")
+	if dotIdx < 0 || dotIdx >= len(name)-1 {
+		return "application/octet-stream"
+	}
+	ext := strings.ToLower(name[dotIdx+1:])
+	switch ext {
+	// 图片
+	case "jpg", "jpeg":
+		return "image/jpeg"
+	case "png":
+		return "image/png"
+	case "gif":
+		return "image/gif"
+	case "webp":
+		return "image/webp"
+	case "svg":
+		return "image/svg+xml"
+	case "bmp":
+		return "image/bmp"
+	case "ico":
+		return "image/x-icon"
+	// 文档
+	case "pdf":
+		return "application/pdf"
+	case "txt", "log", "md":
+		return "text/plain; charset=utf-8"
+	case "html", "htm":
+		return "text/html; charset=utf-8"
+	case "json":
+		return "application/json; charset=utf-8"
+	case "xml":
+		return "application/xml; charset=utf-8"
+	case "csv":
+		return "text/csv; charset=utf-8"
+	case "yaml", "yml":
+		return "text/yaml; charset=utf-8"
+	// 代码
+	case "js", "jsx", "ts", "tsx":
+		return "text/plain; charset=utf-8"
+	case "go", "py", "rb", "rs", "java", "c", "cpp", "h", "hpp", "cs", "swift", "kt":
+		return "text/plain; charset=utf-8"
+	case "sh", "bash", "zsh", "ps1", "bat":
+		return "text/plain; charset=utf-8"
+	case "css", "scss", "less":
+		return "text/plain; charset=utf-8"
+	case "sql":
+		return "text/plain; charset=utf-8"
+	// 视频
+	case "mp4":
+		return "video/mp4"
+	case "webm":
+		return "video/webm"
+	case "avi":
+		return "video/x-msvideo"
+	case "mov":
+		return "video/quicktime"
+	case "mkv":
+		return "video/x-matroska"
+	// 音频
+	case "mp3":
+		return "audio/mpeg"
+	case "wav":
+		return "audio/wav"
+	case "ogg", "oga":
+		return "audio/ogg"
+	case "flac":
+		return "audio/flac"
+	case "aac":
+		return "audio/aac"
+	case "m4a":
+		return "audio/mp4"
+	// 字体
+	case "woff", "woff2":
+		return "font/" + ext
+	case "ttf":
+		return "font/ttf"
+	case "otf":
+		return "font/otf"
+	default:
+		return "application/octet-stream"
+	}
+}
+
 // GetDir GET /v1/dirs/{id} — 目录流式打包下载
 func (h *DownloadHandler) GetDir(w http.ResponseWriter, r *http.Request) {
 	dirID := extractPathID(r.URL.Path, "/v1/dirs/")
@@ -377,9 +501,10 @@ func (h *RESTHandler) DeleteFile(w http.ResponseWriter, r *http.Request) {
 // ListDir GET /v1/ls
 func (h *RESTHandler) ListDir(w http.ResponseWriter, r *http.Request) {
 	parentID := r.URL.Query().Get("parent")
+	search := r.URL.Query().Get("search")
 	namespace := GetNamespace(r.Context())
 
-	dir, children, err := h.downloadSvc.ListDir(r.Context(), parentID, namespace)
+	dir, children, err := h.downloadSvc.ListDir(r.Context(), parentID, namespace, search)
 	if err != nil {
 		respondError(w, domainErrorToStatus(err), err)
 		return

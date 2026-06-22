@@ -183,12 +183,22 @@ func (s *SQLiteStore) GetFileByPath(_ context.Context, namespace, path string) (
 	return scanFile(row)
 }
 
-// ListChildren 列目录子节点
-func (s *SQLiteStore) ListChildren(_ context.Context, parentID string) ([]*domain.FileMetadata, error) {
-	rows, err := s.db.Query(
-		`SELECT file_id, sha256, name, path, size, namespace, is_dir, parent_id, created_at
-		 FROM files WHERE parent_id = ? ORDER BY name`, parentID,
-	)
+// ListChildren 列目录子节点，支持可选搜索
+func (s *SQLiteStore) ListChildren(_ context.Context, parentID string, search string) ([]*domain.FileMetadata, error) {
+	var rows *sql.Rows
+	var err error
+	if search != "" {
+		rows, err = s.db.Query(
+			`SELECT file_id, sha256, name, path, size, namespace, is_dir, parent_id, created_at
+			 FROM files WHERE parent_id = ? AND name LIKE ? ORDER BY name`,
+			parentID, "%"+search+"%",
+		)
+	} else {
+		rows, err = s.db.Query(
+			`SELECT file_id, sha256, name, path, size, namespace, is_dir, parent_id, created_at
+			 FROM files WHERE parent_id = ? ORDER BY name`, parentID,
+		)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("列子节点: %w", err)
 	}
@@ -215,12 +225,22 @@ func (s *SQLiteStore) ListFilesByBlob(_ context.Context, sha256 string) ([]*doma
 	return scanFiles(rows)
 }
 
-// ListRoot 列 root 节点（parent_id IS NULL 且 namespace 匹配）
-func (s *SQLiteStore) ListRoot(_ context.Context, namespace string) ([]*domain.FileMetadata, error) {
-	rows, err := s.db.Query(
-		`SELECT file_id, sha256, name, path, size, namespace, is_dir, parent_id, created_at
-		 FROM files WHERE namespace = ? AND parent_id IS NULL ORDER BY name`, namespace,
-	)
+// ListRoot 列 root 节点（parent_id IS NULL 且 namespace 匹配），支持可选搜索
+func (s *SQLiteStore) ListRoot(_ context.Context, namespace string, search string) ([]*domain.FileMetadata, error) {
+	var rows *sql.Rows
+	var err error
+	if search != "" {
+		rows, err = s.db.Query(
+			`SELECT file_id, sha256, name, path, size, namespace, is_dir, parent_id, created_at
+			 FROM files WHERE namespace = ? AND parent_id IS NULL AND name LIKE ? ORDER BY name`,
+			namespace, "%"+search+"%",
+		)
+	} else {
+		rows, err = s.db.Query(
+			`SELECT file_id, sha256, name, path, size, namespace, is_dir, parent_id, created_at
+			 FROM files WHERE namespace = ? AND parent_id IS NULL ORDER BY name`, namespace,
+		)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("列根目录: %w", err)
 	}

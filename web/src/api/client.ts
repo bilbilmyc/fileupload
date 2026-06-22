@@ -58,8 +58,10 @@ export async function checkHealth(): Promise<boolean> {
   }
 }
 
-export async function listFiles(parent: string = '/'): Promise<ListResult> {
-  const r = await axiosInstance.get('/v1/ls', { params: { parent } })
+export async function listFiles(parent: string = '/', search?: string): Promise<ListResult> {
+  const params: Record<string, string> = { parent }
+  if (search) params.search = search
+  const r = await axiosInstance.get('/v1/ls', { params })
   return r.data
 }
 
@@ -137,6 +139,10 @@ export function downloadFileUrl(id: string): string {
 
 export function downloadDirUrl(id: string, format: string = 'tar.gz'): string {
   return `/v1/dirs/${id}?format=${format}`
+}
+
+export function previewFileUrl(id: string): string {
+  return `/v1/preview/${id}`
 }
 
 export async function submitDir(name: string, entries: { path: string; file_id: string }[]): Promise<{ file_id: string }> {

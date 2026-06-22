@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef } from 'react'
 import type { RcFile } from 'antd/es/upload'
+import axios from 'axios'
 import * as api from '../api/client'
 import type { UploadInitResult } from '../api/client'
 
@@ -7,10 +8,11 @@ export interface UploadTask {
   id: string
   name: string
   size: number
-  status: 'pending' | 'hashing' | 'uploading' | 'finalizing' | 'done' | 'error'
+  status: 'pending' | 'hashing' | 'uploading' | 'retrying' | 'finalizing' | 'done' | 'error'
   progress: number
   error?: string
   speed?: string
+  retryCount?: number
 }
 
 function formatBytes(bytes: number): string {
@@ -50,6 +52,19 @@ function parseChunkSize(v: string): number {
     case 'g': return n * 1024 * 1024 * 1024
     default: return n
   }
+}
+
+const MAX_RETRIES = 3
+const RETRY_DELAYS = [500, 1000, 2000] // ms
+
+/** 判断错误类型是否可重试：网络错误、5xx、408 超时可重试；4xx 不重试 */
+function isRetryableError(error: unknown): boolean {
+  if (axios.isAxiosError(error)) {
+    if (!error.response) return true // 网络错误（无响应）
+    const status = error.response.status
+    return status >= 500 || status === 408
+  }
+  return true // 非 axios 错误也尝试重试
 }
 
 export function useUpload(onUploadComplete: () => void) {
@@ -157,21 +172,75 @@ export function useUpload(onUploadComplete: () => void) {
     const startTime = Date.now()
     let uploaded = 0
 
+    // 确定并发数
+    const maxConcurrency = concurrency === 'auto'
+      ? Math.max(1, navigator.hardwareConcurrency || 4)
+      : concurrency
+
+    // 并发分片上传：将分片列表通过并发池执行
+    const chunks: { index: number; start: number; end: number }[] = []
     for (let i = 0; i < totalChunks; i++) {
       const start = i * chunkBytes
       const end = Math.min(start + chunkBytes, size)
+      chunks.push({ index: i, start, end })
+    }
+
+    const uploadOneChunk = async (chunkInfo: { index: number; start: number; end: number }): Promise<void> => {
+      const { index: i, start, end } = chunkInfo
       const chunk = file.slice(start, end)
       const sliceSha = await chunkSHA256(await chunk.arrayBuffer())
+      const chunkSize = end - start
 
-      await api.uploadChunk(init.session_id, i, chunk, sliceSha, (ev) => {
-        if (ev.total) {
-          const pct = Math.min(100, Math.round(((uploaded + ev.loaded) / size) * 100))
+      let chunkErr: unknown
+      for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+        try {
+          if (attempt > 0) {
+            updateTask(taskId, {
+              status: 'retrying',
+              retryCount: attempt,
+              error: `重试 ${attempt}/${MAX_RETRIES}...`,
+              progress: Math.round((uploaded / size) * 100),
+            })
+          }
+          await api.uploadChunk(init.session_id, i, chunk, sliceSha)
+          chunkErr = undefined
+          uploaded += chunkSize
+          // 更新进度（所有已上传分片的总和）
+          const pct = Math.min(100, Math.round((uploaded / size) * 100))
           const elapsed = (Date.now() - startTime) / 1000
-          const speed = elapsed > 0 ? formatBytes((uploaded + ev.loaded) / elapsed) + '/s' : ''
+          const speed = elapsed > 0 ? formatBytes(uploaded / elapsed) + '/s' : ''
           updateTask(taskId, { status: 'uploading', progress: pct, speed })
+          break // 上传成功
+        } catch (e) {
+          chunkErr = e
+          if (!isRetryableError(e) || attempt >= MAX_RETRIES) {
+            break
+          }
+          await new Promise(r => setTimeout(r, RETRY_DELAYS[attempt]))
         }
-      })
-      uploaded += end - start
+      }
+
+      if (chunkErr) {
+        const msg = axios.isAxiosError(chunkErr)
+          ? chunkErr.response?.data?.error || chunkErr.message
+          : (chunkErr as Error).message
+        throw new Error(`分片 ${i + 1}/${totalChunks} 失败: ${msg}`)
+      }
+    }
+
+    // 分批并发上传：每批 maxConcurrency 个分片并行
+    const errors: Error[] = []
+    for (let batchStart = 0; batchStart < chunks.length; batchStart += maxConcurrency) {
+      const batch = chunks.slice(batchStart, batchStart + maxConcurrency)
+      await Promise.all(batch.map(c =>
+        uploadOneChunk(c).catch((err: Error) => { errors.push(err) })
+      ))
+      if (errors.length > 0) break // 有分片失败，中断剩余上传
+    }
+
+    if (errors.length > 0) {
+      updateTask(taskId, { status: 'error', error: errors[0].message })
+      throw errors[0]
     }
 
     updateTask(taskId, { status: 'finalizing', progress: 99 })

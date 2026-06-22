@@ -211,7 +211,7 @@ func (s *DownloadService) StreamDir(ctx context.Context, dw *DirWalker, format C
 
 // walkDir 递归遍历目录树，收集所有子节点路径
 func (s *DownloadService) walkDir(ctx context.Context, parentID, prefix string, entries *[]DirEntryInfo) error {
-	children, err := s.meta.ListChildren(ctx, parentID)
+	children, err := s.meta.ListChildren(ctx, parentID, "")
 	if err != nil {
 		return err
 	}
@@ -252,11 +252,11 @@ func computeTreeSHA256(entries []DirEntryInfo) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-// ListDir 列目录
-func (s *DownloadService) ListDir(ctx context.Context, parentID, namespace string) (*FileMetadata, []*FileMetadata, error) {
+// ListDir 列目录，支持按文件名搜索（search 为空时不搜索）
+func (s *DownloadService) ListDir(ctx context.Context, parentID, namespace, search string) (*FileMetadata, []*FileMetadata, error) {
 	if parentID == "" || parentID == "/" || parentID == "root" {
 		// 根目录
-		children, err := s.meta.ListRoot(ctx, namespace)
+		children, err := s.meta.ListRoot(ctx, namespace, search)
 		if err != nil {
 			return nil, nil, fmt.Errorf("列根目录: %w", err)
 		}
@@ -274,7 +274,7 @@ func (s *DownloadService) ListDir(ctx context.Context, parentID, namespace strin
 		return nil, nil, ErrForbidden
 	}
 
-	children, err := s.meta.ListChildren(ctx, parentID)
+	children, err := s.meta.ListChildren(ctx, parentID, search)
 	if err != nil {
 		return nil, nil, fmt.Errorf("列子节点: %w", err)
 	}
@@ -302,7 +302,7 @@ func (s *DownloadService) GetAncestors(ctx context.Context, fileID string) ([]*F
 
 // GetDirTotalSize 递归计算目录下所有文件的总大小
 func (s *DownloadService) GetDirTotalSize(ctx context.Context, dirID string) (int64, error) {
-	children, err := s.meta.ListChildren(ctx, dirID)
+	children, err := s.meta.ListChildren(ctx, dirID, "")
 	if err != nil {
 		return 0, err
 	}

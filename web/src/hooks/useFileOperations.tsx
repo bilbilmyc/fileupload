@@ -25,7 +25,7 @@ export function useFileOperations(_namespace?: string) {
   const loadFiles = useCallback(async () => {
     setLoading(true)
     try {
-      const res = await api.listFiles(currentDir)
+      const res = await api.listFiles(currentDir, search || undefined)
       setFiles(res.children || [])
       if (res.dir && typeof res.dir === 'object' && 'name' in res.dir) {
         const d = res.dir as any
@@ -43,7 +43,7 @@ export function useFileOperations(_namespace?: string) {
     }
     setPage(1)
     setSelectedRowKeys([])
-  }, [currentDir])
+  }, [currentDir, search])
 
   const navigateToDir = useCallback((dirId: string) => {
     setCurrentDir(dirId)

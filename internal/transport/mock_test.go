@@ -59,8 +59,16 @@ func (m *mockMeta) GetFile(_ context.Context, id string) (*domain.FileMetadata, 
 	f, ok := m.files[id]; if !ok { return nil, nil }; return f, nil }
 func (m *mockMeta) GetFileByPath(_ context.Context, ns, path string) (*domain.FileMetadata, error) {
 	for _, f := range m.files { if f.Namespace == ns && f.Path == path { return f, nil } }; return nil, nil }
-func (m *mockMeta) ListChildren(_ context.Context, pid string) ([]*domain.FileMetadata, error) {
-	var c []*domain.FileMetadata; for _, f := range m.files { if f.ParentID == pid { c = append(c, f) } }; return c, nil }
+func (m *mockMeta) ListChildren(_ context.Context, pid string, search string) ([]*domain.FileMetadata, error) {
+	var c []*domain.FileMetadata
+	for _, f := range m.files {
+		if f.ParentID == pid {
+			if search == "" || containsIgnoreCase(f.Name, search) {
+				c = append(c, f)
+			}
+		}
+	}
+	return c, nil }
 func (m *mockMeta) DeleteFile(_ context.Context, id string) error {
 	delete(m.files, id); return nil }
 func (m *mockMeta) ListFilesByBlob(_ context.Context, sha string) ([]*domain.FileMetadata, error) {
@@ -80,8 +88,16 @@ func (m *mockMeta) UpdateFileParent(_ context.Context, fileID string, parentID *
 	if f, ok := m.files[fileID]; ok {
 		if parentID == nil { f.ParentID = "" } else { f.ParentID = *parentID }
 	}; return nil }
-func (m *mockMeta) ListRoot(_ context.Context, ns string) ([]*domain.FileMetadata, error) {
-	var r []*domain.FileMetadata; for _, f := range m.files { if f.ParentID == "" && f.Namespace == ns { r = append(r, f) } }; return r, nil }
+func (m *mockMeta) ListRoot(_ context.Context, ns string, search string) ([]*domain.FileMetadata, error) {
+	var r []*domain.FileMetadata
+	for _, f := range m.files {
+		if f.ParentID == "" && f.Namespace == ns {
+			if search == "" || containsIgnoreCase(f.Name, search) {
+				r = append(r, f)
+			}
+		}
+	}
+	return r, nil }
 func (m *mockMeta) ListAllBlobs(_ context.Context) ([]*domain.ContentBlob, error) {
 	var b []*domain.ContentBlob; for _, v := range m.blobs { b = append(b, v) }; return b, nil }
 func (m *mockMeta) ListAllFiles(_ context.Context) ([]*domain.FileMetadata, error) {
@@ -157,6 +173,33 @@ type mockWP struct{}
 func newMockWP() *mockWP { return &mockWP{} }
 func (m *mockWP) Submit(_ context.Context, fn func()) error { fn(); return nil }
 func (m *mockWP) Stats() domain.WorkerStats { return domain.WorkerStats{Capacity: 4, Available: 4} }
+
+// containsIgnoreCase 检查 s 是否包含 substr（大小写不敏感）
+func containsIgnoreCase(s, substr string) bool {
+	if len(s) < len(substr) {
+		return false
+	}
+	for i := 0; i <= len(s)-len(substr); i++ {
+		match := true
+		for j := 0; j < len(substr); j++ {
+			sc, tc := s[i+j], substr[j]
+			if sc >= 'A' && sc <= 'Z' {
+				sc += 32
+			}
+			if tc >= 'A' && tc <= 'Z' {
+				tc += 32
+			}
+			if sc != tc {
+				match = false
+				break
+			}
+		}
+		if match {
+			return true
+		}
+	}
+	return false
+}
 
 // compile-time interface checks
 var (

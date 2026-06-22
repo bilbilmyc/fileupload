@@ -10,7 +10,7 @@ export default function BreadcrumbNav({ items }: BreadcrumbNavProps) {
     <Breadcrumb
       items={items}
       separator={<RightOutlined className="text-xs text-gray-300" />}
-      className="text-sm"
+      className="text-xs sm:text-sm"
     />
   )
 }

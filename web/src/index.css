@@ -6,3 +6,18 @@ body {
   margin: 0;
   background: #f5f7fa;
 }
+
+.dark body {
+  background: #141414;
+}
+
+/* Ant Design 表格在暗色模式下的行 hover 修正 */
+.dark .ant-table-row:hover > td {
+  background-color: rgba(255, 255, 255, 0.04) !important;
+}
+
+/* 暗色模式下 pre 标签代码块 */
+.dark pre {
+  background: #1f1f1f !important;
+  color: #d4d4d4;
+}
