@@ -17,6 +17,7 @@ type Router struct {
 	rest       *RESTHandler
 	download   *DownloadHandler
 	batch      *BatchHandler
+	auth       *AuthHandler
 	uploadSvc  *domain.UploadService
 	scanner    Scanner
 	health     HealthChecker
@@ -33,7 +34,7 @@ type HealthChecker interface {
 }
 
 // NewRouter 创建路由器并注册所有路由
-func NewRouter(mw *Middleware, tus *TusHandler, rest *RESTHandler, download *DownloadHandler, batch *BatchHandler, uploadSvc *domain.UploadService, scanner Scanner, health HealthChecker) *Router {
+func NewRouter(mw *Middleware, tus *TusHandler, rest *RESTHandler, download *DownloadHandler, batch *BatchHandler, auth *AuthHandler, uploadSvc *domain.UploadService, scanner Scanner, health HealthChecker) *Router {
 	r := &Router{
 		mux:        http.NewServeMux(),
 		middleware: mw,
@@ -41,6 +42,7 @@ func NewRouter(mw *Middleware, tus *TusHandler, rest *RESTHandler, download *Dow
 		rest:       rest,
 		download:   download,
 		batch:      batch,
+		auth:       auth,
 		uploadSvc:  uploadSvc,
 		scanner:    scanner,
 		health:     health,
@@ -52,10 +54,11 @@ func NewRouter(mw *Middleware, tus *TusHandler, rest *RESTHandler, download *Dow
 // Handler 返回经过中间件包装的最终 handler
 func (r *Router) Handler() http.Handler {
 	var h http.Handler = r.mux
-	h = r.middleware.Namespace(h)
-	h = r.middleware.Auth(h)    // X-Auth-Token 认证
+	h = r.middleware.JWTValidate(h)   // JWT 验证（Bearer token）
+	h = r.middleware.Namespace(h)     // 命名空间注入
+	h = r.middleware.Auth(h)          // X-Auth-Token 认证
 	h = r.middleware.RateLimit(h)
-	h = r.middleware.Logging(h) // 请求日志（状态码 + 耗时）
+	h = r.middleware.Logging(h)       // 请求日志
 	h = r.middleware.RequestID(h)
 	h = r.middleware.Recover(h)
 	return h
@@ -63,6 +66,13 @@ func (r *Router) Handler() http.Handler {
 
 // registerRoutes 注册所有路由
 func (r *Router) registerRoutes() {
+	// === 鉴权 ===
+	if r.auth != nil {
+		r.mux.HandleFunc("POST /v1/auth/login", r.auth.Login)
+		r.mux.HandleFunc("POST /v1/auth/refresh", r.auth.Refresh)
+		r.mux.HandleFunc("GET /v1/auth/me", r.auth.Me)
+	}
+
 	// === tus 协议 ===
 	r.mux.HandleFunc("POST /uploads", r.tus.CreateUpload)
 	r.mux.HandleFunc("HEAD /uploads/{id}", r.tus.GetUploadInfo)
@@ -78,7 +88,7 @@ func (r *Router) registerRoutes() {
 	// === 下载 ===
 	r.mux.HandleFunc("GET /v1/files/{id}", r.download.GetFile)
 	r.mux.HandleFunc("GET /v1/dirs/{id}", r.download.GetDir)
-		r.mux.HandleFunc("GET /v1/preview/{id}", r.download.GetPreview)
+	r.mux.HandleFunc("GET /v1/preview/{id}", r.download.GetPreview)
 
 	// === 目录管理 ===
 	r.mux.HandleFunc("POST /v1/dirs", r.rest.SubmitDir)
@@ -93,7 +103,7 @@ func (r *Router) registerRoutes() {
 	// === 批量操作 ===
 	r.mux.HandleFunc("POST /v1/batch/delete", r.batch.BatchDelete)
 	r.mux.HandleFunc("POST /v1/batch/download", r.batch.BatchDownload)
-		r.mux.HandleFunc("GET /v1/batch/download", r.batch.BatchDownloadGet)
+	r.mux.HandleFunc("GET /v1/batch/download", r.batch.BatchDownloadGet)
 	r.mux.HandleFunc("POST /v1/batch/move", r.batch.BatchMove)
 	r.mux.HandleFunc("POST /v1/batch/copy", r.batch.BatchCopy)
 	r.mux.HandleFunc("POST /v1/batch/tags", r.batch.BatchTags)

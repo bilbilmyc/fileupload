@@ -33,6 +33,8 @@ auth:
   enabled: false             # 是否启用 X-Auth-Token 认证
   token: ""                  # 静态令牌，启用后客户端需携带此 token
   header: "X-Auth-Token"     # 令牌请求头名称
+  jwt_secret: ""             # JWT 签名密钥（非空时启用 JWT 鉴权）
+  jwt_expiry: 72             # JWT token 过期时间（小时）
 
 download:
   max_archive_size: 0        # 目录打包大小上限（0 = 不限）

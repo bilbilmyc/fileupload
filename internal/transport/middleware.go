@@ -24,12 +24,14 @@ type ctxKey string
 const (
 	ctxKeyRequestID ctxKey = "request_id"
 	ctxKeyNamespace ctxKey = "namespace"
+	ctxKeyAuthClaims ctxKey = "auth_claims"
 )
 
 // Middleware 中间件集合
 type Middleware struct {
 	rateLimiter *RateLimiterGroup
 	authCfg     AuthConfig
+	authSvc     domain.AuthService // JWT 鉴权服务
 }
 
 // AuthConfig 认证中间件配置
@@ -46,9 +48,15 @@ func NewMiddleware() *Middleware {
 	}
 }
 
-// WithAuth 设置认证配置（链式调用）
+// WithAuth 设置静态 Token 认证配置（链式调用）
 func (m *Middleware) WithAuth(cfg AuthConfig) *Middleware {
 	m.authCfg = cfg
+	return m
+}
+
+// WithJWT 设置 JWT 鉴权服务（链式调用）
+func (m *Middleware) WithJWT(authSvc domain.AuthService) *Middleware {
+	m.authSvc = authSvc
 	return m
 }
 
@@ -263,6 +271,58 @@ func (m *Middleware) Logging(next http.Handler) http.Handler {
 		elapsed := time.Since(start)
 		log.Printf("[%s] %s %s → %d (%s)", r.Method, r.URL.Path, GetNamespace(r.Context()), rw.status, elapsed)
 	})
+}
+
+// JWTValidate JWT 认证中间件 —— 验证 Authorization: Bearer <token> 并将 claims 注入 context
+func (m *Middleware) JWTValidate(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if m.authSvc == nil {
+			// JWT 未配置，跳过验证（兼容旧版）
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		authHeader := r.Header.Get("Authorization")
+		if authHeader == "" {
+			// 允许未认证请求通过（namespace 从 X-Namespace 头获取）
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// 解析 Bearer token
+		tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
+		if tokenStr == authHeader {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		claims, err := m.authSvc.ValidateToken(tokenStr)
+		if err != nil {
+			respondJSON(w, http.StatusUnauthorized, map[string]string{
+				"error": "token 无效",
+				"code":  "token_invalid",
+			})
+			return
+		}
+
+		// 从 token 中提取 namespace 注入 context，覆盖 X-Namespace 头
+		ctx := context.WithValue(r.Context(), ctxKeyAuthClaims, claims)
+		ns := claims.Namespace
+		if ns != "" {
+			ctx = context.WithValue(ctx, ctxKeyNamespace, ns)
+		}
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+// ---- JWT Claims Context Helpers ----
+
+// GetAuthClaims 从 context 获取 JWT claims
+func GetAuthClaims(ctx context.Context) *domain.AuthClaims {
+	if claims, ok := ctx.Value(ctxKeyAuthClaims).(*domain.AuthClaims); ok {
+		return claims
+	}
+	return nil
 }
 
 // ---- 辅助函数 ----

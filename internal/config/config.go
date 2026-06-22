@@ -77,9 +77,11 @@ type DownloadConfig struct {
 
 // AuthConfig 认证配置
 type AuthConfig struct {
-	Enabled bool   `json:"enabled" yaml:"enabled"`
-	Token   string `json:"token" yaml:"token"`
-	Header  string `json:"header" yaml:"header"`
+	Enabled   bool   `json:"enabled" yaml:"enabled"`
+	Token     string `json:"token" yaml:"token"`
+	Header    string `json:"header" yaml:"header"`
+	JWTSecret string `json:"jwt_secret" yaml:"jwt_secret"`
+	JWTExpiry int    `json:"jwt_expiry" yaml:"jwt_expiry"` // token 过期小时数
 }
 
 // DefaultConfig 返回默认配置
@@ -116,9 +118,11 @@ func DefaultConfig() Config {
 			MaxArchiveSize: 0,
 		},
 		Auth: AuthConfig{
-			Enabled: false,
-			Token:   "",
-			Header:  "X-Auth-Token",
+			Enabled:   false,
+			Token:     "",
+			Header:    "X-Auth-Token",
+			JWTSecret: "fileupload-dev-secret-change-in-production",
+			JWTExpiry: 72,
 		},
 	}
 }

@@ -25,6 +25,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
+	"github.com/bilbilmyc/fileupload/internal/adapters/auth"
 	"github.com/bilbilmyc/fileupload/internal/adapters/compressor"
 	"github.com/bilbilmyc/fileupload/internal/adapters/hasher"
 	"github.com/bilbilmyc/fileupload/internal/adapters/metadata"
@@ -175,11 +176,21 @@ func main() {
 		Token:   cfg.Auth.Token,
 		Header:  cfg.Auth.Header,
 	})
+
+	// JWT 鉴权（仅在配置了密钥时启用）
+	var authHandler *transport.AuthHandler
+	if cfg.Auth.JWTSecret != "" {
+		jwtExpiry := time.Duration(cfg.Auth.JWTExpiry) * time.Hour
+		jwtSvc := auth.NewJWTService(cfg.Auth.JWTSecret, jwtExpiry, nil)
+		mw.WithJWT(jwtSvc)
+		authHandler = transport.NewAuthHandler(jwtSvc)
+	}
+
 	tusHandler := transport.NewTusHandler(uploadSvc)
 	restHandler := transport.NewRESTHandler(uploadSvc, downloadSvc)
 	downloadHandler := transport.NewDownloadHandler(downloadSvc)
 	batchHandler := transport.NewBatchHandler(batchSvc)
-	router := transport.NewRouter(mw, tusHandler, restHandler, downloadHandler, batchHandler, uploadSvc, scanner, healthChecker)
+	router := transport.NewRouter(mw, tusHandler, restHandler, downloadHandler, batchHandler, authHandler, uploadSvc, scanner, healthChecker)
 
 	// 首次启动时执行一次快速巡检
 	go func() {

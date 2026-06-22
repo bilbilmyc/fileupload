@@ -8,6 +8,8 @@ axiosInstance.interceptors.request.use((config) => {
   const token = localStorage.getItem('fileupload_token')
   const ns = localStorage.getItem('fileupload_namespace') || 'default'
   if (token) {
+    // 同时发送 JWT Bearer 和旧版 X-Auth-Token 头，兼容两种认证方式
+    config.headers['Authorization'] = `Bearer ${token}`
     config.headers['X-Auth-Token'] = token
   }
   config.headers['X-Namespace'] = ns
