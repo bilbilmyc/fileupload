@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"math/rand"
 	"sync"
@@ -32,7 +34,9 @@ func runBench(ctx context.Context, c *Client, numFiles int, sizeStr string, conc
 			rand.Read(data)
 
 			name := fmt.Sprintf("bench-%d.dat", idx)
-			_, err := c.uploadBytes(ctx, name, data, "", "none", UploadOptions{
+			h := sha256.Sum256(data)
+			dataSHA := hex.EncodeToString(h[:])
+			_, err := c.uploadBytes(ctx, name, data, dataSHA, "none", UploadOptions{
 				ChunkSize:   fileSize,
 				Concurrency: 1,
 				Compress:    "none",
