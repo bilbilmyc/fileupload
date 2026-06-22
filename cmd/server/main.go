@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -33,6 +34,52 @@ import (
 	"github.com/bilbilmyc/fileupload/internal/lifecycle"
 	"github.com/bilbilmyc/fileupload/internal/transport"
 )
+
+// serverHealth 实现 transport.HealthChecker
+type serverHealth struct {
+	redis   *redis.Client
+	dataDir string
+	tempDir string
+	dbPath  string
+}
+
+func (h *serverHealth) Check(ctx context.Context) map[string]any {
+	result := make(map[string]any)
+
+	// Redis 检查
+	redisHealth := map[string]any{"status": "ok"}
+	if err := h.redis.Ping(ctx).Err(); err != nil {
+		redisHealth["status"] = "error"
+		redisHealth["error"] = err.Error()
+	}
+	result["redis"] = redisHealth
+
+	// SQLite 检查（通过检查 db 文件是否存在）
+	dbHealth := map[string]any{"status": "ok"}
+	if h.dbPath != "" && h.dbPath != ":memory:" {
+		if _, err := os.Stat(h.dbPath); os.IsNotExist(err) {
+			dbHealth["status"] = "error"
+			dbHealth["error"] = "数据库文件不存在"
+		}
+	}
+	result["database"] = dbHealth
+
+	// 磁盘检查（data dir 和 temp dir 可写性）
+	diskHealth := map[string]any{"status": "ok"}
+	for name, dir := range map[string]string{"data_dir": h.dataDir, "temp_dir": h.tempDir} {
+		testFile := filepath.Join(dir, ".healthcheck")
+		if err := os.WriteFile(testFile, []byte("ok"), 0644); err != nil {
+			diskHealth["status"] = "error"
+			diskHealth[name] = "不可写: " + err.Error()
+		} else {
+			os.Remove(testFile)
+			diskHealth[name] = "可写"
+		}
+	}
+	result["disk"] = diskHealth
+
+	return result
+}
 
 func main() {
 	// 加载配置
@@ -111,6 +158,14 @@ func main() {
 
 	scanner := lifecycle.NewConsistencyScanner(metaFacade, localFS, cfg.Storage.DataDir, cfg.Storage.TempDir)
 
+	// 健康检查器
+	healthChecker := &serverHealth{
+		redis:   rdb,
+		dataDir: cfg.Storage.DataDir,
+		tempDir: cfg.Storage.TempDir,
+		dbPath:  cfg.Database.Path,
+	}
+
 	// === 传输层 ===
 
 	mw := transport.NewMiddleware().WithAuth(transport.AuthConfig{
@@ -121,7 +176,7 @@ func main() {
 	tusHandler := transport.NewTusHandler(uploadSvc)
 	restHandler := transport.NewRESTHandler(uploadSvc, downloadSvc)
 	downloadHandler := transport.NewDownloadHandler(downloadSvc)
-	router := transport.NewRouter(mw, tusHandler, restHandler, downloadHandler, uploadSvc, scanner)
+	router := transport.NewRouter(mw, tusHandler, restHandler, downloadHandler, uploadSvc, scanner, healthChecker)
 
 	// 首次启动时执行一次快速巡检
 	go func() {

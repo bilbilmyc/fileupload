@@ -18,6 +18,7 @@ type Router struct {
 	download   *DownloadHandler
 	uploadSvc  *domain.UploadService
 	scanner    Scanner
+	health     HealthChecker
 }
 
 // Scanner 一致性巡检接口
@@ -25,8 +26,13 @@ type Scanner interface {
 	Scan(ctx context.Context) (any, error)
 }
 
+// HealthChecker 健康检查接口
+type HealthChecker interface {
+	Check(ctx context.Context) map[string]any
+}
+
 // NewRouter 创建路由器并注册所有路由
-func NewRouter(mw *Middleware, tus *TusHandler, rest *RESTHandler, download *DownloadHandler, uploadSvc *domain.UploadService, scanner Scanner) *Router {
+func NewRouter(mw *Middleware, tus *TusHandler, rest *RESTHandler, download *DownloadHandler, uploadSvc *domain.UploadService, scanner Scanner, health HealthChecker) *Router {
 	r := &Router{
 		mux:        http.NewServeMux(),
 		middleware: mw,
@@ -35,6 +41,7 @@ func NewRouter(mw *Middleware, tus *TusHandler, rest *RESTHandler, download *Dow
 		download:   download,
 		uploadSvc:  uploadSvc,
 		scanner:    scanner,
+		health:     health,
 	}
 	r.registerRoutes()
 	return r
@@ -90,10 +97,23 @@ func (r *Router) registerRoutes() {
 	}
 
 	// === 健康检查 ===
-	r.mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status":"ok"}`))
+	r.mux.HandleFunc("GET /health", func(w http.ResponseWriter, req *http.Request) {
+		result := map[string]any{"status": "ok"}
+		if r.health != nil {
+			checks := r.health.Check(req.Context())
+			for k, v := range checks {
+				result[k] = v
+			}
+			for _, v := range checks {
+				if m, ok := v.(map[string]any); ok {
+					if s, _ := m["status"].(string); s != "" && s != "ok" {
+						result["status"] = "degraded"
+						break
+					}
+				}
+			}
+		}
+		respondJSON(w, http.StatusOK, result)
 	})
 }
 

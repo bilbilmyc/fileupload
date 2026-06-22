@@ -334,7 +334,7 @@ func TestRouter_Health(t *testing.T) {
 	mw := NewMiddleware()
 	uploadSvc, _, _, _, _ := newTestFixtures(t)
 	_ = uploadSvc
-	router := NewRouter(mw, tusHandler, restHandler, downloadHandler, nil, nil)
+	router := NewRouter(mw, tusHandler, restHandler, downloadHandler, nil, nil, nil)
 
 	req := httptest.NewRequest("GET", "/health", nil)
 	w := httptest.NewRecorder()
@@ -361,7 +361,7 @@ func TestRouter_CheckExists(t *testing.T) {
 	uploadSvc.AppendChunk(ctx, session.SessionID, 0, bytes.NewReader(content), "")
 	result, _ := uploadSvc.Finalize(ctx, session.SessionID)
 
-	router := NewRouter(mw, tusHandler, restHandler, downloadHandler, uploadSvc, nil)
+	router := NewRouter(mw, tusHandler, restHandler, downloadHandler, uploadSvc, nil, nil)
 
 	req := httptest.NewRequest("HEAD", "/v1/files?sha256="+result.SHA256+"&namespace=demo", nil)
 	w := httptest.NewRecorder()
@@ -375,7 +375,7 @@ func TestRouter_CheckExists(t *testing.T) {
 func TestRouter_CheckExists_Miss(t *testing.T) {
 	uploadSvc, _, tusHandler, restHandler, downloadHandler := newTestFixtures(t)
 	mw := NewMiddleware()
-	router := NewRouter(mw, tusHandler, restHandler, downloadHandler, uploadSvc, nil)
+	router := NewRouter(mw, tusHandler, restHandler, downloadHandler, uploadSvc, nil, nil)
 
 	req := httptest.NewRequest("HEAD", "/v1/files?sha256=nonexistent&namespace=demo", nil)
 	w := httptest.NewRecorder()

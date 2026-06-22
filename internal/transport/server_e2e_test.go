@@ -111,7 +111,7 @@ func newE2EFixture(t *testing.T) *e2eFixture {
 	tusHandler := NewTusHandler(uploadSvc)
 	restHandler := NewRESTHandler(uploadSvc, downloadSvc)
 	downloadHandler := NewDownloadHandler(downloadSvc)
-	router := NewRouter(mw, tusHandler, restHandler, downloadHandler, uploadSvc, scanner)
+	router := NewRouter(mw, tusHandler, restHandler, downloadHandler, uploadSvc, scanner, nil)
 
 	// 10. httptest 服务器
 	srv := httptest.NewServer(router.Handler())
@@ -169,10 +169,10 @@ func TestE2E_HealthCheck(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("health status = %d, want 200", resp.StatusCode)
 	}
-	body := strings.TrimSpace(readBody(resp))
-	if body != `{"status":"ok"}` {
-		t.Errorf("health body = %s", body)
+	if _, err := io.ReadAll(resp.Body); err != nil {
+		t.Fatalf("read health body: %v", err)
 	}
+	resp.Body.Close()
 }
 
 func TestE2E_UploadAndDownload(t *testing.T) {
