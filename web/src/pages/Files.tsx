@@ -78,7 +78,8 @@ export default function Files() {
   const [uploadTasks, setUploadTasks] = useState<UploadTask[]>([])
   const [configOpen, setConfigOpen] = useState(false)
   const [chunkSize, setChunkSize] = useState('10m')
-  const [concurrency, setConcurrency] = useState(4)
+  const [concurrency, setConcurrency] = useState<number | 'auto'>(4)
+  const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([])
   const [compression, setCompression] = useState<'none' | 'zstd'>('none')
   const [dirMode, setDirMode] = useState(false)
 
@@ -175,6 +176,33 @@ export default function Files() {
     } catch (e: any) {
       message.error(`删除失败: ${e.message}`)
     }
+  }
+
+  const handleBatchDelete = async () => {
+    const items = files.filter(f => selectedRowKeys.includes(f.file_id))
+    if (items.length === 0) return
+    Modal.confirm({
+      title: `确认删除 ${items.length} 个项目？`,
+      content: '删除后不可恢复。目录删除仅移除目录记录，不删除子文件。',
+      onOk: async () => {
+        let ok = 0, fail = 0
+        for (const item of items) {
+          try {
+            if (item.is_dir) {
+              await api.deleteDir(item.file_id)
+            } else {
+              await api.deleteFile(item.file_id)
+            }
+            ok++
+          } catch {
+            fail++
+          }
+        }
+        setSelectedRowKeys([])
+        message.success(`删除完成: ${ok} 成功${fail ? `, ${fail} 失败` : ''}`)
+        loadFiles()
+      },
+    })
   }
 
   // 目录上传批次跟踪（taskId → 目录信息）
@@ -460,7 +488,27 @@ export default function Files() {
                 columns={columns}
                 pagination={false}
                 locale={{ emptyText: '暂无文件' }}
+                rowSelection={{
+                  selectedRowKeys,
+                  onChange: (keys) => setSelectedRowKeys(keys),
+                }}
               />
+              {selectedRowKeys.length > 0 && (
+                <div className="mt-2 flex items-center gap-2">
+                  <Text type="secondary">已选 {selectedRowKeys.length} 项</Text>
+                  <Popconfirm
+                    title={`确认删除选中的 ${selectedRowKeys.length} 个项目？`}
+                    onConfirm={handleBatchDelete}
+                  >
+                    <Button icon={<DeleteOutlined />} danger size="small">
+                      批量删除
+                    </Button>
+                  </Popconfirm>
+                  <Button size="small" onClick={() => setSelectedRowKeys([])}>
+                    取消选择
+                  </Button>
+                </div>
+              )}
             </Spin>
           </div>
         </Space>
@@ -471,16 +519,21 @@ export default function Files() {
         open={configOpen}
         onOk={() => setConfigOpen(false)}
         onCancel={() => setConfigOpen(false)}
+        width={400}
       >
         <Form layout="vertical">
-          <Form.Item label="分片大小">
-            <Input value={chunkSize} onChange={(e) => setChunkSize(e.target.value)} />
-          </Form.Item>
-          <Form.Item label="并发数">
+          <Form.Item label="并发数" help="auto 根据文件大小自动选择">
             <Select
               value={concurrency}
               onChange={(v) => setConcurrency(v)}
-              options={[1, 2, 4, 8, 16].map((n) => ({ value: n, label: n }))}
+              options={[
+                { value: 'auto', label: 'auto（推荐）' },
+                { value: 1, label: '1' },
+                { value: 2, label: '2' },
+                { value: 4, label: '4' },
+                { value: 8, label: '8' },
+                { value: 16, label: '16' },
+              ]}
             />
           </Form.Item>
           <Form.Item label="压缩">
@@ -493,6 +546,14 @@ export default function Files() {
               ]}
             />
           </Form.Item>
+          <details className="mt-2 text-gray-400 text-xs cursor-pointer">
+            <summary className="select-none">高级选项</summary>
+            <div className="mt-2 pl-2 border-l-2 border-gray-200">
+              <Form.Item label="分片大小（字节，如 10m / 100m）" help="大文件分片上传时的每片大小">
+                <Input value={chunkSize} onChange={(e) => setChunkSize(e.target.value)} />
+              </Form.Item>
+            </div>
+          </details>
         </Form>
       </Modal>
     </Layout>
