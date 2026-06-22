@@ -14,15 +14,18 @@
 | **双协议上传** | tus.io 协议 + 自定义 REST API，共享同一领域核心 |
 | **动态分片** | 大文件自动切分，并发上传 |
 | **客户端压缩** | zstd 压缩后传输，服务端透明解压 |
-| **流式下载** | 单文件 Range 分段下载，目录 tar.gz/tar.zst 流式打包 |
+| **流式下载** | 单文件 Range 分段下载，目录/批量流式打包（tar.gz / zip） |
 | **数据校验** | 分片级 + 整体级 SHA-256，传输与存储全链路防篡改 |
 | **秒传** | 内容寻址去重（content-addressed storage），相同内容秒级完成 |
 | **断点续传** | tus 协议原生 + REST 客户端 resume 状态文件 |
 | **并发控制** | 全局 worker 池，限制并发磁盘 IO |
 | **命名空间隔离** | 多租户隔离（由上游 Gateway 注入 `X-Namespace`） |
+| **层级存储** | 目录上传后物理文件按原始层级路径存放，可直接从文件系统拷贝 |
+| **文件标签** | 关系型标签系统，支持批量标记与分类 |
+| **批量操作** | 批量删除 / 打包下载 / 移动 / 复制 / 标记，可选目录目标 |
 | **一致性巡检** | 定时/手动扫描孤儿文件、引用计数漂移 |
 | **Go CLI** | Cobra 命令行客户端，支持 kubectl 式 Tab 补全 |
-| **Web UI** | React + Ant Design 管理面板，拖拽上传、目录树、进度 |
+| **Web UI** | React + Ant Design 管理面板，完整面包屑导航、拖拽上传、进度跟踪、批量管理 |
 | **登录预留** | 前端已实现登录页与 token 管理，后端鉴权可后续接入 |
 
 ---
@@ -135,7 +138,7 @@ fileupload --server http://192.168.1.100:8080 upload data.bin
 | `bench` | 压测 | `--files`, `--size`, `--concurrency` |
 | `config` | 查看当前配置 | — |
 | `login` | 登录占位（预留） | — |
-| `completion` | 生成 shell 补全脚本 | `bash|zsh|fish|powershell` |
+| `completion` | 生成 shell 补全脚本 | `bash\|zsh\|fish\|powershell` |
 
 ### kubectl 式 Tab 补全
 
@@ -174,12 +177,13 @@ fileupload upload --co<TAB>  # → --concurrency, --compress, --chunk-size
 
 ### 功能
 
-- 登录占位页（支持跳过，后续可接入真实鉴权）
-- 顶部 Namespace 切换、主题/配置
-- 拖拽上传文件/目录
-- 实时上传队列（进度、速率、状态）
-- 文件/目录列表、搜索、下载、删除
-- 小文件在线预览（图片/文本）
+- **目录浏览** — 完整面包屑路径导航，每级可点击返回，文件列表显示 `..` 返回上级
+- **拖拽上传** — 始终展开的紧凑上传条，支持单文件/目录模式，实时进度与速率
+- **批量管理** — 选中多文件后批量删除/下载（zip/tar.gz）/移动/复制/标记
+- **目录选择器** — 树形浏览+搜索过滤，用于批量移动/复制目标选择
+- **标签系统** — 彩色标签编辑，快速添加常用标签，逗号分隔批量输入
+- **操作历史** — 表格分页展示批量操作记录
+- **文件管理** — 搜索过滤、分页、下载、删除，目录大小递归显示
 
 ### 构建
 
@@ -214,11 +218,26 @@ npm run build
 | `POST` | `/v1/uploads/{id}/finalize` | 完成上传（合并+校验+去重写入） |
 | `HEAD` | `/v1/files?sha256={hex}` | 秒传预检（按内容哈希去重） |
 | `GET` | `/v1/files/{id}` | 下载文件（支持 Range） |
-| `GET` | `/v1/dirs/{id}` | 下载目录（流式 tar.gz/tar.zst 打包） |
+| `GET` | `/v1/dirs/{id}` | 下载目录（流式打包） |
 | `POST` | `/v1/dirs` | 提交目录 manifest |
 | `DELETE` | `/v1/files/{id}` | 删除文件或目录 |
-| `GET` | `/v1/ls` | 列目录 |
+| `GET` | `/v1/ls` | 列目录（含祖先链 breadcrumb） |
 | `GET` | `/v1/stat/{id}` | 文件/目录信息 |
+
+### 批量操作 API
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `POST` | `/v1/batch/delete` | 批量删除文件/目录 |
+| `POST` | `/v1/batch/download` | 批量下载（流式 zip/tar.gz 打包） |
+| `POST` | `/v1/batch/move` | 批量移动到目标目录 |
+| `POST` | `/v1/batch/copy` | 批量复制到目标目录（含目录递归） |
+| `POST` | `/v1/batch/tags` | 批量设置标签 |
+
+### 管理 API
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
 | `POST` | `/v1/admin/scan` | 触发一致性巡检 |
 | `GET` | `/health` | 健康检查 |
 
@@ -307,13 +326,15 @@ FILEUPLOAD_CHUNK_SIZE=20971520
 ┌─────▼─────────────────────┐
 │ 传输层 (net/http)          │
 │ tus Handler | REST Handler│
-│ 下载 Handler | 中间件     │
+│ 下载 Handler | Batch      │
+│ Handler | 中间件           │
 └─────┬─────────────────────┘
       ▼
 ┌──────────────────────────┐
 │ 领域核心                  │
 │ UploadService / Download │
-│ WorkerPool / 领域模型    │
+│ BatchService / WorkerPool│
+│ 领域模型                  │
 └─────┬─────────────────────┘
       │ 端口接口（port）
 ┌─────▼─────────────────────┐
@@ -326,7 +347,17 @@ FILEUPLOAD_CHUNK_SIZE=20971520
   │ 磁盘  │ Redis   │ SQLite
 ```
 
-完整设计文档见 [docs/superpowers/specs/2026-06-17-fileupload-design.md](docs/superpowers/specs/2026-06-17-fileupload-design.md)
+### 文件存储策略
+
+物理文件采用**双层存储策略**：
+
+1. **上传阶段**：文件内容以 `namespace/filename` 扁平路径写入（内容寻址）
+2. **目录提交后**：SubmitDir 将文件搬移到 `namespace/dir/subdir/filename` 层级路径
+3. **元数据层**：SQLite 维护完整的目录树结构（parent_id 自引用），包含文件标签（file_tags 关联表）
+
+这样既能通过文件系统直接拷贝目录，又不影响上传性能。
+
+完整设计文档见 [docs/adr/](docs/adr/)
 
 ---
 
@@ -338,27 +369,41 @@ FILEUPLOAD_CHUNK_SIZE=20971520
 │   ├── server/               # 服务端入口（HTTP 服务）
 │   └── fileupload/           # CLI 客户端（Cobra 子命令）
 ├── internal/
-│   ├── domain/               # 领域核心（模型/端口接口/服务编排）
+│   ├── domain/               # 领域核心
+│   │   ├── model.go          # 领域模型（UploadSession / FileMetadata / ContentBlob）
+│   │   ├── ports.go          # 端口接口（Storage / Metadata / Compressor）
+│   │   ├── upload.go         # 上传编排（会话/分片/Finalize/秒传/删除/SubmitDir）
+│   │   ├── download.go       # 下载编排（Range/目录遍历/流式打包/祖先链）
+│   │   ├── batch.go          # 批量操作（删除/下载/移动/复制/标签）
+│   │   └── worker_pool.go    # 并发 worker 池
 │   ├── adapters/             # 适配层实现
 │   │   ├── storage/          # 本地文件系统存储 + S3
 │   │   ├── metadata/         # Redis 热数据 + SQLite 冷数据门面
-│   │   ├── compressor/       # zstd/gzip/tar 压缩
+│   │   ├── compressor/       # zstd/gzip/tar/zip 压缩
 │   │   └── hasher/           # SHA-256 哈希
 │   ├── transport/            # HTTP 传输层
 │   │   ├── router.go         # 路由注册 + 嵌入 React 构建产物
 │   │   ├── tus.go            # tus/REST/下载 handler
-│   │   ├── middleware.go     # 中间件（Recover/RequestID/Namespace/RateLimit）
-│   │   └── static/           # 旧浏览器面板（已弃用）
+│   │   ├── batch.go          # 批量操作 handler
+│   │   └── middleware.go     # 中间件（Recover/RequestID/Namespace/RateLimit）
 │   ├── lifecycle/            # SessionReaper + ConsistencyScanner
 │   └── config/               # 配置加载（YAML + env override）
 ├── web/                      # React 前端（Vite + React + Ant Design）
+│   ├── src/
+│   │   ├── pages/            # Files.tsx, Login.tsx
+│   │   ├── components/       # 13 个 UI 组件
+│   │   ├── hooks/            # useFileOperations, useUpload
+│   │   └── api/              # API 客户端
 ├── deploy/
 │   ├── docker/               # Dockerfile + Compose
 │   └── systemd/              # systemd 服务单元
-├── docs/                     # 架构文档与设计 spec
+├── docs/
+│   ├── adr/                  # 架构决策记录（5 份）
+│   └── agents/               # Agent 配置
+├── AGENTS.md                 # Agent 技能配置
+├── CONTEXT.md                # 领域词汇表
 ├── Makefile                  # 编译/测试/发布/前端构建
 ├── fileupload.yaml           # 默认配置文件
-├── go.mod / go.sum
 └── README.md
 ```
 
@@ -438,6 +483,7 @@ cd deploy/docker && docker compose up -d
 ### 生产环境建议
 
 - 前端放 Gateway / Nginx 做 TLS 终结和鉴权
+- 数据目录可直接通过文件系统拷贝（层级存储）
 - Redis 启用 AOF 持久化
 - 定期执行 `fileupload scan` 或开启自动巡检
 - 数据目录和 SQLite 文件定期备份
@@ -461,6 +507,20 @@ go test -v -run TestUpload ./internal/domain/
 # 前端开发
 cd web && npm run dev
 ```
+
+---
+
+## 架构决策
+
+关键架构决策记录在 [docs/adr/](docs/adr/)：
+
+| ADR | 决策 |
+|-----|------|
+| 0001 | **物理文件存储策略** — Finalize 扁平写入 + SubmitDir 搬移到层级路径 |
+| 0002 | **文件标签存储方案** — file_tags 关联表（关系型） |
+| 0003 | **SubmitDir 复用 Finalize 记录** — 不重复创建元数据 |
+| 0004 | **目录上传目录树自动构建** — 解析路径分隔符创建中间节点 |
+| 0005 | **批量下载支持 zip** — Go 标准库 `archive/zip` 流式打包 |
 
 ---
 
