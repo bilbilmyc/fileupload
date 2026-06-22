@@ -58,8 +58,8 @@ type RedisConfig struct {
 
 // DatabaseConfig 冷数据库配置
 type DatabaseConfig struct {
-	Type string `json:"type" yaml:"type"`
-	Path string `json:"path" yaml:"path"`
+	Type string `json:"type" yaml:"type"`   // sqlite / postgres
+	Path string `json:"path" yaml:"path"`   // SQLite 文件路径 或 PostgreSQL DSN
 }
 
 // UploadConfig 上传服务配置

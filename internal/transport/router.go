@@ -18,6 +18,7 @@ type Router struct {
 	download   *DownloadHandler
 	batch      *BatchHandler
 	auth       *AuthHandler
+	admin      *AdminHandler
 	uploadSvc  *domain.UploadService
 	scanner    Scanner
 	health     HealthChecker
@@ -34,7 +35,7 @@ type HealthChecker interface {
 }
 
 // NewRouter 创建路由器并注册所有路由
-func NewRouter(mw *Middleware, tus *TusHandler, rest *RESTHandler, download *DownloadHandler, batch *BatchHandler, auth *AuthHandler, uploadSvc *domain.UploadService, scanner Scanner, health HealthChecker) *Router {
+func NewRouter(mw *Middleware, tus *TusHandler, rest *RESTHandler, download *DownloadHandler, batch *BatchHandler, auth *AuthHandler, admin *AdminHandler, uploadSvc *domain.UploadService, scanner Scanner, health HealthChecker) *Router {
 	r := &Router{
 		mux:        http.NewServeMux(),
 		middleware: mw,
@@ -43,6 +44,7 @@ func NewRouter(mw *Middleware, tus *TusHandler, rest *RESTHandler, download *Dow
 		download:   download,
 		batch:      batch,
 		auth:       auth,
+		admin:      admin,
 		uploadSvc:  uploadSvc,
 		scanner:    scanner,
 		health:     health,
@@ -109,6 +111,10 @@ func (r *Router) registerRoutes() {
 	r.mux.HandleFunc("POST /v1/batch/tags", r.batch.BatchTags)
 
 	// === 管理 ===
+	if r.admin != nil {
+		r.mux.HandleFunc("GET /v1/admin/status", r.admin.Status)
+		r.mux.HandleFunc("GET /v1/admin/audit", r.admin.AuditLog)
+	}
 	r.mux.HandleFunc("POST /v1/admin/scan", r.handleAdminScan)
 
 	// === 前端 React 构建产物 ===

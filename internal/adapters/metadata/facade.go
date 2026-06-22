@@ -129,6 +129,28 @@ func (f *Facade) ListAllFiles(ctx context.Context) ([]*domain.FileMetadata, erro
 	return f.cold.ListAllFiles(ctx)
 }
 
+// ========== 管理后台 ==========
+
+func (f *Facade) WriteAuditLog(ctx context.Context, entry *domain.AuditLogEntry) error {
+	return f.cold.WriteAuditLog(ctx, entry)
+}
+
+func (f *Facade) ListAuditLogs(ctx context.Context, page, perPage int) ([]*domain.AuditLogEntry, int, error) {
+	return f.cold.ListAuditLogs(ctx, page, perPage)
+}
+
+func (f *Facade) AdminCountFiles(ctx context.Context) (int, error) {
+	return f.cold.AdminCountFiles(ctx)
+}
+
+func (f *Facade) AdminCountBlobs(ctx context.Context) (int, error) {
+	return f.cold.AdminCountBlobs(ctx)
+}
+
+func (f *Facade) AdminTotalBlobSize(ctx context.Context) (int64, error) {
+	return f.cold.AdminTotalBlobSize(ctx)
+}
+
 // Close 关闭所有后端连接
 func (f *Facade) Close() error {
 	hotErr := f.hot.Close()

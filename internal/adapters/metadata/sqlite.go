@@ -62,6 +62,7 @@ func (s *SQLiteStore) migrate() error {
 			PRIMARY KEY (file_id, tag)
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_file_tags_tag ON file_tags(tag)`,
+		auditLogMigration,
 	}
 
 	for _, q := range queries {
