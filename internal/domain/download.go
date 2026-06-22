@@ -281,6 +281,25 @@ func (s *DownloadService) ListDir(ctx context.Context, parentID, namespace strin
 	return dir, children, nil
 }
 
+// GetAncestors 获取目录的完整祖先链（从根到当前目录）
+func (s *DownloadService) GetAncestors(ctx context.Context, fileID string) ([]*FileMetadata, error) {
+	var ancestors []*FileMetadata
+	seen := make(map[string]bool) // 防止循环引用
+	currentID := fileID
+	depth := 0
+	for currentID != "" && !seen[currentID] && depth < 100 {
+		seen[currentID] = true
+		file, err := s.meta.GetFile(ctx, currentID)
+		if err != nil || file == nil {
+			break
+		}
+		ancestors = append([]*FileMetadata{file}, ancestors...)
+		currentID = file.ParentID
+		depth++
+	}
+	return ancestors, nil
+}
+
 // GetDirTotalSize 递归计算目录下所有文件的总大小
 func (s *DownloadService) GetDirTotalSize(ctx context.Context, dirID string) (int64, error) {
 	children, err := s.meta.ListChildren(ctx, dirID)

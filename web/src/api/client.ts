@@ -29,6 +29,7 @@ export interface FileItem {
 export interface ListResult {
   dir: FileItem | null
   children: FileItem[]
+  ancestors?: FileItem[]
 }
 
 export interface UploadInitResult {

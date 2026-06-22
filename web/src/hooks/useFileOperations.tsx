@@ -16,7 +16,8 @@ export function useFileOperations(_namespace?: string) {
   const [loading, setLoading] = useState(false)
   const [currentDir, setCurrentDir] = useState<string>('/')
   const [parentName, setParentName] = useState<string>('')
-  const [parentID, setParentID] = useState<string | null>(null) // 上级目录 ID，用于"上一级"
+  const [parentID, setParentID] = useState<string | null>(null)
+  const [ancestors, setAncestors] = useState<FileItem[]>([]) // 上级目录 ID，用于"上一级"
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([])
@@ -34,6 +35,7 @@ export function useFileOperations(_namespace?: string) {
         setParentName('')
         setParentID(null)
       }
+      setAncestors(res.ancestors || [])
     } catch (e: any) {
       message.error(`加载失败: ${e.message}`)
     } finally {
@@ -81,26 +83,36 @@ export function useFileOperations(_namespace?: string) {
   }, [files])
 
   const breadcrumbItems = useMemo(() => {
-    const items: any[] = [
-      {
-        title: (
-          <a onClick={navigateToRoot}>
-            <span role="img" aria-label="root">📂</span> 根目录
-          </a>
-        ),
-      },
-    ]
-    if (currentDir !== '/' && parentName) {
+    const items: any[] = []
+    // 祖先链：从根到当前目录的完整路径
+    if (ancestors && ancestors.length > 0) {
+      for (let i = 0; i < ancestors.length; i++) {
+        const a = ancestors[i]
+        const isLast = i === ancestors.length - 1
+        items.push({
+          title: isLast ? (
+            <span className="text-gray-700 font-medium">
+              <span role="img" aria-label="folder">📁</span> {a.name}
+            </span>
+          ) : (
+            <a onClick={() => navigateToDir(a.file_id)} className="text-gray-500 hover:text-blue-500">
+              <span role="img" aria-label="folder">📁</span> {a.name}
+            </a>
+          ),
+        })
+      }
+    } else {
+      // 根目录
       items.push({
         title: (
-          <a onClick={navigateUp} className="text-gray-500 hover:text-blue-500 cursor-pointer">
-            <span role="img" aria-label="folder">📁</span> {parentName.slice(0, 16)}
-          </a>
+          <span className="text-gray-700 font-medium">
+            <span role="img" aria-label="root">📂</span> 根目录
+          </span>
         ),
       })
     }
     return items
-  }, [currentDir, parentName, navigateToRoot, navigateUp])
+  }, [ancestors, navigateToDir])
 
   const handleDownload = useCallback((record: FileItem) => {
     const url = record.is_dir
