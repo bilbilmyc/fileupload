@@ -20,8 +20,8 @@ redis:
   prefix: "upload:"          # key 前缀
 
 database:
-  type: "sqlite"             # 数据库类型：sqlite / postgres（pg 为预留）
-  path: "storage/fileupload.db"      # SQLite 文件路径 / PG DSN
+  type: "postgres"           # 数据库类型：sqlite / postgres
+  path: "postgres://postgres:Postgres%402026@12.2.40.40:35432/fileupload?sslmode=disable"  # SQLite 文件路径 / PG DSN
 
 upload:
   session_ttl_minutes: 60    # 上传会话无活动超时（分钟）

@@ -2,6 +2,7 @@ package domain
 
 import (
 	"context"
+	"runtime"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -87,12 +88,24 @@ func TestSimpleWorkerPool_QueueFull(t *testing.T) {
 }
 
 func TestNewSimpleWorkerPool_Defaults(t *testing.T) {
-	pool := NewSimpleWorkerPool(0, 0) // 应使用默认值
+	pool := NewSimpleWorkerPool(0, 0) // 应自动按 CPU 核数缩放
 	if pool == nil {
 		t.Fatal("NewSimpleWorkerPool returned nil")
 	}
+	expected := runtime.GOMAXPROCS(0) * 8
+	if pool.capacity != expected {
+		t.Errorf("default capacity = %d, want %d (GOMAXPROCS*8)", pool.capacity, expected)
+	}
+	pool.Stop()
+}
+
+func TestNewSimpleWorkerPool_ExplicitCapacity(t *testing.T) {
+	pool := NewSimpleWorkerPool(4, 20) // 显式指定，不应缩放
 	if pool.capacity != 4 {
-		t.Errorf("default capacity = %d, want 4", pool.capacity)
+		t.Errorf("capacity = %d, want 4", pool.capacity)
+	}
+	if cap(pool.tasks) != 20 {
+		t.Errorf("queue size = %d, want 20", cap(pool.tasks))
 	}
 	pool.Stop()
 }

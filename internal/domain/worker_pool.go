@@ -2,6 +2,7 @@ package domain
 
 import (
 	"context"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -16,13 +17,15 @@ type SimpleWorkerPool struct {
 	queued   atomic.Int32
 }
 
-// NewSimpleWorkerPool 创建固定大小的 worker 池
+// NewSimpleWorkerPool 创建 worker 池。
+// capacity <= 0 时自动按 CPU 核数缩放：GOMAXPROCS × 8。
+// queueSize <= 0 时按 capacity × 5 设置。
 func NewSimpleWorkerPool(capacity, queueSize int) *SimpleWorkerPool {
 	if capacity <= 0 {
-		capacity = 4
+		capacity = runtime.GOMAXPROCS(0) * 8
 	}
 	if queueSize <= 0 {
-		queueSize = 100
+		queueSize = capacity * 5
 	}
 	p := &SimpleWorkerPool{
 		capacity: capacity,
