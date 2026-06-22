@@ -10,14 +10,55 @@ import (
 	"github.com/bilbilmyc/fileupload/internal/domain"
 )
 
-// Facade Metadata 门面，路由请求到 RedisStore（热）或 SQLiteStore（冷）
+// ColdStore 冷数据存储接口（SQLite / PostgreSQL 均可实现）
+type ColdStore interface {
+	// Blob 操作
+	GetBlobBySha(ctx context.Context, sha256 string) (*domain.ContentBlob, error)
+	PutBlob(ctx context.Context, b *domain.ContentBlob) error
+	UpdateBlobStorage(ctx context.Context, sha256 string, storagePath string) error
+	IncrBlobRef(ctx context.Context, sha256 string) error
+	DecrBlobRef(ctx context.Context, sha256 string) (int, error)
+
+	// 文件操作
+	PutFile(ctx context.Context, f *domain.FileMetadata) error
+	GetFile(ctx context.Context, id string) (*domain.FileMetadata, error)
+	GetFileByPath(ctx context.Context, namespace, path string) (*domain.FileMetadata, error)
+	ListChildren(ctx context.Context, parentID string, search string) ([]*domain.FileMetadata, error)
+	DeleteFile(ctx context.Context, id string) error
+	ListFilesByBlob(ctx context.Context, sha256 string) ([]*domain.FileMetadata, error)
+	ListRoot(ctx context.Context, namespace string, search string) ([]*domain.FileMetadata, error)
+
+	// 标签
+	SetFileTags(ctx context.Context, fileID string, tags []string) error
+	GetFileTags(ctx context.Context, fileID string) ([]string, error)
+	DeleteFileTags(ctx context.Context, fileID string) error
+
+	// 批量操作
+	ReparentFile(ctx context.Context, fileID string, parentID *string, path string) error
+	UpdateFileParent(ctx context.Context, fileID string, parentID *string) error
+
+	// 一致性巡检
+	ListAllBlobs(ctx context.Context) ([]*domain.ContentBlob, error)
+	ListAllFiles(ctx context.Context) ([]*domain.FileMetadata, error)
+
+	// 审计日志
+	WriteAuditLog(ctx context.Context, entry *domain.AuditLogEntry) error
+	ListAuditLogs(ctx context.Context, page, perPage int) ([]*domain.AuditLogEntry, int, error)
+	AdminCountFiles(ctx context.Context) (int, error)
+	AdminCountBlobs(ctx context.Context) (int, error)
+	AdminTotalBlobSize(ctx context.Context) (int64, error)
+
+	Close() error
+}
+
+// Facade Metadata 门面，路由请求到 RedisStore（热）或 ColdStore（冷）
 type Facade struct {
-	hot  *RedisStore  // 热数据：会话/分片/offset
-	cold *SQLiteStore // 冷数据：content_blobs / files
+	hot  *RedisStore // 热数据：会话/分片/offset
+	cold ColdStore   // 冷数据：content_blobs / files
 }
 
 // NewFacade 创建 Metadata 门面
-func NewFacade(hot *RedisStore, cold *SQLiteStore) *Facade {
+func NewFacade(hot *RedisStore, cold ColdStore) *Facade {
 	return &Facade{hot: hot, cold: cold}
 }
 

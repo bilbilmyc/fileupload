@@ -116,14 +116,25 @@ func main() {
 	}
 	redisStore := metadata.NewRedisStore(rdb, cfg.Redis.Prefix)
 
-	// 3. SQLite 冷数据
-	sqliteStore, err := metadata.NewSQLiteStore(cfg.Database.Path)
-	if err != nil {
-		log.Fatalf("初始化 SQLite: %v", err)
+	// 3. 冷数据（SQLite / PostgreSQL）
+	var coldStore metadata.ColdStore
+	if cfg.Database.Type == "postgres" {
+		pgStore, err := metadata.NewPostgresStore(cfg.Database.Path)
+		if err != nil {
+			log.Fatalf("初始化 PostgreSQL: %v", err)
+		}
+		coldStore = pgStore
+		log.Printf("使用 PostgreSQL 数据库")
+	} else {
+		sqliteStore, err := metadata.NewSQLiteStore(cfg.Database.Path)
+		if err != nil {
+			log.Fatalf("初始化 SQLite: %v", err)
+		}
+		coldStore = sqliteStore
 	}
 
 	// 4. Metadata 门面
-	metaFacade := metadata.NewFacade(redisStore, sqliteStore)
+	metaFacade := metadata.NewFacade(redisStore, coldStore)
 
 	// 5. 压缩器
 	compress, err := compressor.NewCompressor()
