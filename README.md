@@ -536,6 +536,32 @@ cd web && npm run dev
 
 ---
 
+## SDK
+
+fileupload 提供多语言 SDK，方便其他服务集成：
+
+### Go SDK
+
+独立包 [`github.com/bilbilmyc/fileupload/sdk/go/fileupload`](sdk/go/fileupload)：
+
+```go
+client := fileupload.NewClient("http://localhost:8080")
+info, err := client.Upload(ctx, "data.bin", fileupload.WithCompression("zstd"))
+```
+
+### TypeScript SDK
+
+npm 包 [`@fileupload/sdk`](sdk/js)：
+
+```typescript
+const client = new FileuploadClient({ endpoint: 'http://localhost:8080' })
+const file = await client.upload(fileBlob, 'photo.jpg')
+```
+
+详见 [sdk/README.md](sdk/README.md)。
+
+---
+
 ## 许可证
 
 MIT

@@ -1,0 +1,22 @@
+{
+  "name": "@fileupload/sdk",
+  "version": "0.1.0",
+  "description": "File upload/download service SDK — browser & Node.js",
+  "type": "module",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": ["fileupload", "upload", "sdk"],
+  "license": "MIT",
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  },
+  "dependencies": {
+    "axios": "^1.8.0"
+  }
+}
