@@ -34,13 +34,15 @@ web-deps:
 web: web-deps
 	@echo "▸ 构建前端"
 	@cd web && npm run build
-	@echo "▸ 恢复占位 index.html（构建产物不追踪）"
-	@printf '<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/><title>fileupload 管理面板</title></head><body><div style="padding:48px;font-family:sans-serif;text-align:center;color:#64748b;"><h1>📦 fileupload</h1><p>前端尚未构建。</p><p>请运行：<code style="background:#f1f5f9;padding:4px 8px;border-radius:4px;">cd web && npm install && npm run build</code></p><p>然后重启服务端。</p></div></body></html>' > $(WEB_DIST_PLACEHOLDER)
 
 .PHONY: web-force
 web-force:
-	@echo "▸ 强制重新安装前端依赖"
+	@echo "▸ 强制重新安装前端依赖并构建"
 	@cd web && npm install && npm run build
+
+.PHONY: web-placeholder
+web-placeholder:
+	@echo "▸ 恢复占位 index.html（提交前执行，避免误追踪构建产物）"
 	@printf '<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/><title>fileupload 管理面板</title></head><body><div style="padding:48px;font-family:sans-serif;text-align:center;color:#64748b;"><h1>📦 fileupload</h1><p>前端尚未构建。</p><p>请运行：<code style="background:#f1f5f9;padding:4px 8px;border-radius:4px;">cd web && npm install && npm run build</code></p><p>然后重启服务端。</p></div></body></html>' > $(WEB_DIST_PLACEHOLDER)
 
 .PHONY: web-dev
