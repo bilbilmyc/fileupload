@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"io/fs"
 	"os"
@@ -256,6 +257,115 @@ func TestReap_HandlesListError(t *testing.T) {
 	// reap with nil meta should not panic
 	r := NewSessionReaper(nil, nil, "/tmp", time.Minute)
 	r.reap(context.Background()) // should not panic
+}
+
+func TestReap_ListExpiredError(t *testing.T) {
+	// If ListExpiredSessions returns error, reap should not panic
+	meta := newMockMeta()
+	// Inject error by passing a nil meta that fails on ListExpiredSessions
+	r := NewSessionReaper(meta, nil, t.TempDir(), time.Minute)
+	// override meta with one that returns error
+	r.meta = &errorMeta{}
+	r.reap(context.Background())
+}
+
+// errorMeta returns error on every method that matters for coverage
+type errorMeta struct{}
+
+func (e *errorMeta) CreateSession(_ context.Context, _ *domain.UploadSession) error { return nil }
+func (e *errorMeta) GetSession(_ context.Context, _ string) (*domain.UploadSession, error) { return nil, fmt.Errorf("fail") }
+func (e *errorMeta) UpdateOffset(_ context.Context, _ string, _ int, _ string, _ int64) error { return nil }
+func (e *errorMeta) ListChunks(_ context.Context, _ string) ([]domain.ChunkInfo, error) { return nil, nil }
+func (e *errorMeta) DeleteSession(_ context.Context, _ string) error { return nil }
+func (e *errorMeta) TouchSession(_ context.Context, _ string, _ time.Duration) error { return nil }
+func (e *errorMeta) ListExpiredSessions(_ context.Context) ([]string, error) { return nil, fmt.Errorf("list error") }
+func (e *errorMeta) GetBlobBySha(_ context.Context, _ string) (*domain.ContentBlob, error) { return nil, nil }
+func (e *errorMeta) PutBlob(_ context.Context, _ *domain.ContentBlob) error { return nil }
+func (e *errorMeta) IncrBlobRef(_ context.Context, _ string) error { return nil }
+func (e *errorMeta) DecrBlobRef(_ context.Context, _ string) (int, error) { return 0, nil }
+func (e *errorMeta) PutFile(_ context.Context, _ *domain.FileMetadata) error { return nil }
+func (e *errorMeta) GetFile(_ context.Context, _ string) (*domain.FileMetadata, error) { return nil, nil }
+func (e *errorMeta) GetFileByPath(_ context.Context, _, _ string) (*domain.FileMetadata, error) { return nil, nil }
+func (e *errorMeta) ListChildren(_ context.Context, _ string) ([]*domain.FileMetadata, error) { return nil, nil }
+func (e *errorMeta) DeleteFile(_ context.Context, _ string) error { return nil }
+func (e *errorMeta) ListFilesByBlob(_ context.Context, _ string) ([]*domain.FileMetadata, error) { return nil, nil }
+func (e *errorMeta) ListRoot(_ context.Context, _ string) ([]*domain.FileMetadata, error) { return nil, nil }
+func (e *errorMeta) ListAllBlobs(_ context.Context) ([]*domain.ContentBlob, error) { return nil, fmt.Errorf("fail") }
+func (e *errorMeta) ListAllFiles(_ context.Context) ([]*domain.FileMetadata, error) { return nil, nil }
+
+func TestCleanupOrphanParts_GetSessionError(t *testing.T) {
+	meta := &errorMeta{}
+	dir := t.TempDir()
+
+	// Create an orphan dir in temp dir
+	orphanDir := filepath.Join(dir, "orphan-session-with-error")
+	os.MkdirAll(orphanDir, 0755)
+	os.WriteFile(filepath.Join(orphanDir, "0.part"), []byte("x"), 0644)
+
+	r := NewSessionReaper(meta, nil, dir, time.Minute)
+	r.reap(context.Background())
+	// Should not panic; orphan dir should remain since GetSession returned error
+	_, err := os.Stat(orphanDir)
+	if err != nil {
+		t.Errorf("expected orphan dir to remain when GetSession errors, but it was removed")
+	}
+}
+
+func TestReap_CleanupSessionNoDir(t *testing.T) {
+	// cleanupSession when temp dir doesn't exist should not error
+	meta := newMockMeta()
+	meta.CreateSession(context.Background(), &domain.UploadSession{
+		SessionID: "ghost-session",
+		ExpireAt:  time.Now().Add(-1 * time.Hour),
+		Status:    "active",
+	})
+
+	r := NewSessionReaper(meta, nil, "/nonexistent-temp-dir", time.Minute)
+	r.reap(context.Background())
+	// Should not panic
+	session, _ := meta.GetSession(context.Background(), "ghost-session")
+	if session != nil {
+		t.Error("expected ghost-session to be deleted from meta")
+	}
+}
+
+func TestScanner_NilMeta(t *testing.T) {
+	// Scanner with nil meta should not panic
+	dir := t.TempDir()
+	s := NewConsistencyScanner(nil, nil, dir, dir)
+	result, err := s.Scan(context.Background())
+	if err != nil {
+		t.Fatalf("Scan with nil meta should not error: %v", err)
+	}
+	report := result.(*ScannerReport)
+	if report.OrphanParts != 0 {
+		t.Errorf("OrphanParts = %d, want 0", report.OrphanParts)
+	}
+}
+
+func TestScanner_ScanOrphanParts_ReadDirError(t *testing.T) {
+	// ReadDir on invalid path should not panic
+	s := NewConsistencyScanner(nil, nil, "/nonexistent", "/nonexistent")
+	result, err := s.Scan(context.Background())
+	if err != nil {
+		t.Fatalf("Scan error = %v", err)
+	}
+	report := result.(*ScannerReport)
+	if report.OrphanParts != 0 {
+		t.Errorf("OrphanParts = %d, want 0", report.OrphanParts)
+	}
+}
+
+func TestScanner_ScanRefCount_ListAllBlobsError(t *testing.T) {
+	// When ListAllBlobs returns error, scanRefCount should skip gracefully
+	st := newMockStorage()
+	dir := t.TempDir()
+	s := NewConsistencyScanner(&errorMeta{}, st, dir, dir)
+	result, err := s.Scan(context.Background())
+	if err != nil {
+		t.Fatalf("Scan error = %v", err)
+	}
+	_ = result
 }
 
 func TestCleanupOrphanParts_RemovesOrphanDirs(t *testing.T) {

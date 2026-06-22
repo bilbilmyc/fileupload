@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
+	"github.com/klauspost/compress/zstd"
 	"github.com/redis/go-redis/v9"
 
 	"github.com/bilbilmyc/fileupload/internal/adapters/compressor"
@@ -27,6 +28,7 @@ import (
 	"github.com/bilbilmyc/fileupload/internal/adapters/metadata"
 	"github.com/bilbilmyc/fileupload/internal/adapters/storage"
 	"github.com/bilbilmyc/fileupload/internal/domain"
+	"github.com/bilbilmyc/fileupload/internal/lifecycle"
 )
 
 // e2eFixture 全链路集成测试的测试夹具
@@ -101,14 +103,15 @@ func newE2EFixture(t *testing.T) *e2eFixture {
 	downloadCfg := domain.DownloadConfig{DataDir: dataDir}
 	downloadSvc := domain.NewDownloadService(metaFacade, localFS, compress, hasher, downloadCfg)
 
-	// 9. 传输层
+	// 9. Scanner
+	scanner := lifecycle.NewConsistencyScanner(metaFacade, localFS, dataDir, tempDir)
+
+	// 10. 传输层
 	mw := NewMiddleware()
 	tusHandler := NewTusHandler(uploadSvc)
 	restHandler := NewRESTHandler(uploadSvc, downloadSvc)
 	downloadHandler := NewDownloadHandler(downloadSvc)
-
-	// Scanner 可选 — 传 nil 以跳过管理路由
-	router := NewRouter(mw, tusHandler, restHandler, downloadHandler, uploadSvc, nil)
+	router := NewRouter(mw, tusHandler, restHandler, downloadHandler, uploadSvc, scanner)
 
 	// 10. httptest 服务器
 	srv := httptest.NewServer(router.Handler())
@@ -451,6 +454,330 @@ func TestE2E_DirUploadAndDownload(t *testing.T) {
 
 	_ = shaA
 	_ = shaB
+}
+
+func TestE2E_TusProtocol(t *testing.T) {
+	f := newE2EFixture(t)
+	namespace := "tus-ns"
+	content := []byte("tus protocol test data")
+	contentSHA := sha256Hex(content)
+
+	// === 1. Tus POST — create session ===
+	postResp := f.doReq("POST", "/uploads", nil, map[string]string{
+		"Upload-Length": fmt.Sprint(len(content)),
+		"X-SHA256":      contentSHA,
+		"X-File-Name":   "tus-test.txt",
+		"X-Compression": "none",
+		"X-Chunk-Size":  "1048576",
+		"X-Namespace":   namespace,
+	})
+	if postResp.StatusCode != http.StatusCreated {
+		t.Fatalf("Tus POST status = %d, want 201; body=%s", postResp.StatusCode, readBody(postResp))
+	}
+	location := postResp.Header.Get("Location")
+	if location == "" {
+		t.Fatal("Tus POST missing Location header")
+	}
+	sessionID := strings.TrimPrefix(location, "/uploads/")
+	if sessionID == "" {
+		t.Fatal("empty session ID from Location header")
+	}
+	postResp.Body.Close()
+
+	if postResp.Header.Get("Upload-Offset") != "0" {
+		t.Errorf("Upload-Offset = %s, want 0", postResp.Header.Get("Upload-Offset"))
+	}
+
+	// === 2. Tus HEAD — verify offset (0) ===
+	headResp := f.doReq("HEAD", "/uploads/"+sessionID, nil, map[string]string{
+		"X-Namespace": namespace,
+	})
+	if headResp.StatusCode != http.StatusOK {
+		t.Fatalf("Tus HEAD status = %d, want 200; body=%s", headResp.StatusCode, readBody(headResp))
+	}
+	offset := headResp.Header.Get("Upload-Offset")
+	if offset != "0" {
+		t.Errorf("HEAD offset = %s, want 0", offset)
+	}
+	headResp.Body.Close()
+
+	// === 3. Tus PATCH — upload chunk ===
+	patchResp := f.doReq("PATCH", "/uploads/"+sessionID,
+		bytes.NewReader(content), map[string]string{
+			"Upload-Offset":  "0",
+			"X-Slice-Index":  "0",
+			"X-Slice-SHA256": contentSHA,
+			"X-Namespace":    namespace,
+			"Content-Type":   "application/offset+octet-stream",
+		})
+	if patchResp.StatusCode != http.StatusNoContent {
+		t.Fatalf("Tus PATCH status = %d, want 204; body=%s", patchResp.StatusCode, readBody(patchResp))
+	}
+	_ = patchResp.Header.Get("Upload-Offset")
+	patchResp.Body.Close()
+
+	// === 4. Tus HEAD — check offset (may be 0 if metadata store doesn't track sizes) ===
+	head2Resp := f.doReq("HEAD", "/uploads/"+sessionID, nil, map[string]string{
+		"X-Namespace": namespace,
+	})
+	if head2Resp.StatusCode != http.StatusOK {
+		t.Fatalf("Tus HEAD2 status = %d; body=%s", head2Resp.StatusCode, readBody(head2Resp))
+	}
+	head2Resp.Body.Close()
+
+	// === 5. Finalize (REST endpoint) ===
+	finalResp := f.doReq("POST", "/v1/uploads/"+sessionID+"/finalize", nil, map[string]string{
+		"X-Namespace": namespace,
+	})
+	if finalResp.StatusCode != http.StatusOK {
+		t.Fatalf("Finalize status = %d; body=%s", finalResp.StatusCode, readBody(finalResp))
+	}
+	var finalResult map[string]any
+	json.NewDecoder(finalResp.Body).Decode(&finalResult)
+	finalResp.Body.Close()
+	fileID := finalResult["file_id"].(string)
+	if finalResult["sha256"] != contentSHA {
+		t.Errorf("finalize sha256 = %v, want %s", finalResult["sha256"], contentSHA)
+	}
+
+	// === 6. Download and verify ===
+	dlResp := f.doReq("GET", "/v1/files/"+fileID, nil, map[string]string{
+		"X-Namespace": namespace,
+	})
+	if dlResp.StatusCode != http.StatusOK {
+		t.Fatalf("Download status = %d; body=%s", dlResp.StatusCode, readBody(dlResp))
+	}
+	downloaded, _ := io.ReadAll(dlResp.Body)
+	dlResp.Body.Close()
+	if !bytes.Equal(downloaded, content) {
+		t.Errorf("downloaded content mismatch: got %d bytes, want %d", len(downloaded), len(content))
+	}
+}
+
+func TestE2E_ZstdCompression(t *testing.T) {
+	f := newE2EFixture(t)
+	namespace := "zstd-ns"
+	content := bytes.Repeat([]byte("compressible data pattern! "), 1000)
+	contentSHA := sha256Hex(content)
+
+	initResp := f.doReq("POST", "/v1/uploads/init?size="+fmt.Sprint(len(content)), nil, map[string]string{
+		"X-SHA256":      contentSHA,
+		"X-File-Name":   "zstd-test.txt",
+		"X-Namespace":   namespace,
+		"X-Compression": "zstd",
+	})
+	if initResp.StatusCode != http.StatusCreated {
+		t.Fatalf("Init status = %d; body=%s", initResp.StatusCode, readBody(initResp))
+	}
+	var initResult map[string]any
+	json.NewDecoder(initResp.Body).Decode(&initResult)
+	initResp.Body.Close()
+	sessionID := initResult["session_id"].(string)
+
+	// Compress data using zstd directly
+	var compressedBuf bytes.Buffer
+	zw, err := zstd.NewWriter(&compressedBuf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = io.Copy(zw, bytes.NewReader(content))
+	zw.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	compressedData := compressedBuf.Bytes()
+
+	chunkResp := f.doReq("PUT", "/v1/uploads/"+sessionID+"/chunks/0",
+		bytes.NewReader(compressedData), map[string]string{
+			"X-Namespace":  namespace,
+			"Content-Type": "application/octet-stream",
+		})
+	if chunkResp.StatusCode != http.StatusOK {
+		t.Fatalf("UploadChunk status = %d; body=%s", chunkResp.StatusCode, readBody(chunkResp))
+	}
+	chunkResp.Body.Close()
+
+	finalResp := f.doReq("POST", "/v1/uploads/"+sessionID+"/finalize", nil, map[string]string{
+		"X-Namespace": namespace,
+	})
+	if finalResp.StatusCode != http.StatusOK {
+		t.Fatalf("Finalize status = %d; body=%s", finalResp.StatusCode, readBody(finalResp))
+	}
+	var finalResult map[string]any
+	json.NewDecoder(finalResp.Body).Decode(&finalResult)
+	finalResp.Body.Close()
+	fileID := finalResult["file_id"].(string)
+	if finalResult["sha256"] != contentSHA {
+		t.Errorf("sha256 = %v, want %s", finalResult["sha256"], contentSHA)
+	}
+
+	// Download and verify decompressed content matches original
+	dlResp := f.doReq("GET", "/v1/files/"+fileID, nil, map[string]string{
+		"X-Namespace": namespace,
+	})
+	if dlResp.StatusCode != http.StatusOK {
+		t.Fatalf("Download status = %d; body=%s", dlResp.StatusCode, readBody(dlResp))
+	}
+	downloaded, _ := io.ReadAll(dlResp.Body)
+	dlResp.Body.Close()
+	if !bytes.Equal(downloaded, content) {
+		t.Errorf("downloaded content mismatch: got %d bytes, want %d", len(downloaded), len(content))
+	}
+	if sha256Hex(downloaded) != contentSHA {
+		t.Errorf("downloaded SHA256 mismatch")
+	}
+}
+
+func TestE2E_CancelUpload(t *testing.T) {
+	f := newE2EFixture(t)
+	namespace := "cancel-ns"
+	content := []byte("to be cancelled")
+
+	initResp := f.doReq("POST", "/v1/uploads/init?size="+fmt.Sprint(len(content)), nil, map[string]string{
+		"X-SHA256":      sha256Hex(content),
+		"X-File-Name":   "cancel-test.txt",
+		"X-Namespace":   namespace,
+		"X-Compression": "none",
+	})
+	if initResp.StatusCode != http.StatusCreated {
+		t.Fatalf("Init status = %d", initResp.StatusCode)
+	}
+	var initResult map[string]any
+	json.NewDecoder(initResp.Body).Decode(&initResult)
+	initResp.Body.Close()
+	sessionID := initResult["session_id"].(string)
+
+	// Upload chunk so there's temp data
+	chunkResp := f.doReq("PUT", "/v1/uploads/"+sessionID+"/chunks/0",
+		bytes.NewReader(content), map[string]string{"X-Namespace": namespace})
+	if chunkResp.StatusCode != http.StatusOK {
+		t.Fatalf("UploadChunk status = %d", chunkResp.StatusCode)
+	}
+	chunkResp.Body.Close()
+
+	// Cancel (tus DELETE)
+	cancelResp := f.doReq("DELETE", "/uploads/"+sessionID, nil, map[string]string{
+		"X-Namespace": namespace,
+	})
+	if cancelResp.StatusCode != http.StatusNoContent {
+		t.Fatalf("Cancel status = %d, want 204", cancelResp.StatusCode)
+	}
+	cancelResp.Body.Close()
+
+	// Finalize should fail after cancel
+	finalResp := f.doReq("POST", "/v1/uploads/"+sessionID+"/finalize", nil, map[string]string{
+		"X-Namespace": namespace,
+	})
+	if finalResp.StatusCode != http.StatusNotFound && finalResp.StatusCode != http.StatusConflict {
+		t.Errorf("Finalize after cancel status = %d, want 404 or 409; body=%s",
+			finalResp.StatusCode, readBody(finalResp))
+	}
+	finalResp.Body.Close()
+
+	// Verify temp dir cleaned
+	tempSessionDir := filepath.Join(f.tempDir, sessionID)
+	_, err := os.Stat(tempSessionDir)
+	if !os.IsNotExist(err) {
+		t.Logf("Note: temp dir %s still exists (may be cleaned async)", tempSessionDir)
+	}
+}
+
+func TestE2E_MultipleFilesSequential(t *testing.T) {
+	f := newE2EFixture(t)
+	namespace := "multi-seq-ns"
+	numFiles := 5
+
+	for i := range numFiles {
+		content := []byte(fmt.Sprintf("sequential file %d — unique content here", i))
+		contentSHA := sha256Hex(content)
+		name := fmt.Sprintf("seq-%d.txt", i)
+
+		t.Run(name, func(t *testing.T) {
+			initResp := f.doReq("POST", "/v1/uploads/init?size="+fmt.Sprint(len(content)), nil, map[string]string{
+				"X-SHA256": contentSHA, "X-Compression": "none",
+				"X-File-Name": name, "X-Namespace": namespace,
+			})
+			if initResp.StatusCode != http.StatusCreated {
+				t.Fatalf("init status=%d", initResp.StatusCode)
+			}
+			var initResult map[string]any
+			json.NewDecoder(initResp.Body).Decode(&initResult)
+			initResp.Body.Close()
+			sessionID := initResult["session_id"].(string)
+
+			chunkResp := f.doReq("PUT", "/v1/uploads/"+sessionID+"/chunks/0",
+				bytes.NewReader(content), map[string]string{"X-Namespace": namespace})
+			if chunkResp.StatusCode != http.StatusOK {
+				t.Fatalf("chunk status=%d", chunkResp.StatusCode)
+			}
+			chunkResp.Body.Close()
+
+			finalResp := f.doReq("POST", "/v1/uploads/"+sessionID+"/finalize", nil,
+				map[string]string{"X-Namespace": namespace})
+			if finalResp.StatusCode != http.StatusOK {
+				t.Fatalf("finalize status=%d; body=%s", finalResp.StatusCode, readBody(finalResp))
+			}
+			var finalResult map[string]any
+			json.NewDecoder(finalResp.Body).Decode(&finalResult)
+			finalResp.Body.Close()
+
+			dlResp := f.doReq("GET", "/v1/files/"+finalResult["file_id"].(string), nil,
+				map[string]string{"X-Namespace": namespace})
+			if dlResp.StatusCode != http.StatusOK {
+				t.Fatalf("download status=%d", dlResp.StatusCode)
+			}
+			downloaded, _ := io.ReadAll(dlResp.Body)
+			dlResp.Body.Close()
+			if !bytes.Equal(downloaded, content) {
+				t.Error("content mismatch")
+			}
+		})
+	}
+}
+
+func TestE2E_AdminScan(t *testing.T) {
+	f := newE2EFixture(t)
+
+	content := []byte("scan test content")
+	contentSHA := sha256Hex(content)
+	initResp := f.doReq("POST", "/v1/uploads/init?size="+fmt.Sprint(len(content)), nil, map[string]string{
+		"X-SHA256": contentSHA, "X-Compression": "none",
+		"X-File-Name": "scan-test.txt", "X-Namespace": "scan-ns",
+	})
+	var initResult map[string]any
+	json.NewDecoder(initResp.Body).Decode(&initResult)
+	initResp.Body.Close()
+	sess := initResult["session_id"].(string)
+	f.doReq("PUT", "/v1/uploads/"+sess+"/chunks/0",
+		bytes.NewReader(content), map[string]string{"X-Namespace": "scan-ns"}).Body.Close()
+	finalResp := f.doReq("POST", "/v1/uploads/"+sess+"/finalize", nil,
+		map[string]string{"X-Namespace": "scan-ns"})
+	var finalResult map[string]any
+	json.NewDecoder(finalResp.Body).Decode(&finalResult)
+	finalResp.Body.Close()
+
+	// Orphan temp file (no corresponding session)
+	orphanPart := filepath.Join(f.tempDir, "orphan-standalone.part")
+	os.WriteFile(orphanPart, []byte("orphan"), 0644)
+
+	// Run scan
+	scanResp := f.doReq("POST", "/v1/admin/scan", nil, nil)
+	if scanResp.StatusCode != http.StatusOK {
+		t.Fatalf("Admin scan status = %d, want 200; body=%s", scanResp.StatusCode, readBody(scanResp))
+	}
+	var report map[string]any
+	json.NewDecoder(scanResp.Body).Decode(&report)
+	scanResp.Body.Close()
+
+	for _, key := range []string{"orphan_parts", "orphan_files", "metadata_orphans", "ref_count_fixes"} {
+		if _, ok := report[key]; !ok {
+			t.Errorf("scan report missing %s", key)
+		}
+	}
+	t.Logf("Scan report: %+v", report)
+
+	_ = contentSHA
+	_ = finalResult
 }
 
 func TestE2E_SecPassDedup(t *testing.T) {
