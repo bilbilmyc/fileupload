@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useCallback } from 'react'
+import { useEffect, useMemo, useState, useCallback, useRef } from 'react'
 import {
   Layout,
   Space,
@@ -177,7 +177,16 @@ export default function Files() {
     }
   }
 
-  const uploadSingleFile = async (file: RcFile, taskId: string) => {
+  // 目录上传批次跟踪（taskId → 目录信息）
+  const dirBatches = useRef<Map<string, {
+    dirName: string
+    entries: { path: string; file_id: string }[]
+    total: number
+    done: number
+    taskId: string
+  }>>(new Map())
+
+  const uploadSingleFile = async (file: RcFile, taskId: string, dirRelPath?: string) => {
     const size = file.size
     updateTask(taskId, { status: 'hashing', progress: 0 })
 
@@ -195,7 +204,8 @@ export default function Files() {
         if (exists) {
           updateTask(taskId, { status: 'done', progress: 100 })
           message.success(`秒传: ${file.name}`)
-          loadFiles()
+          if (dirRelPath) recordDirFile(taskId, dirRelPath, exists.file_id)
+          else loadFiles()
           return
         }
       } catch {
@@ -239,13 +249,41 @@ export default function Files() {
 
     updateTask(taskId, { status: 'finalizing', progress: 99 })
     try {
-      await api.finalizeUpload(init.session_id)
+      const result = await api.finalizeUpload(init.session_id)
       updateTask(taskId, { status: 'done', progress: 100 })
-      message.success(`上传完成: ${file.name}`)
-      loadFiles()
+
+      if (dirRelPath) {
+        // 目录模式：记录文件路径，提交 manifest
+        recordDirFile(taskId, dirRelPath, result.file_id)
+      } else {
+        message.success(`上传完成: ${file.name}`)
+        loadFiles()
+      }
     } catch (e: any) {
       updateTask(taskId, { status: 'error', error: e.message })
       throw e
+    }
+  }
+
+  // 记录目录文件并检测是否完成
+  const recordDirFile = (batchTaskId: string, relPath: string, fileId: string) => {
+    const batch = dirBatches.current.get(batchTaskId)
+    if (!batch) return
+    batch.entries.push({ path: relPath, file_id: fileId })
+    batch.done++
+    updateTask(batchTaskId, { progress: Math.round((batch.done / batch.total) * 100) })
+
+    if (batch.done >= batch.total) {
+      // 所有文件上传完成，提交目录 manifest
+      updateTask(batchTaskId, { status: 'finalizing', progress: 99 })
+      api.submitDir(batch.dirName, batch.entries).then(() => {
+        updateTask(batchTaskId, { status: 'done', progress: 100, name: `📁 ${batch.dirName}` })
+        message.success(`目录上传完成: ${batch.dirName} (${batch.entries.length} 个文件)`)
+        dirBatches.current.delete(batchTaskId)
+        loadFiles()
+      }).catch((e: any) => {
+        updateTask(batchTaskId, { status: 'error', error: e.message })
+      })
     }
   }
 
@@ -255,11 +293,11 @@ export default function Files() {
     )
   }
 
-  const addTask = (file: RcFile): string => {
+  const addTask = (file: RcFile, dirName?: string): string => {
     const id = `${file.name}-${Date.now()}-${Math.random()}`
     const task: UploadTask = {
       id,
-      name: file.name,
+      name: dirName ? `📁 ${dirName} — ${file.name}` : file.name,
       size: file.size,
       status: 'pending',
       progress: 0,
@@ -270,13 +308,54 @@ export default function Files() {
 
   const customRequest = async (options: any) => {
     const { file, onSuccess, onError } = options
-    const taskId = addTask(file)
-    try {
-      await uploadSingleFile(file, taskId)
-      onSuccess?.()
-    } catch (e: any) {
-      updateTask(taskId, { status: 'error', error: e.message })
-      onError?.(e)
+
+    if (dirMode && file.webkitRelativePath) {
+      // ===== 目录模式 =====
+      const parts = file.webkitRelativePath.split('/')
+      const dirName = parts[0]
+      const relPath = parts.slice(1).join('/')
+
+      // 查找或创建批次
+      let batch = dirBatches.current.get(dirName)
+      if (!batch) {
+        // 首次遇到此目录：先估算总文件数（创建一个占位任务）
+        const placeholderId = `dir-${dirName}-${Date.now()}`
+        const task: UploadTask = {
+          id: placeholderId,
+          name: `📁 ${dirName}`,
+          size: 0,
+          status: 'pending',
+          progress: 0,
+        }
+        setUploadTasks((prev) => [...prev, task])
+        // 暂存：稍后在收集完所有文件后更新 total
+        batch = { dirName, entries: [], total: 0, done: 0, taskId: placeholderId }
+        dirBatches.current.set(dirName, batch)
+        dirBatches.current.set(placeholderId, batch)
+      }
+
+      batch.total++
+      // 实际 total 在文件逐个到达时递增，用于进度计算
+
+      // 每个文件单独一个 taskId 用于进度显示
+      const taskId = addTask(file, dirName)
+      try {
+        await uploadSingleFile(file, taskId, relPath)
+        onSuccess?.()
+      } catch (e: any) {
+        updateTask(taskId, { status: 'error', error: (e as Error).message })
+        onError?.(e)
+      }
+    } else {
+      // ===== 单文件/多文件模式 =====
+      const taskId = addTask(file)
+      try {
+        await uploadSingleFile(file, taskId)
+        onSuccess?.()
+      } catch (e: any) {
+        updateTask(taskId, { status: 'error', error: (e as Error).message })
+        onError?.(e)
+      }
     }
   }
 
