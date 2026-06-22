@@ -397,6 +397,97 @@ func TestSubmitDir(t *testing.T) {
 	}
 }
 
+func TestSubmitDir_NestedStructure(t *testing.T) {
+	svc, meta, _ := newTestUploadService(t)
+	ctx := context.Background()
+
+	// 先创建引用文件
+	files := []*FileMetadata{
+		{FileID: "f1", SHA256: "sha1", Name: "a.txt", Path: "a.txt", Size: 100, Namespace: "demo", CreatedAt: time.Now()},
+		{FileID: "f2", SHA256: "sha2", Name: "b.txt", Path: "b.txt", Size: 200, Namespace: "demo", CreatedAt: time.Now()},
+		{FileID: "f3", SHA256: "sha3", Name: "c.txt", Path: "c.txt", Size: 300, Namespace: "demo", CreatedAt: time.Now()},
+		{FileID: "f4", SHA256: "sha4", Name: "d.txt", Path: "d.txt", Size: 400, Namespace: "demo", CreatedAt: time.Now()},
+	}
+	for _, f := range files {
+		meta.PutFile(ctx, f)
+	}
+
+	// 嵌套目录结构
+	manifest := DirManifest{
+		Name: "myfolder",
+		Entries: []DirEntry{
+			{Path: "subdir/a.txt", FileID: "f1"},
+			{Path: "subdir/nested/b.txt", FileID: "f2"},
+			{Path: "other/c.txt", FileID: "f3"},
+			{Path: "d.txt", FileID: "f4"}, // 根目录下的文件
+		},
+	}
+
+	dir, err := svc.SubmitDir(ctx, manifest, "demo")
+	if err != nil {
+		t.Fatalf("SubmitDir error = %v", err)
+	}
+
+	// 验证根目录直接子节点：subdir, other, d.txt
+	rootChildren, _ := meta.ListChildren(ctx, dir.FileID)
+	if len(rootChildren) != 3 {
+		t.Fatalf("根目录子节点数 = %d, want 3 (subdir, other, d.txt)", len(rootChildren))
+	}
+
+	// 找出 subdir 和 other 目录节点
+	var subdirID, otherID string
+	for _, c := range rootChildren {
+		if c.Name == "subdir" && c.IsDir {
+			subdirID = c.FileID
+		}
+		if c.Name == "other" && c.IsDir {
+			otherID = c.FileID
+		}
+		if c.Name == "d.txt" && !c.IsDir {
+			// d.txt 应该在根目录下
+		}
+	}
+	if subdirID == "" {
+		t.Fatal("未找到 subdir 目录节点")
+	}
+	if otherID == "" {
+		t.Fatal("未找到 other 目录节点")
+	}
+
+	// 验证 subdir 的子节点：a.txt, nested
+	subdirChildren, _ := meta.ListChildren(ctx, subdirID)
+	if len(subdirChildren) != 2 {
+		t.Fatalf("subdir 子节点数 = %d, want 2 (a.txt, nested)", len(subdirChildren))
+	}
+	var nestedID string
+	for _, c := range subdirChildren {
+		if c.Name == "a.txt" && !c.IsDir && c.ParentID == subdirID {
+			// a.txt parent 应为 subdir
+		}
+		if c.Name == "nested" && c.IsDir {
+			nestedID = c.FileID
+		}
+	}
+	if nestedID == "" {
+		t.Fatal("未找到嵌套的子目录 nested")
+	}
+
+	// 验证 nested 的子节点：b.txt
+	nestedChildren, _ := meta.ListChildren(ctx, nestedID)
+	if len(nestedChildren) != 1 {
+		t.Fatalf("nested 子节点数 = %d, want 1 (b.txt)", len(nestedChildren))
+	}
+	if nestedChildren[0].Name != "b.txt" || nestedChildren[0].IsDir {
+		t.Error("nested 子节点应为 b.txt 文件")
+	}
+
+	// 验证 other 的子节点：c.txt
+	otherChildren, _ := meta.ListChildren(ctx, otherID)
+	if len(otherChildren) != 1 || otherChildren[0].Name != "c.txt" {
+		t.Error("other 子节点应为 c.txt")
+	}
+}
+
 func TestDelete_SingleFile(t *testing.T) {
 	svc, meta, storage := newTestUploadService(t)
 	ctx := context.Background()

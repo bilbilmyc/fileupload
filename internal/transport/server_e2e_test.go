@@ -425,9 +425,29 @@ func TestE2E_DirUploadAndDownload(t *testing.T) {
 	json.NewDecoder(lsResp.Body).Decode(&lsResult)
 	lsResp.Body.Close()
 	children := lsResult["children"].([]any)
-	if len(children) != 2 {
-		t.Errorf("ListDir children = %d, want 2", len(children))
-	}
+		if len(children) != 1 {
+			t.Errorf("ListDir children = %d, want 1 (subdir dir node)", len(children))
+		}
+		firstChild := children[0].(map[string]any)
+		subdirID, ok := firstChild["file_id"].(string)
+		if !ok || !firstChild["is_dir"].(bool) {
+			t.Fatal("expected subdir directory node")
+		}
+
+		// List subdir
+		subResp := f.doReq("GET", "/v1/ls?parent="+subdirID, nil, map[string]string{
+			"X-Namespace": namespace,
+		})
+		if subResp.StatusCode != http.StatusOK {
+			t.Fatalf("ListSubdir status = %d", subResp.StatusCode)
+		}
+		var subResult map[string]any
+		json.NewDecoder(subResp.Body).Decode(&subResult)
+		subResp.Body.Close()
+		subChildren := subResult["children"].([]any)
+		if len(subChildren) != 2 {
+			t.Errorf("Subdir children = %d, want 2 (a.txt, b.txt)", len(subChildren))
+		}
 
 	// === 5. Download dir (just verify it starts streaming) ===
 	dlResp := f.doReq("GET", "/v1/dirs/"+dirID+"?format=tar.gz", nil, map[string]string{

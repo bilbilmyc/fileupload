@@ -469,6 +469,7 @@ func (s *UploadService) cleanupTempChunks(ctx context.Context, sessionID string,
 }
 
 // SubmitDir 提交目录 manifest，建目录树
+// 支持嵌套目录结构：entry.Path 中的 "/" 分隔符会被解析为子目录层级。
 func (s *UploadService) SubmitDir(ctx context.Context, manifest DirManifest, namespace string) (*FileMetadata, error) {
 	dirID := NewID()
 	now := time.Now()
@@ -490,14 +491,72 @@ func (s *UploadService) SubmitDir(ctx context.Context, manifest DirManifest, nam
 		return nil, fmt.Errorf("创建目录节点: %w", err)
 	}
 
-	// 创建子节点
+	// 构建目录树映射：路径 -> 目录节点 FileID
+	// "" 表示根目录
+	dirMap := map[string]string{"": dirID}
+
+	// 收集所有不重复的目录路径
+	dirPaths := make(map[string]bool)
+	for _, entry := range manifest.Entries {
+		for i := 0; i < len(entry.Path); i++ {
+			if entry.Path[i] == '/' {
+				dirPaths[entry.Path[:i]] = true
+			}
+		}
+	}
+
+	// 排序确保父目录先于子目录创建
+	sortedDirs := make([]string, 0, len(dirPaths))
+	for d := range dirPaths {
+		sortedDirs = append(sortedDirs, d)
+	}
+	sort.Strings(sortedDirs)
+
+	// 创建子目录节点
+	for _, dirPath := range sortedDirs {
+		parentPath := ""
+		if idx := strings.LastIndex(dirPath, "/"); idx >= 0 {
+			parentPath = dirPath[:idx]
+		}
+		parentID, ok := dirMap[parentPath]
+		if !ok {
+			parentID = dirID
+		}
+
+		subDirID := NewID()
+		subDir := &FileMetadata{
+			FileID:    subDirID,
+			Name:      filepath.Base(dirPath),
+			Path:      dirPath,
+			Namespace: namespace,
+			IsDir:     true,
+			ParentID:  parentID,
+			CreatedAt: now,
+		}
+		if err := s.meta.PutFile(ctx, subDir); err != nil {
+			return nil, fmt.Errorf("创建子目录 %s: %w", dirPath, err)
+		}
+		dirMap[dirPath] = subDirID
+	}
+
+	// 创建文件子节点
 	for _, entry := range manifest.Entries {
 		childID := NewID()
-		// 查原文件信息
 		parentFile, err := s.meta.GetFile(ctx, entry.FileID)
 		if err != nil || parentFile == nil {
 			continue
 		}
+
+		// 确定父目录
+		parentPath := ""
+		if idx := strings.LastIndex(entry.Path, "/"); idx >= 0 {
+			parentPath = entry.Path[:idx]
+		}
+		parentID, ok := dirMap[parentPath]
+		if !ok {
+			parentID = dirID
+		}
+
 		child := &FileMetadata{
 			FileID:    childID,
 			SHA256:    parentFile.SHA256,
@@ -506,13 +565,13 @@ func (s *UploadService) SubmitDir(ctx context.Context, manifest DirManifest, nam
 			Size:      parentFile.Size,
 			Namespace: namespace,
 			IsDir:     false,
-			ParentID:  dirID,
+			ParentID:  parentID,
 			CreatedAt: now,
 		}
 		_ = s.meta.PutFile(ctx, child)
 	}
 
-	log.Printf("[upload] 目录创建 %s (%s): %d 个子文件", root.FileID, dirName, len(manifest.Entries))
+	log.Printf("[upload] 目录创建 %s (%s): %d 个子文件, %d 个子目录", root.FileID, dirName, len(manifest.Entries), len(dirPaths))
 	return root, nil
 }
 
