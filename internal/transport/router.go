@@ -19,6 +19,7 @@ type Router struct {
 	batch      *BatchHandler
 	auth       *AuthHandler
 	admin      *AdminHandler
+	share      *ShareHandler
 	uploadSvc  *domain.UploadService
 	scanner    Scanner
 	health     HealthChecker
@@ -35,7 +36,7 @@ type HealthChecker interface {
 }
 
 // NewRouter 创建路由器并注册所有路由
-func NewRouter(mw *Middleware, tus *TusHandler, rest *RESTHandler, download *DownloadHandler, batch *BatchHandler, auth *AuthHandler, admin *AdminHandler, uploadSvc *domain.UploadService, scanner Scanner, health HealthChecker) *Router {
+func NewRouter(mw *Middleware, tus *TusHandler, rest *RESTHandler, download *DownloadHandler, batch *BatchHandler, auth *AuthHandler, admin *AdminHandler, share *ShareHandler, uploadSvc *domain.UploadService, scanner Scanner, health HealthChecker) *Router {
 	r := &Router{
 		mux:        http.NewServeMux(),
 		middleware: mw,
@@ -45,6 +46,7 @@ func NewRouter(mw *Middleware, tus *TusHandler, rest *RESTHandler, download *Dow
 		batch:      batch,
 		auth:       auth,
 		admin:      admin,
+		share:      share,
 		uploadSvc:  uploadSvc,
 		scanner:    scanner,
 		health:     health,

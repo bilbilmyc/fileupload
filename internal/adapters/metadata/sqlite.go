@@ -63,6 +63,16 @@ func (s *SQLiteStore) migrate() error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_file_tags_tag ON file_tags(tag)`,
 		auditLogMigration,
+		`CREATE TABLE IF NOT EXISTS shares (
+			token        TEXT PRIMARY KEY,
+			file_id      TEXT NOT NULL,
+			password_hash TEXT NOT NULL DEFAULT '',
+			expires_at   TEXT NOT NULL DEFAULT '',
+			max_downloads INTEGER NOT NULL DEFAULT 0,
+			cur_downloads INTEGER NOT NULL DEFAULT 0,
+			namespace    TEXT NOT NULL DEFAULT '',
+			created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+		)`,
 	}
 
 	for _, q := range queries {
@@ -360,6 +370,33 @@ func (s *SQLiteStore) UpdateFileParent(_ context.Context, fileID string, parentI
 		_, res = s.db.Exec(`UPDATE files SET parent_id = ? WHERE file_id = ?`, *parentID, fileID)
 	}
 	return res
+}
+
+// ========== 分享链接 ==========
+
+func (s *SQLiteStore) CreateShare(_ context.Context, token string, entry *domain.ShareEntry) error {
+	_, err := s.db.Exec(
+		`INSERT INTO shares (token, file_id, password_hash, expires_at, max_downloads, cur_downloads, namespace, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+		token, entry.FileID, entry.PasswordHash, entry.ExpiresAt, entry.MaxDownloads, entry.CurDownloads, entry.Namespace,
+	)
+	return err
+}
+
+func (s *SQLiteStore) GetShare(_ context.Context, token string) (*domain.ShareEntry, error) {
+	row := s.db.QueryRow(`SELECT token, file_id, password_hash, expires_at, max_downloads, cur_downloads, namespace, created_at FROM shares WHERE token = ?`, token)
+	var e domain.ShareEntry
+	var createdAt string
+	err := row.Scan(&e.Token, &e.FileID, &e.PasswordHash, &e.ExpiresAt, &e.MaxDownloads, &e.CurDownloads, &e.Namespace, &createdAt)
+	if err != nil {
+		return nil, nil
+	}
+	e.CreatedAt = createdAt
+	return &e, nil
+}
+
+func (s *SQLiteStore) IncrDownloads(_ context.Context, token string) error {
+	_, err := s.db.Exec(`UPDATE shares SET cur_downloads = cur_downloads + 1 WHERE token = ?`, token)
+	return err
 }
 
 // Close 关闭数据库连接
