@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"log"
 	"net"
 	"net/http"
@@ -291,8 +292,10 @@ func respondJSON(w http.ResponseWriter, status int, data any) {
 
 // respondError 写 JSON 错误
 func respondError(w http.ResponseWriter, status int, err error) {
+	log.Printf("[error] %s (status=%d)", err.Error(), status)
 	errMsg := err.Error()
-	if domainErr, ok := err.(domain.DomainError); ok {
+	var domainErr domain.DomainError
+	if errors.As(err, &domainErr) {
 		errMsg = string(domainErr)
 	}
 	respondJSON(w, status, map[string]string{"error": errMsg})
@@ -303,30 +306,32 @@ func domainErrorToStatus(err error) int {
 	if err == nil {
 		return http.StatusOK
 	}
-	switch err {
-	case domain.ErrSliceChecksum:
-		return 460
-	case domain.ErrContentChecksum:
-		return http.StatusUnprocessableEntity
-	case domain.ErrSessionNotFound:
-		return http.StatusNotFound
-	case domain.ErrSessionState:
-		return http.StatusConflict
-	case domain.ErrOffsetConflict:
-		return http.StatusConflict
-	case domain.ErrForbidden:
-		return http.StatusForbidden
-	case domain.ErrBusy:
-		return http.StatusServiceUnavailable
-	case domain.ErrCorrupted:
-		return http.StatusGone
-	case domain.ErrNotFound:
-		return http.StatusNotFound
-	case domain.ErrInvalidArgument:
-		return http.StatusBadRequest
-	case domain.ErrPathTraversal:
-		return http.StatusBadRequest
-	default:
-		return http.StatusInternalServerError
+	var de domain.DomainError
+	if errors.As(err, &de) {
+		switch de {
+		case domain.ErrSliceChecksum:
+			return 460
+		case domain.ErrContentChecksum:
+			return http.StatusUnprocessableEntity
+		case domain.ErrSessionNotFound:
+			return http.StatusNotFound
+		case domain.ErrSessionState:
+			return http.StatusConflict
+		case domain.ErrOffsetConflict:
+			return http.StatusConflict
+		case domain.ErrForbidden:
+			return http.StatusForbidden
+		case domain.ErrBusy:
+			return http.StatusServiceUnavailable
+		case domain.ErrCorrupted:
+			return http.StatusGone
+		case domain.ErrNotFound:
+			return http.StatusNotFound
+		case domain.ErrInvalidArgument:
+			return http.StatusBadRequest
+		case domain.ErrPathTraversal:
+			return http.StatusBadRequest
+		}
 	}
+	return http.StatusInternalServerError
 }
