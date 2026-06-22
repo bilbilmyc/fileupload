@@ -24,3 +24,12 @@ Thumbs.db
 .env
 .env.local
 *.exe
+
+# 前端
+web/node_modules/
+# web/dist 为构建产物，仅保留占位 index.html（见 .gitignore 规则）
+web/dist/assets/
+web/dist/*.js
+web/dist/*.css
+web/dist/*.map
+web/dist/vite.svg

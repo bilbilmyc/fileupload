@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"log"
+	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -25,13 +26,13 @@ const (
 
 // Middleware 中间件集合
 type Middleware struct {
-	rateLimiter *RateLimiter
+	rateLimiter *RateLimiterGroup
 }
 
 // NewMiddleware 创建中间件集合
 func NewMiddleware() *Middleware {
 	return &Middleware{
-		rateLimiter: NewRateLimiter(100, 200),
+		rateLimiter: NewRateLimiterGroup(100, 200),
 	}
 }
 
@@ -81,10 +82,11 @@ func (m *Middleware) Namespace(next http.Handler) http.Handler {
 	})
 }
 
-// RateLimit 令牌桶限流
+// RateLimit 令牌桶限流（按 namespace / IP 隔离）
 func (m *Middleware) RateLimit(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !m.rateLimiter.Allow() {
+		key := m.rateKey(r)
+		if !m.rateLimiter.Allow(key) {
 			w.Header().Set("Retry-After", "1")
 			respondJSON(w, http.StatusTooManyRequests, map[string]string{
 				"error": "请求过于频繁",
@@ -94,6 +96,55 @@ func (m *Middleware) RateLimit(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// rateKey 生成限流 key：namespace 优先，其次 RemoteAddr
+func (m *Middleware) rateKey(r *http.Request) string {
+	ns := GetNamespace(r.Context())
+	if ns != "" && ns != "default" {
+		return "ns:" + ns
+	}
+	ip, _, _ := net.SplitHostPort(r.RemoteAddr)
+	if ip == "" {
+		ip = r.RemoteAddr
+	}
+	return "ip:" + ip
+}
+
+// RateLimiterGroup 按 key 隔离的令牌桶限流器组
+type RateLimiterGroup struct {
+	mu       sync.RWMutex
+	limiters map[string]*RateLimiter
+	rate     float64
+	burst    float64
+}
+
+// NewRateLimiterGroup 创建限流器组
+func NewRateLimiterGroup(rate, burst float64) *RateLimiterGroup {
+	return &RateLimiterGroup{
+		limiters: make(map[string]*RateLimiter),
+		rate:     rate,
+		burst:    burst,
+	}
+}
+
+// Allow 获取 key 对应的限流器并尝试放行
+func (g *RateLimiterGroup) Allow(key string) bool {
+	g.mu.RLock()
+	l, ok := g.limiters[key]
+	g.mu.RUnlock()
+	if ok {
+		return l.Allow()
+	}
+
+	g.mu.Lock()
+	l, ok = g.limiters[key]
+	if !ok {
+		l = NewRateLimiter(g.rate, g.burst)
+		g.limiters[key] = l
+	}
+	g.mu.Unlock()
+	return l.Allow()
 }
 
 // RateLimiter 简单令牌桶

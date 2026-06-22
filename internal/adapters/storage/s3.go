@@ -69,16 +69,28 @@ func (s *S3Storage) key(path string) string {
 // Write 从 reader 流式写入 S3
 func (s *S3Storage) Write(ctx context.Context, p string, r io.Reader) (int64, error) {
 	uploader := manager.NewUploader(s.client)
+	cw := &countingReader{r: r}
 	result, err := uploader.Upload(ctx, &s3.PutObjectInput{
 		Bucket: aws.String(s.cfg.Bucket),
 		Key:    aws.String(s.key(p)),
-		Body:   r,
+		Body:   cw,
 	})
 	if err != nil {
-		return 0, fmt.Errorf("S3 上传失败: %w", err)
+		return cw.n, fmt.Errorf("S3 上传失败: %w", err)
 	}
 	_ = result // Location 可用于日志
-	return 0, nil // 实际写入字节数不易获取，返回 0（caller 可自行统计）
+	return cw.n, nil
+}
+
+type countingReader struct {
+	r io.Reader
+	n int64
+}
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.n += int64(n)
+	return n, err
 }
 
 // Open 读取 S3 对象，支持 Range

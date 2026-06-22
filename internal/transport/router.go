@@ -2,15 +2,12 @@ package transport
 
 import (
 	"context"
-	"embed"
 	"io/fs"
 	"net/http"
 
 	"github.com/bilbilmyc/fileupload/internal/domain"
+	"github.com/bilbilmyc/fileupload/web"
 )
-
-//go:embed static/*
-var staticFiles embed.FS
 
 // Router HTTP 路由器，组装全部路由
 type Router struct {
@@ -85,8 +82,8 @@ func (r *Router) registerRoutes() {
 	// === 管理 ===
 	r.mux.HandleFunc("POST /v1/admin/scan", r.handleAdminScan)
 
-	// === 前端测试页面 ===
-	staticFS, err := fs.Sub(staticFiles, "static")
+	// === 前端 React 构建产物 ===
+	staticFS, err := fs.Sub(web.DistFiles, "dist")
 	if err == nil {
 		r.mux.Handle("GET /", http.FileServer(http.FS(staticFS)))
 	}

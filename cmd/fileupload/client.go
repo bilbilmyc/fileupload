@@ -16,6 +16,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"github.com/klauspost/compress/zstd"
 )
 
 const defaultNamespace = "default"
@@ -46,7 +48,6 @@ func NewClient(serverURL, namespace string) *Client {
 func (c *Client) do(req *http.Request) (*http.Response, error) {
 	var lastErr error
 	for attempt := 0; attempt < 3; attempt++ {
-		// 重试时重建 body：http.Client.Do 消费后 body 不能重用
 		if attempt > 0 && req.GetBody != nil {
 			body, err := req.GetBody()
 			if err != nil {
@@ -212,20 +213,17 @@ func loadResumeState(path string) (resumeState, error) {
 
 // UploadOptions 上传选项。
 type UploadOptions struct {
-	ChunkSize   int64
-	Concurrency int
-	Compress    string
-	Resume      bool
-	// FileName 自定义存储文件名。为空时使用本地文件的基本名。
-	// 目录上传时设为相对路径以保留目录结构（如 "subdir/photo.jpg"）。
-	FileName string
-	// NoProgress 静默模式：目录上传时禁用逐文件进度条，改用 [3/50] 文件名 显示。
-	NoProgress bool
-	// ExcludeHidden 为 true 时跳过以 . 开头的隐藏文件。
+	ChunkSize     int64
+	Concurrency   int
+	Compress      string
+	Resume        bool
+	FileName      string
+	NoProgress    bool
 	ExcludeHidden bool
 }
 
-// UploadFile 上传单个文件。支持压缩、并发分片、秒传。
+// UploadFile 上传单个文件。支持压缩、并发分片、秒传、断点续传。
+// 实现为流式：不将整个文件读入内存。
 func (c *Client) UploadFile(ctx context.Context, localPath string, opts UploadOptions) (*FileInfo, error) {
 	f, err := os.Open(localPath)
 	if err != nil {
@@ -237,7 +235,6 @@ func (c *Client) UploadFile(ctx context.Context, localPath string, opts UploadOp
 	if err != nil {
 		return nil, err
 	}
-	// 使用自定义文件名（含相对路径）或默认基本名
 	fileName := opts.FileName
 	if fileName == "" {
 		fileName = info.Name()
@@ -249,26 +246,184 @@ func (c *Client) UploadFile(ctx context.Context, localPath string, opts UploadOp
 		return nil, err
 	}
 
-	if opts.Compress == "zstd" && fileSize > 0 {
-		data, err := io.ReadAll(f)
-		if err != nil {
-			return nil, err
-		}
-		compressed, err := compressBuffer(data, "zstd")
-		if err != nil {
-			return nil, err
-		}
-		return c.uploadBytes(ctx, fileName, compressed, originalSHA, "zstd", opts)
-	}
-
-	data, err := io.ReadAll(f)
+	exists, err := c.CheckExists(ctx, originalSHA, fileName)
 	if err != nil {
 		return nil, err
 	}
-	return c.uploadBytes(ctx, fileName, data, originalSHA, "none", opts)
+	if exists != nil {
+		return exists, nil
+	}
+
+	chunkSize := opts.ChunkSize
+	if chunkSize <= 0 {
+		chunkSize = 10 * 1024 * 1024
+	}
+	concurrency := opts.Concurrency
+	if concurrency <= 0 {
+		concurrency = 4
+	}
+
+	compress := opts.Compress
+	if compress == "" {
+		compress = "none"
+	}
+
+	sessionID, err := c.CreateSession(ctx, fileSize, originalSHA, compress, chunkSize, fileName)
+	if err != nil {
+		return nil, err
+	}
+
+	uploaded := make(map[int]bool)
+	if opts.Resume {
+		status, _, _ := c.GetStatus(ctx, sessionID)
+		for _, ch := range status {
+			uploaded[ch.Index] = true
+		}
+	}
+
+	var p *Progress
+	if !opts.NoProgress && fileSize > 0 {
+		p = NewProgress(fileSize, "Uploading")
+		p.Start()
+		defer p.Stop()
+	}
+
+	saveResume := opts.Resume && compress != "zstd"
+	if saveResume {
+		saveResumeState(resumeStatePath(originalSHA), resumeState{
+			SessionID: sessionID,
+			SHA256:    originalSHA,
+			FileSize:  fileSize,
+		})
+	}
+
+	var source io.Reader
+	var byteCounter *countingReader
+	if compress == "zstd" && fileSize > 0 {
+		byteCounter = &countingReader{r: f}
+		pr, pw := io.Pipe()
+		go func() {
+			zw, err := zstd.NewWriter(pw)
+			if err != nil {
+				pw.CloseWithError(err)
+				return
+			}
+			_, err = io.Copy(zw, byteCounter)
+			zw.Close()
+			pw.CloseWithError(err)
+		}()
+		source = pr
+	} else {
+		byteCounter = &countingReader{r: f}
+		source = byteCounter
+	}
+
+	if err := c.uploadStream(ctx, sessionID, source, chunkSize, concurrency, p, uploaded, byteCounter); err != nil {
+		return nil, err
+	}
+
+	if p != nil {
+		p.Done()
+	}
+	fi, err := c.Finalize(ctx, sessionID)
+	if err == nil && saveResume {
+		os.Remove(resumeStatePath(originalSHA))
+	}
+	return fi, err
 }
 
-// uploadBytes 将内存中的字节上传到服务端，含秒传、并发分片。
+// countingReader 统计已读取字节的 reader。
+type countingReader struct {
+	r io.Reader
+	n int64
+}
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.n += int64(n)
+	return n, err
+}
+
+func (c *countingReader) N() int64 {
+	return c.n
+}
+
+// uploadStream 从 reader 流式读取分片并上传。
+func (c *Client) uploadStream(
+	ctx context.Context,
+	sessionID string,
+	source io.Reader,
+	chunkSize int64,
+	concurrency int,
+	p *Progress,
+	uploaded map[int]bool,
+	counter *countingReader,
+) error {
+	buf := make([]byte, chunkSize)
+	idx := 0
+	offset := int64(0)
+	sem := make(chan struct{}, concurrency)
+	errCh := make(chan error, concurrency)
+	sent := 0
+	var doneErr error
+	var lastCounter int64
+
+	for {
+		n, err := io.ReadFull(source, buf)
+		if n == 0 {
+			break
+		}
+		chunk := buf[:n]
+		i := idx
+		o := offset
+
+		updateProgress := func() {
+			if p == nil {
+				return
+			}
+			now := counter.N()
+			delta := now - lastCounter
+			if delta > 0 {
+				lastCounter = now
+				p.Add(delta)
+			}
+		}
+
+		if !uploaded[i] {
+			sem <- struct{}{}
+			sent++
+			go func() {
+				defer func() { <-sem }()
+				err := c.UploadChunk(ctx, sessionID, i, chunk, o)
+				if err == nil {
+					updateProgress()
+				}
+				errCh <- err
+			}()
+		} else {
+			updateProgress()
+		}
+
+		idx++
+		offset += int64(n)
+		if err == io.EOF || err == io.ErrUnexpectedEOF {
+			break
+		}
+		if err != nil {
+			doneErr = err
+			break
+		}
+	}
+
+	for i := 0; i < sent; i++ {
+		if err := <-errCh; err != nil {
+			return err
+		}
+	}
+	return doneErr
+}
+
+// uploadBytes 将内存中的字节上传到服务端（用于 bench 和旧路径）。
 func (c *Client) uploadBytes(ctx context.Context, fileName string, data []byte, originalSHA, compress string, opts UploadOptions) (*FileInfo, error) {
 	exists, err := c.CheckExists(ctx, originalSHA, fileName)
 	if err != nil {
@@ -296,17 +451,6 @@ func (c *Client) uploadBytes(ctx context.Context, fileName string, data []byte, 
 		chunkCount++
 	}
 
-	// 保存 resume state（仅非 zstd 压缩，因为压缩后数据为临时数据）
-	if opts.Resume && compress != "zstd" {
-		saveResumeState(resumeStatePath(originalSHA), resumeState{
-			SessionID: sessionID,
-			SHA256:    originalSHA,
-			FileSize:  int64(total),
-		})
-	}
-
-	// 进度跟踪 — 可视化进度条
-	// 0 字节文件或目录上传模式跳过 bar
 	var p *Progress
 	if !opts.NoProgress && total > 0 {
 		p = NewProgress(int64(total), "Uploading")
@@ -347,11 +491,7 @@ func (c *Client) uploadBytes(ctx context.Context, fileName string, data []byte, 
 	if p != nil {
 		p.Done()
 	}
-	info, err := c.Finalize(ctx, sessionID)
-	if err == nil && opts.Resume && compress != "zstd" {
-		os.Remove(resumeStatePath(originalSHA))
-	}
-	return info, err
+	return c.Finalize(ctx, sessionID)
 }
 
 // fileSHA256 计算文件的 SHA-256 十六进制字符串。
@@ -403,15 +543,12 @@ type clientDirEntry struct {
 }
 
 // UploadDir 并发上传目录：收集所有文件后以固定并发数上传，最后提交 manifest。
-// 自动跳过空文件（0 字节）和隐藏文件（以 . 开头），避免服务端返回"参数不合法"。
 func (c *Client) UploadDir(ctx context.Context, dirPath string, opts UploadOptions) (*FileInfo, error) {
-	// 收集文件
 	type fileTask struct {
-		path string // 本地绝对路径
-		rel  string // 存储路径（含 dirPrefix: skills/subdir/file.txt）
-		mrel string // manifest 路径（不含 dirPrefix: subdir/file.txt）
+		path string
+		rel  string
+		mrel string
 	}
-	// 用上传的目录名作为路径前缀，保留目录本身在存储结构中
 	dirPrefix := filepath.Base(dirPath)
 
 	var tasks []fileTask
@@ -422,7 +559,6 @@ func (c *Client) UploadDir(ctx context.Context, dirPath string, opts UploadOptio
 		if info.IsDir() {
 			return nil
 		}
-		// --exclude-hidden 开启时跳过隐藏文件和隐藏目录
 		if opts.ExcludeHidden {
 			if len(info.Name()) > 0 && info.Name()[0] == '.' {
 				return nil
@@ -451,13 +587,10 @@ func (c *Client) UploadDir(ctx context.Context, dirPath string, opts UploadOptio
 	if concurrency <= 0 {
 		concurrency = 4
 	}
-	// 关闭逐文件进度条，改用 [3/N] 文件名 显示
 	opts.NoProgress = true
 	fmt.Fprintf(os.Stderr, "  上传 %d 个文件（并发 %d）\n", len(tasks), concurrency)
 
-	// 进度：atomic 计数器显示当前正在上传的文件
 	var doneCount int32
-
 	type result struct {
 		rel   string
 		mrel  string
@@ -481,7 +614,6 @@ func (c *Client) UploadDir(ctx context.Context, dirPath string, opts UploadOptio
 		}()
 	}
 
-	// drain sem
 	go func() {
 		for i := 0; i < cap(sem); i++ {
 			sem <- struct{}{}
@@ -499,7 +631,7 @@ func (c *Client) UploadDir(ctx context.Context, dirPath string, opts UploadOptio
 			entries = append(entries, clientDirEntry{Path: r.mrel, FileID: r.fmeta.FileID})
 		}
 	}
-	fmt.Fprintln(os.Stderr) // 换行
+	fmt.Fprintln(os.Stderr)
 	if len(errs) > 0 {
 		fmt.Fprintf(os.Stderr, "  失败 %d 个文件:\n", len(errs))
 		for _, e := range errs {
@@ -546,56 +678,6 @@ func (c *Client) DownloadDir(ctx context.Context, dirID, format string) (*http.R
 		return nil, fmt.Errorf("download dir failed (%d): %s", resp.StatusCode, string(body))
 	}
 	return resp, nil
-}
-
-func (c *Client) uploadMissingChunks(ctx context.Context, sessionID string, data []byte, chunkSize int64, concurrency int) error {
-	status, total, err := c.GetStatus(ctx, sessionID)
-	if err != nil {
-		return err
-	}
-	_ = total
-	got := make(map[int]bool)
-	for _, c := range status {
-		got[c.Index] = true
-	}
-
-	totalLen := len(data)
-	chunkCount := totalLen / int(chunkSize)
-	if totalLen%int(chunkSize) != 0 {
-		chunkCount++
-	}
-
-	sem := make(chan struct{}, concurrency)
-	errCh := make(chan error, chunkCount)
-	sent := 0
-
-	for i := 0; i < chunkCount; i++ {
-		if got[i] {
-			continue
-		}
-		start := i * int(chunkSize)
-		end := start + int(chunkSize)
-		if end > totalLen {
-			end = totalLen
-		}
-		idx := i
-		offset := int64(start)
-		chunk := data[start:end]
-
-		sem <- struct{}{}
-		sent++
-		go func() {
-			defer func() { <-sem }()
-			errCh <- c.UploadChunk(ctx, sessionID, idx, chunk, offset)
-		}()
-	}
-
-	for i := 0; i < sent; i++ {
-		if err := <-errCh; err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // ChunkStatus 单个分片状态。

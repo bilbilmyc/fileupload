@@ -2,19 +2,15 @@ package main
 
 import "testing"
 
-func TestParseSize(t *testing.T) {
-	flags := map[string]string{"chunk-size": "5m"}
-	if got := parseSize(flags, "chunk-size", 10); got != 5*1024*1024 {
+func TestParseSizeFlag(t *testing.T) {
+	if got := parseSizeFlag("5m", 10); got != 5*1024*1024 {
 		t.Fatalf("expected 5MB, got %d", got)
+	}
+	if got := parseSizeFlag("1g", 10); got != 1024*1024*1024 {
+		t.Fatalf("expected 1GB, got %d", got)
+	}
+	if got := parseSizeFlag("", 10); got != 10 {
+		t.Fatalf("expected default 10, got %d", got)
 	}
 }
 
-func TestGetFlag(t *testing.T) {
-	flags := map[string]string{"namespace": "test-ns"}
-	if got := getFlag(flags, "namespace", "default"); got != "test-ns" {
-		t.Fatalf("expected test-ns, got %s", got)
-	}
-	if got := getFlag(flags, "missing", "fallback"); got != "fallback" {
-		t.Fatalf("expected fallback, got %s", got)
-	}
-}

@@ -1,7 +1,17 @@
 # fileupload 服务端 Docker 镜像
-# 多阶段构建：build → release
+# 多阶段构建：node 构建前端 → golang 构建后端 → alpine 运行
 
-# ---- 构建阶段 ----
+# ---- 前端构建阶段 ----
+FROM node:20-alpine AS web-builder
+
+WORKDIR /web
+COPY web/package.json web/package-lock.json* ./
+RUN npm install
+
+COPY web/ .
+RUN npm run build
+
+# ---- Go 构建阶段 ----
 FROM golang:1.25-alpine AS builder
 
 RUN apk add --no-cache git ca-certificates
@@ -11,6 +21,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
+COPY --from=web-builder /web/dist ./web/dist
 
 ARG TARGETOS=linux
 ARG TARGETARCH=amd64

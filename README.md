@@ -3,7 +3,7 @@
 [![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go)](https://golang.org)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-高性能、可自托管的文件上传下载服务。支持动态分片、客户端压缩、流式打包下载、SHA-256 全链路数据校验、断点续传、秒传（内容寻址去重）。用 Go 编写，单二进制部署。
+高性能、可自托管的文件上传下载服务。支持动态分片、客户端压缩、流式打包下载、SHA-256 全链路数据校验、断点续传、秒传（内容寻址去重）。用 Go 编写，单二进制部署，内置 React 管理面板。
 
 ---
 
@@ -21,14 +21,18 @@
 | **并发控制** | 全局 worker 池，限制并发磁盘 IO |
 | **命名空间隔离** | 多租户隔离（由上游 Gateway 注入 `X-Namespace`） |
 | **一致性巡检** | 定时/手动扫描孤儿文件、引用计数漂移 |
-| **Go CLI** | 完整命令行客户端（上传/下载/管理/压测），支持进度条 |
-| **Web UI** | 自带浏览器测试面板 |
+| **Go CLI** | Cobra 命令行客户端，支持 kubectl 式 Tab 补全 |
+| **Web UI** | React + Ant Design 管理面板，拖拽上传、目录树、进度 |
+| **登录预留** | 前端已实现登录页与 token 管理，后端鉴权可后续接入 |
+
+---
 
 ## 快速开始
 
 ### 前提条件
 
 - Go 1.25+
+- Node.js 20+（构建前端）
 - Redis（上传会话热数据，启动失败则仅热数据功能受限）
 
 ### 从源码运行
@@ -37,6 +41,9 @@
 # 克隆项目
 git clone https://github.com/bilbilmyc/fileupload.git
 cd fileupload
+
+# 构建前端（开发时也可用 npm run dev 单独启动）
+make web
 
 # 启动服务端（默认监听 :8080，使用 SQLite + 本地文件系统）
 go run ./cmd/server
@@ -47,8 +54,17 @@ go run ./cmd/fileupload upload README.md
 # 下载文件
 go run ./cmd/fileupload download <fileID> -o output.md
 
-# 打开浏览器测试面板
+# 打开浏览器管理面板
 open http://localhost:8080
+```
+
+### 前端开发模式
+
+```bash
+# 前端独立开发（热更新，代理到 localhost:8080）
+cd web
+npm install
+npm run dev
 ```
 
 ### 使用 Docker Compose
@@ -58,6 +74,8 @@ cd deploy/docker
 docker compose up -d
 # 服务端运行在 http://localhost:8080
 ```
+
+---
 
 ## CLI 使用
 
@@ -103,19 +121,77 @@ fileupload bench --files 50 --size 100m --concurrency 16
 fileupload --server http://192.168.1.100:8080 upload data.bin
 ```
 
-### CLI 子命令一览
+### 子命令一览
 
 | 子命令 | 功能 | 关键参数 |
 |--------|------|---------|
 | `upload` | 上传文件或目录 | `--concurrency`, `--compress`, `--chunk-size` |
 | `download` | 下载文件或目录 | `-o`, `--range`, `--format` |
-| `rm` | 删除文件或目录 | `--dir` |
-| `ls` | 列目录 | `--parent` |
+| `rm` | 删除文件或目录 | — |
+| `ls` | 列目录 | — |
 | `stat` | 查看文件/目录信息 | — |
 | `status` | 查询上传会话进度 | — |
 | `scan` | 触发服务端一致性巡检 | — |
 | `bench` | 压测 | `--files`, `--size`, `--concurrency` |
 | `config` | 查看当前配置 | — |
+| `login` | 登录占位（预留） | — |
+| `completion` | 生成 shell 补全脚本 | `bash|zsh|fish|powershell` |
+
+### kubectl 式 Tab 补全
+
+Cobra 支持为命令、子命令和 flag 生成 shell 补全脚本。
+
+```bash
+# bash
+source <(fileupload completion bash)
+
+# zsh
+source <(fileupload completion zsh)
+
+# fish
+fileupload completion fish | source
+```
+
+配置完成后，连续按 Tab 即可补全子命令与参数：
+
+```bash
+fileupload up<TAB>      # → upload
+fileupload upload --co<TAB>  # → --concurrency, --compress, --chunk-size
+```
+
+---
+
+## Web UI
+
+前端位于 `web/` 目录，技术栈：
+
+- Vite 6
+- React 18 + TypeScript
+- Tailwind CSS
+- Ant Design 5
+- React Router 6
+- Axios
+
+### 功能
+
+- 登录占位页（支持跳过，后续可接入真实鉴权）
+- 顶部 Namespace 切换、主题/配置
+- 拖拽上传文件/目录
+- 实时上传队列（进度、速率、状态）
+- 文件/目录列表、搜索、下载、删除
+- 小文件在线预览（图片/文本）
+
+### 构建
+
+```bash
+cd web
+npm install
+npm run build
+```
+
+构建产物输出到 `web/dist/`，由 Go 二进制通过 `embed` 直接提供。
+
+---
 
 ## API 参考
 
@@ -132,7 +208,7 @@ fileupload --server http://192.168.1.100:8080 upload data.bin
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| `POST` | `/v1/uploads/init` | 创建上传会话 |
+| `POST` | `/v1/uploads/init` | 创建会话 |
 | `PUT` | `/v1/uploads/{id}/chunks/{index}` | 上传分片 |
 | `GET` | `/v1/uploads/{id}/status` | 查询分片进度 |
 | `POST` | `/v1/uploads/{id}/finalize` | 完成上传（合并+校验+去重写入） |
@@ -151,6 +227,7 @@ fileupload --server http://192.168.1.100:8080 upload data.bin
 | 头 | 适用 API | 说明 |
 |------|----------|------|
 | `X-Namespace` | 全部 | 命名空间（多租户隔离，缺省为 `default`） |
+| `Authorization` | 全部 | 预留：Bearer token（当前服务端未校验） |
 | `X-SHA256` | 上传 | 原始内容的 SHA-256（用于最终校验和秒传） |
 | `X-Compression` | 上传 | 客户端压缩格式：`none` / `zstd` |
 | `X-File-Name` | 上传 | 原始文件名 |
@@ -168,6 +245,8 @@ fileupload --server http://192.168.1.100:8080 upload data.bin
 | 422 | 整体 SHA-256 校验失败 |
 | 503 | 服务忙（worker 池满） |
 | 410 | 文件已损坏 |
+
+---
 
 ## 配置
 
@@ -218,6 +297,8 @@ FILEUPLOAD_STORAGE_DATA_DIR=/data/files
 FILEUPLOAD_CHUNK_SIZE=20971520
 ```
 
+---
+
 ## 架构概览
 
 ```
@@ -247,44 +328,50 @@ FILEUPLOAD_CHUNK_SIZE=20971520
 
 完整设计文档见 [docs/superpowers/specs/2026-06-17-fileupload-design.md](docs/superpowers/specs/2026-06-17-fileupload-design.md)
 
+---
+
 ## 项目结构
 
 ```
 .
 ├── cmd/
 │   ├── server/               # 服务端入口（HTTP 服务）
-│   └── fileupload/           # CLI 客户端（9 个子命令）
+│   └── fileupload/           # CLI 客户端（Cobra 子命令）
 ├── internal/
 │   ├── domain/               # 领域核心（模型/端口接口/服务编排）
 │   ├── adapters/             # 适配层实现
-│   │   ├── storage/          # 本地文件系统存储
+│   │   ├── storage/          # 本地文件系统存储 + S3
 │   │   ├── metadata/         # Redis 热数据 + SQLite 冷数据门面
 │   │   ├── compressor/       # zstd/gzip/tar 压缩
 │   │   └── hasher/           # SHA-256 哈希
 │   ├── transport/            # HTTP 传输层
-│   │   ├── router.go         # 路由注册 + 静态文件服务
+│   │   ├── router.go         # 路由注册 + 嵌入 React 构建产物
 │   │   ├── tus.go            # tus/REST/下载 handler
 │   │   ├── middleware.go     # 中间件（Recover/RequestID/Namespace/RateLimit）
-│   │   └── static/           # 浏览器测试面板
+│   │   └── static/           # 旧浏览器面板（已弃用）
 │   ├── lifecycle/            # SessionReaper + ConsistencyScanner
 │   └── config/               # 配置加载（YAML + env override）
+├── web/                      # React 前端（Vite + React + Ant Design）
 ├── deploy/
 │   ├── docker/               # Dockerfile + Compose
 │   └── systemd/              # systemd 服务单元
 ├── docs/                     # 架构文档与设计 spec
-├── Makefile                  # 编译/测试/发布
+├── Makefile                  # 编译/测试/发布/前端构建
 ├── fileupload.yaml           # 默认配置文件
 ├── go.mod / go.sum
 └── README.md
 ```
+
+---
 
 ## 编译
 
 ### 当前平台
 
 ```bash
-make server      # 编译服务端
-make cli         # 编译 CLI
+make web      # 构建前端
+make server   # 编译服务端
+make cli      # 编译 CLI
 ```
 
 ### 全平台交叉编译
@@ -307,6 +394,8 @@ build/
 └── fileupload-cli-darwin-arm64
 ```
 
+---
+
 ## 测试
 
 ```bash
@@ -316,15 +405,14 @@ go test ./...
 # 包含覆盖率
 go test -cover ./...
 
+# 包含 race 检测
+go test -race ./...
+
 # E2E 测试（全链路：真实 HTTP → 真实存储 → 真实数据库）
 go test -v -run TestE2E ./internal/transport/
 ```
 
-项目包含 50+ 个测试，整体覆盖率约 70%：
-- 领域核心覆盖 78%
-- 传输层覆盖 76%（含全链路 E2E 测试）
-- 生命周期覆盖 89%
-- 适配层覆盖 70-93%
+---
 
 ## 部署
 
@@ -355,6 +443,8 @@ cd deploy/docker && docker compose up -d
 - 数据目录和 SQLite 文件定期备份
 - 调整 `worker_pool_size` 和 `write_timeout` 适应大文件并发
 
+---
+
 ## 开发
 
 ```bash
@@ -363,8 +453,29 @@ make vet
 make lint
 
 # 运行测试
-go test -v ./...
+make test
 
 # 单包测试
 go test -v -run TestUpload ./internal/domain/
+
+# 前端开发
+cd web && npm run dev
 ```
+
+---
+
+## 登录与鉴权（预留）
+
+- 前端已包含 `AuthContext`、登录页、路由守卫和 `Authorization: Bearer` 请求头。
+- 后端当前不校验 token，namespace 由 `X-Namespace` 头或 `X-User-ID`（网关）提供。
+- 后续接入真实鉴权时：
+  1. 在 `internal/transport` 新增 JWT 验证中间件；
+  2. 从 token 解析 `user_id` 和 `namespace` 注入 context；
+  3. 移除/限制 `X-Namespace` 客户端直接设置；
+  4. 将 `/v1/auth/me` 替换为真实登录/刷新接口。
+
+---
+
+## 许可证
+
+MIT

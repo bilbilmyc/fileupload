@@ -3,6 +3,7 @@ package domain
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -11,8 +12,8 @@ type SimpleWorkerPool struct {
 	capacity int
 	tasks    chan func()
 	wg       sync.WaitGroup
-	queued   int32
-	running  int32
+	running  atomic.Int32
+	queued   atomic.Int32
 }
 
 // NewSimpleWorkerPool 创建固定大小的 worker 池
@@ -38,9 +39,9 @@ func (p *SimpleWorkerPool) start() {
 		go func() {
 			defer p.wg.Done()
 			for task := range p.tasks {
-				// atomic.AddInt32(&p.running, 1) // 可选跟踪
+				p.running.Add(1)
 				task()
-				// atomic.AddInt32(&p.running, -1)
+				p.running.Add(-1)
 			}
 		}()
 	}
@@ -48,6 +49,9 @@ func (p *SimpleWorkerPool) start() {
 
 // Submit 提交任务到池中，带超时排队
 func (p *SimpleWorkerPool) Submit(ctx context.Context, task func()) error {
+	p.queued.Add(1)
+	defer p.queued.Add(-1)
+
 	select {
 	case p.tasks <- task:
 		return nil
@@ -68,9 +72,14 @@ func (p *SimpleWorkerPool) Submit(ctx context.Context, task func()) error {
 
 // Stats 返回当前池状态
 func (p *SimpleWorkerPool) Stats() WorkerStats {
+	running := int(p.running.Load())
+	available := p.capacity - running
+	if available < 0 {
+		available = 0
+	}
 	return WorkerStats{
 		Capacity:  p.capacity,
-		Available: p.capacity, // 简化
+		Available: available,
 	}
 }
 
