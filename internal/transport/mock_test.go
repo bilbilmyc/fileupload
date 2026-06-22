@@ -69,6 +69,11 @@ func (m *mockMeta) GetFileTags(_ context.Context, fileID string) ([]string, erro
 	if f, ok := m.files[fileID]; ok { return append([]string{}, f.Tags...), nil }; return nil, nil }
 func (m *mockMeta) DeleteFileTags(_ context.Context, fileID string) error {
 	if f, ok := m.files[fileID]; ok { f.Tags = nil }; return nil }
+func (m *mockMeta) ReparentFile(_ context.Context, fileID string, parentID *string, path string) error {
+	if f, ok := m.files[fileID]; ok {
+		f.Path = path
+		if parentID == nil { f.ParentID = "" } else { f.ParentID = *parentID }
+	}; return nil }
 func (m *mockMeta) UpdateFileParent(_ context.Context, fileID string, parentID *string) error {
 	if f, ok := m.files[fileID]; ok {
 		if parentID == nil { f.ParentID = "" } else { f.ParentID = *parentID }

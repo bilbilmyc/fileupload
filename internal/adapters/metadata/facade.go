@@ -109,6 +109,10 @@ func (f *Facade) DeleteFileTags(ctx context.Context, fileID string) error {
 	return f.cold.DeleteFileTags(ctx, fileID)
 }
 
+func (f *Facade) ReparentFile(ctx context.Context, fileID string, parentID *string, path string) error {
+	return f.cold.ReparentFile(ctx, fileID, parentID, path)
+}
+
 func (f *Facade) UpdateFileParent(ctx context.Context, fileID string, parentID *string) error {
 	return f.cold.UpdateFileParent(ctx, fileID, parentID)
 }

@@ -311,6 +311,20 @@ func (m *mockMetadata) DeleteFileTags(_ context.Context, fileID string) error {
 	return nil
 }
 
+func (m *mockMetadata) ReparentFile(_ context.Context, fileID string, parentID *string, path string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if f, ok := m.files[fileID]; ok {
+		f.Path = path
+		if parentID == nil {
+			f.ParentID = ""
+		} else {
+			f.ParentID = *parentID
+		}
+	}
+	return nil
+}
+
 func (m *mockMetadata) UpdateFileParent(_ context.Context, fileID string, parentID *string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

@@ -539,15 +539,13 @@ func (s *UploadService) SubmitDir(ctx context.Context, manifest DirManifest, nam
 		dirMap[dirPath] = subDirID
 	}
 
-	// 创建文件子节点
+	// 将已有的文件记录归入目录树（复用 Finalize 创建的记录，不重复创建）
 	for _, entry := range manifest.Entries {
-		childID := NewID()
 		parentFile, err := s.meta.GetFile(ctx, entry.FileID)
 		if err != nil || parentFile == nil {
 			continue
 		}
 
-		// 确定父目录
 		parentPath := ""
 		if idx := strings.LastIndex(entry.Path, "/"); idx >= 0 {
 			parentPath = entry.Path[:idx]
@@ -557,18 +555,8 @@ func (s *UploadService) SubmitDir(ctx context.Context, manifest DirManifest, nam
 			parentID = dirID
 		}
 
-		child := &FileMetadata{
-			FileID:    childID,
-			SHA256:    parentFile.SHA256,
-			Name:      filepath.Base(entry.Path),
-			Path:      entry.Path,
-			Size:      parentFile.Size,
-			Namespace: namespace,
-			IsDir:     false,
-			ParentID:  parentID,
-			CreatedAt: now,
-		}
-		_ = s.meta.PutFile(ctx, child)
+		// 更新已有记录的父目录和路径
+		_ = s.meta.ReparentFile(ctx, entry.FileID, &parentID, entry.Path)
 	}
 
 	log.Printf("[upload] 目录创建 %s (%s): %d 个子文件, %d 个子目录", root.FileID, dirName, len(manifest.Entries), len(dirPaths))

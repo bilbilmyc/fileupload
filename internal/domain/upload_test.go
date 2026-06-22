@@ -486,6 +486,14 @@ func TestSubmitDir_NestedStructure(t *testing.T) {
 	if len(otherChildren) != 1 || otherChildren[0].Name != "c.txt" {
 		t.Error("other 子节点应为 c.txt")
 	}
+
+	// 验证原文件不再孤立在根目录（SubmitDir 应复用记录而非新建）
+	rootOrphans, _ := meta.ListRoot(ctx, "demo")
+	for _, orphan := range rootOrphans {
+		if orphan.FileID == "f1" || orphan.FileID == "f2" || orphan.FileID == "f3" || orphan.FileID == "f4" {
+			t.Errorf("原文件 %s 不应再出现在根目录, parentID=%s", orphan.FileID, orphan.ParentID)
+		}
+	}
 }
 
 func TestDelete_SingleFile(t *testing.T) {

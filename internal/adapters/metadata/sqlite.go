@@ -316,6 +316,16 @@ func (s *SQLiteStore) DeleteFileTags(_ context.Context, fileID string) error {
 
 // ========== 批量管理 ==========
 
+func (s *SQLiteStore) ReparentFile(_ context.Context, fileID string, parentID *string, path string) error {
+	var res error
+	if parentID == nil {
+		_, res = s.db.Exec(`UPDATE files SET parent_id = NULL, path = ? WHERE file_id = ?`, path, fileID)
+	} else {
+		_, res = s.db.Exec(`UPDATE files SET parent_id = ?, path = ? WHERE file_id = ?`, *parentID, path, fileID)
+	}
+	return res
+}
+
 func (s *SQLiteStore) UpdateFileParent(_ context.Context, fileID string, parentID *string) error {
 	var res error
 	if parentID == nil {

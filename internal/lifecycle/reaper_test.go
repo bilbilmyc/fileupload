@@ -98,6 +98,7 @@ func (m *mockMeta) ListRoot(_ context.Context, _ string) ([]*domain.FileMetadata
 func (m *mockMeta) SetFileTags(_ context.Context, _ string, _ []string) error { return nil }
 func (m *mockMeta) GetFileTags(_ context.Context, _ string) ([]string, error) { return nil, nil }
 func (m *mockMeta) DeleteFileTags(_ context.Context, _ string) error { return nil }
+func (m *mockMeta) ReparentFile(_ context.Context, _ string, _ *string, _ string) error { return nil }
 func (m *mockMeta) UpdateFileParent(_ context.Context, _ string, _ *string) error { return nil }
 func (m *mockMeta) ListAllBlobs(_ context.Context) ([]*domain.ContentBlob, error) {
 	var blobs []*domain.ContentBlob
@@ -297,6 +298,7 @@ func (e *errorMeta) ListRoot(_ context.Context, _ string) ([]*domain.FileMetadat
 func (e *errorMeta) SetFileTags(_ context.Context, _ string, _ []string) error { return nil }
 func (e *errorMeta) GetFileTags(_ context.Context, _ string) ([]string, error) { return nil, nil }
 func (e *errorMeta) DeleteFileTags(_ context.Context, _ string) error { return nil }
+func (e *errorMeta) ReparentFile(_ context.Context, _ string, _ *string, _ string) error { return nil }
 func (e *errorMeta) UpdateFileParent(_ context.Context, _ string, _ *string) error { return nil }
 func (e *errorMeta) ListAllBlobs(_ context.Context) ([]*domain.ContentBlob, error) { return nil, fmt.Errorf("fail") }
 func (e *errorMeta) ListAllFiles(_ context.Context) ([]*domain.FileMetadata, error) { return nil, nil }

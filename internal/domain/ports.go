@@ -68,6 +68,7 @@ type Metadata interface {
 
 	// 批量管理
 	UpdateFileParent(ctx context.Context, fileID string, parentID *string) error // parentID nil → 根目录
+	ReparentFile(ctx context.Context, fileID string, parentID *string, path string) error // 更新父目录+路径
 
 	// 列目录（根目录 children 为空）
 	ListRoot(ctx context.Context, namespace string) ([]*FileMetadata, error)
