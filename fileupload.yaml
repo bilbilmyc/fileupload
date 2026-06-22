@@ -29,5 +29,10 @@ upload:
   worker_pool_size: 10        # 并发 worker 池大小
   worker_queue_size: 100     # worker 排队上限
 
+auth:
+  enabled: false             # 是否启用 X-Auth-Token 认证
+  token: ""                  # 静态令牌，启用后客户端需携带此 token
+  header: "X-Auth-Token"     # 令牌请求头名称
+
 download:
   max_archive_size: 0        # 目录打包大小上限（0 = 不限）

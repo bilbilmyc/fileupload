@@ -107,7 +107,7 @@ func newE2EFixture(t *testing.T) *e2eFixture {
 	scanner := lifecycle.NewConsistencyScanner(metaFacade, localFS, dataDir, tempDir)
 
 	// 10. 传输层
-	mw := NewMiddleware()
+	mw := NewMiddleware().WithAuth(AuthConfig{Enabled: false})
 	tusHandler := NewTusHandler(uploadSvc)
 	restHandler := NewRESTHandler(uploadSvc, downloadSvc)
 	downloadHandler := NewDownloadHandler(downloadSvc)

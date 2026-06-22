@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/bilbilmyc/fileupload/internal/config"
@@ -13,6 +14,7 @@ var (
 	serverURL string
 	namespace string
 	cfgFile   string
+	token     string
 )
 
 var rootCmd = &cobra.Command{
@@ -36,6 +38,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&serverURL, "server", "", "服务端地址（默认 http://localhost:8080）")
 	rootCmd.PersistentFlags().StringVar(&namespace, "namespace", "", "Namespace（默认 default）")
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "配置文件路径")
+	rootCmd.PersistentFlags().StringVar(&token, "token", "", "X-Auth-Token 认证令牌")
 
 	rootCmd.CompletionOptions.HiddenDefaultCmd = true
 }
@@ -52,7 +55,46 @@ func getClient() *Client {
 	if ns == "" {
 		ns = "default"
 	}
-	return NewClient(url, ns)
+	c := NewClient(url, ns)
+
+	// 认证令牌：优先 --token flag，其次 token 文件
+	if token != "" {
+		c.SetToken(token)
+	} else if t := loadToken(); t != "" {
+		c.SetToken(t)
+	}
+	return c
+}
+
+// tokenFilePath 返回令牌文件路径
+func tokenFilePath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".fileupload", "token")
+}
+
+// saveToken 保存令牌到 ~/.fileupload/token
+func saveToken(tok string) error {
+	dir := filepath.Dir(tokenFilePath())
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return err
+	}
+	return os.WriteFile(tokenFilePath(), []byte(tok), 0600)
+}
+
+// loadToken 从 ~/.fileupload/token 读取令牌
+func loadToken() string {
+	p := tokenFilePath()
+	if p == "" {
+		return ""
+	}
+	data, err := os.ReadFile(p)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
 }
 
 func loadConfig() (config.Config, error) {

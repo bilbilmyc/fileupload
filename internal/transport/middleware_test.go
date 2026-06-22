@@ -211,3 +211,111 @@ func TestGetNamespace_Empty(t *testing.T) {
 		t.Errorf("empty context namespace = %s", ns)
 	}
 }
+
+// === Auth middleware ===
+
+func TestAuth_Disabled(t *testing.T) {
+	mw := NewMiddleware().WithAuth(AuthConfig{Enabled: false})
+	handler := mw.Auth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest("GET", "/v1/files/test", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("auth disabled status = %d, want 200", w.Code)
+	}
+}
+
+func TestAuth_EmptyToken(t *testing.T) {
+	mw := NewMiddleware().WithAuth(AuthConfig{Enabled: true, Token: "my-token", Header: "X-Auth-Token"})
+	handler := mw.Auth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest("GET", "/v1/files/test", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401; body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestAuth_WrongToken(t *testing.T) {
+	mw := NewMiddleware().WithAuth(AuthConfig{Enabled: true, Token: "correct-token", Header: "X-Auth-Token"})
+	handler := mw.Auth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest("GET", "/v1/files/test", nil)
+	req.Header.Set("X-Auth-Token", "wrong-token")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want 403; body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestAuth_ValidToken(t *testing.T) {
+	mw := NewMiddleware().WithAuth(AuthConfig{Enabled: true, Token: "secret", Header: "X-Auth-Token"})
+	handler := mw.Auth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest("GET", "/v1/files/abc", nil)
+	req.Header.Set("X-Auth-Token", "secret")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", w.Code)
+	}
+}
+
+func TestAuth_SkipHealthCheck(t *testing.T) {
+	mw := NewMiddleware().WithAuth(AuthConfig{Enabled: true, Token: "secret", Header: "X-Auth-Token"})
+	handler := mw.Auth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	// /health bypasses auth
+	req := httptest.NewRequest("GET", "/health", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("health check should bypass auth, got %d", w.Code)
+	}
+}
+
+func TestAuth_SkipRoot(t *testing.T) {
+	mw := NewMiddleware().WithAuth(AuthConfig{Enabled: true, Token: "secret", Header: "X-Auth-Token"})
+	handler := mw.Auth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest("GET", "/", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("root should bypass auth, got %d", w.Code)
+	}
+}
+
+func TestAuth_CustomHeader(t *testing.T) {
+	mw := NewMiddleware().WithAuth(AuthConfig{
+		Enabled: true,
+		Token:   "custom",
+		Header:  "X-My-Auth",
+	})
+	handler := mw.Auth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest("GET", "/v1/ls", nil)
+	req.Header.Set("X-My-Auth", "custom")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("custom header status = %d, want 200", w.Code)
+	}
+}

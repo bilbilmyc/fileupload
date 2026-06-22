@@ -20,6 +20,7 @@ type Config struct {
 	Database DatabaseConfig `json:"database" yaml:"database"`
 	Upload   UploadConfig   `json:"upload" yaml:"upload"`
 	Download DownloadConfig `json:"download" yaml:"download"`
+	Auth     AuthConfig     `json:"auth" yaml:"auth"`
 }
 
 // ServerConfig HTTP 服务配置
@@ -74,6 +75,13 @@ type DownloadConfig struct {
 	MaxArchiveSize int64 `json:"max_archive_size" yaml:"max_archive_size"`
 }
 
+// AuthConfig 认证配置
+type AuthConfig struct {
+	Enabled bool   `json:"enabled" yaml:"enabled"`
+	Token   string `json:"token" yaml:"token"`
+	Header  string `json:"header" yaml:"header"`
+}
+
 // DefaultConfig 返回默认配置
 func DefaultConfig() Config {
 	return Config{
@@ -106,6 +114,11 @@ func DefaultConfig() Config {
 		},
 		Download: DownloadConfig{
 			MaxArchiveSize: 0,
+		},
+		Auth: AuthConfig{
+			Enabled: false,
+			Token:   "",
+			Header:  "X-Auth-Token",
 		},
 	}
 }
@@ -206,6 +219,13 @@ func loadEnv(cfg *Config) {
 		if n, err := strconv.Atoi(v); err == nil {
 			cfg.Upload.WorkerPoolSize = n
 		}
+	}
+	if v := os.Getenv("FILEUPLOAD_AUTH_TOKEN"); v != "" {
+		cfg.Auth.Token = v
+		cfg.Auth.Enabled = true
+	}
+	if v := os.Getenv("FILEUPLOAD_AUTH_HEADER"); v != "" {
+		cfg.Auth.Header = v
 	}
 }
 

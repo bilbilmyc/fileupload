@@ -27,6 +27,14 @@ const (
 // Middleware 中间件集合
 type Middleware struct {
 	rateLimiter *RateLimiterGroup
+	authCfg     AuthConfig
+}
+
+// AuthConfig 认证中间件配置
+type AuthConfig struct {
+	Enabled bool
+	Token   string
+	Header  string
 }
 
 // NewMiddleware 创建中间件集合
@@ -34,6 +42,12 @@ func NewMiddleware() *Middleware {
 	return &Middleware{
 		rateLimiter: NewRateLimiterGroup(100, 200),
 	}
+}
+
+// WithAuth 设置认证配置（链式调用）
+func (m *Middleware) WithAuth(cfg AuthConfig) *Middleware {
+	m.authCfg = cfg
+	return m
 }
 
 // Recover panic 恢复中间件
@@ -195,6 +209,40 @@ type responseWriter struct {
 func (rw *responseWriter) WriteHeader(code int) {
 	rw.status = code
 	rw.ResponseWriter.WriteHeader(code)
+}
+
+// Auth X-Auth-Token 认证中间件
+func (m *Middleware) Auth(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !m.authCfg.Enabled || m.authCfg.Token == "" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// 健康检查和前端静态资源免认证
+		path := r.URL.Path
+		if path == "/health" || path == "/" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		token := r.Header.Get(m.authCfg.Header)
+		if token == "" {
+			respondJSON(w, http.StatusUnauthorized, map[string]string{
+				"error": "缺少认证令牌",
+				"code":  "auth_required",
+			})
+			return
+		}
+		if token != m.authCfg.Token {
+			respondJSON(w, http.StatusForbidden, map[string]string{
+				"error": "认证令牌无效",
+				"code":  "auth_invalid",
+			})
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // Logging 请求日志中间件，记录方法、路径、状态码、耗时

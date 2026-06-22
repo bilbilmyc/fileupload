@@ -113,7 +113,11 @@ func main() {
 
 	// === 传输层 ===
 
-	mw := transport.NewMiddleware()
+	mw := transport.NewMiddleware().WithAuth(transport.AuthConfig{
+		Enabled: cfg.Auth.Enabled,
+		Token:   cfg.Auth.Token,
+		Header:  cfg.Auth.Header,
+	})
 	tusHandler := transport.NewTusHandler(uploadSvc)
 	restHandler := transport.NewRESTHandler(uploadSvc, downloadSvc)
 	downloadHandler := transport.NewDownloadHandler(downloadSvc)

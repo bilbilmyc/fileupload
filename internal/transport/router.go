@@ -44,6 +44,7 @@ func NewRouter(mw *Middleware, tus *TusHandler, rest *RESTHandler, download *Dow
 func (r *Router) Handler() http.Handler {
 	var h http.Handler = r.mux
 	h = r.middleware.Namespace(h)
+	h = r.middleware.Auth(h)    // X-Auth-Token 认证
 	h = r.middleware.RateLimit(h)
 	h = r.middleware.Logging(h) // 请求日志（状态码 + 耗时）
 	h = r.middleware.RequestID(h)

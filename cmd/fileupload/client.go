@@ -26,6 +26,8 @@ const defaultNamespace = "default"
 type Client struct {
 	ServerURL  string
 	Namespace  string
+	Token      string
+	TokenHeader string
 	HTTPClient *http.Client
 }
 
@@ -38,16 +40,30 @@ func NewClient(serverURL, namespace string) *Client {
 		namespace = defaultNamespace
 	}
 	return &Client{
-		ServerURL:  strings.TrimRight(serverURL, "/"),
-		Namespace:  namespace,
-		HTTPClient: &http.Client{Timeout: 60 * time.Second},
+		ServerURL:   strings.TrimRight(serverURL, "/"),
+		Namespace:   namespace,
+		TokenHeader: "X-Auth-Token",
+		HTTPClient:  &http.Client{Timeout: 60 * time.Second},
 	}
 }
 
-// do 执行 HTTP 请求，对 5xx/503 自动重试最多 3 次，支持 Retry-After。
+// SetToken 设置认证令牌，后续所有请求将携带 X-Auth-Token
+func (c *Client) SetToken(token string) {
+	c.Token = token
+}
+
+// do 执行 HTTP 请求，自动注入认证令牌，对 5xx/503 自动重试最多 3 次。
 func (c *Client) do(req *http.Request) (*http.Response, error) {
+	// 注入认证令牌
+	if c.Token != "" {
+		req.Header.Set(c.TokenHeader, c.Token)
+	}
+	if c.Namespace != "" && req.Header.Get("X-Namespace") == "" {
+		req.Header.Set("X-Namespace", c.Namespace)
+	}
+
 	var lastErr error
-	for attempt := 0; attempt < 3; attempt++ {
+	for attempt := range 3 {
 		if attempt > 0 && req.GetBody != nil {
 			body, err := req.GetBody()
 			if err != nil {
