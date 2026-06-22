@@ -1,4 +1,5 @@
-import { Modal, Form, Select, Input, Button } from 'antd'
+import { Modal, Form, Select, Input, Button, Collapse } from 'antd'
+import { SettingOutlined } from '@ant-design/icons'
 
 interface SettingsModalProps {
   open: boolean
@@ -23,14 +24,18 @@ export default function SettingsModal({
 }: SettingsModalProps) {
   return (
     <Modal
-      title="上传设置"
+      title={
+        <span>
+          <SettingOutlined className="mr-2 text-blue-500" />
+          上传设置
+        </span>
+      }
       open={open}
-      onOk={onClose}
       onCancel={onClose}
-      width={400}
-      footer={<Button type="primary" onClick={onClose}>关闭</Button>}
+      width={420}
+      footer={<Button onClick={onClose}>关闭</Button>}
     >
-      <Form layout="vertical">
+      <Form layout="vertical" className="mt-2">
         <Form.Item label="并发数" help="auto 根据文件大小自动选择">
           <Select
             value={concurrency}
@@ -51,18 +56,22 @@ export default function SettingsModal({
             onChange={(v) => onCompressionChange(v)}
             options={[
               { value: 'none', label: '无' },
-              { value: 'zstd', label: 'zstd' },
+              { value: 'zstd', label: 'zstd（推荐）' },
             ]}
           />
         </Form.Item>
-        <details className="mt-2 text-gray-400 text-xs cursor-pointer">
-          <summary className="select-none">高级选项</summary>
-          <div className="mt-2 pl-2 border-l-2 border-gray-200">
-            <Form.Item label="分片大小（如 10m / 100m）" help="大文件分片上传时的每片大小">
-              <Input value={chunkSize} onChange={(e) => onChunkSizeChange(e.target.value)} />
-            </Form.Item>
-          </div>
-        </details>
+        <Collapse
+          ghost
+          items={[{
+            key: 'advanced',
+            label: <span className="text-xs text-gray-400">高级选项</span>,
+            children: (
+              <Form.Item label="分片大小" help="大文件分片上传时的每片大小，如 10m / 100m">
+                <Input value={chunkSize} onChange={(e) => onChunkSizeChange(e.target.value)} />
+              </Form.Item>
+            ),
+          }]}
+        />
       </Form>
     </Modal>
   )

@@ -1,6 +1,6 @@
-import { useState, useCallback, useEffect } from 'react'
-import { Modal, Tree, Spin, message } from 'antd'
-import { FolderOutlined, FolderOpenOutlined } from '@ant-design/icons'
+import { useState, useCallback, useEffect, useMemo } from 'react'
+import { Modal, Tree, Spin, Input, Empty } from 'antd'
+import { FolderOutlined, FolderOpenOutlined, SearchOutlined } from '@ant-design/icons'
 import type { DataNode } from 'antd/es/tree'
 import * as api from '../api/client'
 import type { FileItem } from '../api/client'
@@ -37,6 +37,7 @@ export default function DirectoryPicker({
   const [loading, setLoading] = useState(false)
   const [selectedKey, setSelectedKey] = useState<string>('')
   const [selectedName, setSelectedName] = useState<string>('')
+  const [searchText, setSearchText] = useState('')
 
   // Load root directories
   useEffect(() => {
@@ -44,26 +45,21 @@ export default function DirectoryPicker({
     setLoading(true)
     setSelectedKey('')
     setSelectedName('')
+    setSearchText('')
     loadChildren('/').then((nodes) => {
-      // Add "root" option
-      const rootNode: DataNode = {
-        key: '',
-        title: '根目录',
-        icon: <FolderOpenOutlined />,
-        isLeaf: true,
-      }
-      setTreeData([rootNode, ...nodes])
+      setTreeData(nodes)
       setLoading(false)
     })
   }, [open])
 
   const onLoadData = useCallback(async (node: DataNode): Promise<void> => {
-    // Don't load if already loaded or it's the root pseudo-node
-    if (node.children || node.key === '') return
+    if (node.children || node.key === '__root__') return
     const children = await loadChildren(node.key as string)
-    // @ts-ignore - mutate tree data
-    node.children = children.length > 0 ? children : [{ key: `${node.key}-empty`, title: '(空目录)', isLeaf: true, disabled: true }]
-    setTreeData([...treeData])
+    if (children.length > 0) {
+      // @ts-ignore - mutate tree data
+      node.children = children
+      setTreeData([...treeData])
+    }
   }, [treeData])
 
   const handleSelect = useCallback((keys: React.Key[], info: { node: DataNode }) => {
@@ -73,10 +69,41 @@ export default function DirectoryPicker({
     }
   }, [])
 
+  // Filter tree by search text
+  const filterTree = useCallback((nodes: DataNode[], search: string): DataNode[] => {
+    if (!search) return nodes
+    const lower = search.toLowerCase()
+    return nodes.reduce<DataNode[]>((acc, node) => {
+      const titleStr = String(node.title || '')
+      if (titleStr.toLowerCase().includes(lower)) {
+        acc.push({ ...node })
+      }
+      const children = node.children ? filterTree(node.children, search) : undefined
+      if (children && children.length > 0) {
+        acc.push({ ...node, children })
+      }
+      return acc
+    }, [])
+  }, [])
+
+  const filteredTree = useMemo(() => {
+    return filterTree(treeData, searchText)
+  }, [treeData, searchText, filterTree])
+
+  // Add root option at top
+  const displayTree: DataNode[] = useMemo(() => {
+    const rootNode: DataNode = {
+      key: '',
+      title: '根目录',
+      icon: <FolderOpenOutlined />,
+      isLeaf: true,
+    }
+    return [rootNode, ...filteredTree]
+  }, [filteredTree])
+
   const handleConfirm = () => {
-    if (!selectedKey && selectedKey !== '') {
-      message.warning('请选择一个目录')
-      return
+    if (selectedKey === undefined) {
+      return // root is valid (key = '')
     }
     onConfirm(selectedKey, selectedName)
   }
@@ -89,23 +116,37 @@ export default function DirectoryPicker({
       onCancel={onCancel}
       okText="确认"
       cancelText="取消"
-      width={400}
+      width={500}
     >
+      <div className="mb-3">
+        <Input
+          size="small"
+          prefix={<SearchOutlined className="text-gray-400" />}
+          placeholder="搜索目录..."
+          value={searchText}
+          onChange={(e) => setSearchText(e.target.value)}
+          allowClear
+          autoFocus
+        />
+      </div>
+      {selectedName && (
+        <div className="mb-2 text-xs text-blue-600 bg-blue-50 px-2.5 py-1.5 rounded-md border border-blue-100">
+          已选择: <strong>{selectedName}</strong>
+        </div>
+      )}
       {loading ? (
         <div className="flex justify-center py-8"><Spin /></div>
+      ) : filteredTree.length === 0 && searchText ? (
+        <Empty description="无匹配目录" className="py-8" />
       ) : (
-        <div className="max-h-80 overflow-auto">
-          {selectedName && selectedKey !== '' && (
-            <div className="mb-2 text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded">
-              已选择: {selectedName}
-            </div>
-          )}
+        <div className="max-h-72 overflow-auto border border-gray-100 rounded-md p-1">
           <Tree
-            treeData={treeData}
+            treeData={displayTree}
             loadData={onLoadData as any}
             onSelect={handleSelect}
             showIcon
             defaultExpandAll={false}
+            selectedKeys={selectedKey ? [selectedKey] : []}
           />
         </div>
       )}

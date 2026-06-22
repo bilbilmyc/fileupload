@@ -47,14 +47,12 @@ export default function Files() {
   const {
     uploadTasks,
     dirMode,
-    showUpload,
     chunkSize,
     concurrency,
     compression,
     configOpen,
     hasActiveUploads,
     setDirMode,
-    setShowUpload,
     setChunkSize,
     setConcurrency,
     setCompression,
@@ -228,18 +226,15 @@ export default function Files() {
             <StatsBar
               dirs={stats.dirs}
               files={stats.files}
-              totalSize={stats.totalSize.toString()}
+              totalSize={stats.totalSize}
             />
           </div>
 
-          {/* Hide Upload Area - click to show */}
           <UploadPanel
             uploadTasks={uploadTasks}
             dirMode={dirMode}
-            showUpload={showUpload}
             hasActiveUploads={hasActiveUploads}
             onDirModeChange={setDirMode}
-            onShowUploadChange={setShowUpload}
             onCustomRequest={customRequest}
             onClearDone={clearDoneTasks}
           />

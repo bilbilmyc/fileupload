@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react'
-import { Modal, Timeline, Typography, Button, Empty, Space, Tag } from 'antd'
-import { ClockCircleOutlined, ClearOutlined } from '@ant-design/icons'
+import { Modal, Table, Tag, Button, Empty, Space, Typography } from 'antd'
+import { ClockCircleOutlined, ClearOutlined, DeleteOutlined, DownloadOutlined, ScissorOutlined, CopyOutlined, TagOutlined } from '@ant-design/icons'
 
 const { Text } = Typography
 
@@ -20,35 +20,61 @@ interface BatchHistoryPanelProps {
   onClear: () => void
 }
 
-const TYPE_LABELS: Record<string, string> = {
-  delete: '批量删除',
-  download: '批量下载',
-  move: '批量移动',
-  copy: '批量复制',
-  tag: '批量标记',
-}
-
-const TYPE_COLORS: Record<string, string> = {
-  delete: 'red',
-  download: 'blue',
-  move: 'orange',
-  copy: 'green',
-  tag: 'purple',
-}
-
-const STATUS_DOTS: Record<string, string> = {
-  success: 'green',
-  partial: 'orange',
-  failed: 'red',
+const TYPE_CONFIG: Record<string, { label: string; color: string; icon: React.ReactNode }> = {
+  delete: { label: '删除', color: 'red', icon: <DeleteOutlined /> },
+  download: { label: '下载', color: 'blue', icon: <DownloadOutlined /> },
+  move: { label: '移动', color: 'orange', icon: <ScissorOutlined /> },
+  copy: { label: '复制', color: 'green', icon: <CopyOutlined /> },
+  tag: { label: '标记', color: 'purple', icon: <TagOutlined /> },
 }
 
 export default function BatchHistoryPanel({ open, onClose, history, onClear }: BatchHistoryPanelProps) {
+  const columns = [
+    {
+      title: '操作',
+      dataIndex: 'type',
+      width: 80,
+      render: (type: string) => {
+        const cfg = TYPE_CONFIG[type] || {}
+        return <Tag color={cfg.color}>{cfg.label || type}</Tag>
+      },
+    },
+    {
+      title: '数量',
+      dataIndex: 'fileCount',
+      width: 60,
+      align: 'right' as const,
+      render: (n: number) => <Text className="text-sm">{n}</Text>,
+    },
+    {
+      title: '状态',
+      dataIndex: 'status',
+      width: 80,
+      render: (status: string) => {
+        const colors: Record<string, string> = { success: 'green', partial: 'orange', failed: 'red' }
+        const labels: Record<string, string> = { success: '成功', partial: '部分', failed: '失败' }
+        return <Tag color={colors[status]}>{labels[status] || status}</Tag>
+      },
+    },
+    {
+      title: '详情',
+      dataIndex: 'detail',
+      ellipsis: true,
+      render: (d: string) => <Text className="text-xs text-gray-500">{d || '-'}</Text>,
+    },
+    {
+      title: '时间',
+      dataIndex: 'time',
+      width: 160,
+      render: (t: Date) => <Text className="text-xs text-gray-400">{t.toLocaleString()}</Text>,
+    },
+  ]
 
   return (
     <Modal
       title={
         <Space>
-          <ClockCircleOutlined />
+          <ClockCircleOutlined className="text-blue-500" />
           <span>批量操作历史</span>
         </Space>
       }
@@ -56,39 +82,26 @@ export default function BatchHistoryPanel({ open, onClose, history, onClear }: B
       onCancel={onClose}
       footer={
         history.length > 0 ? (
-          <Button size="small" icon={<ClearOutlined />} onClick={onClear}>
-            清除历史
-          </Button>
+          <Space>
+            <Text className="text-xs text-gray-400">共 {history.length} 条记录</Text>
+            <Button size="small" icon={<ClearOutlined />} onClick={onClear}>
+              清除历史
+            </Button>
+          </Space>
         ) : null
       }
-      width={500}
+      width={600}
     >
       {history.length === 0 ? (
         <Empty description="暂无操作历史" className="py-8" />
       ) : (
-        <Timeline
-          items={history.slice().reverse().map((item) => ({
-            color: STATUS_DOTS[item.status],
-            children: (
-              <div key={item.id}>
-                <Space>
-                  <Tag color={TYPE_COLORS[item.type]}>
-                    {TYPE_LABELS[item.type] || item.type}
-                  </Tag>
-                  <Text className="text-sm">{item.fileCount} 个文件</Text>
-                  {item.status === 'success' && <Tag color="success">全部成功</Tag>}
-                  {item.status === 'partial' && <Tag color="warning">部分成功</Tag>}
-                  {item.status === 'failed' && <Tag color="error">失败</Tag>}
-                </Space>
-                {item.detail && (
-                  <div className="text-xs text-gray-400 mt-1">{item.detail}</div>
-                )}
-                <div className="text-xs text-gray-300 mt-0.5">
-                  {item.time.toLocaleString()}
-                </div>
-              </div>
-            ),
-          }))}
+        <Table
+          dataSource={[...history].reverse()}
+          columns={columns}
+          rowKey="id"
+          size="small"
+          pagination={{ pageSize: 10, size: 'small', showTotal: (t) => `共 ${t} 条` }}
+          locale={{ emptyText: '暂无记录' }}
         />
       )}
     </Modal>
@@ -105,8 +118,9 @@ export function useBatchHistory() {
       time: new Date(),
     }
     setItems((prev: BatchHistoryItem[]) => [...prev, newItem])
-    // Keep max 100 records
-    setItems((prev: BatchHistoryItem[]) => prev.length > 100 ? prev.slice(-100) : prev)
+    if (items.length >= 100) {
+      setItems((prev: BatchHistoryItem[]) => prev.slice(-100))
+    }
   }, [])
 
   return { items, addRecord }

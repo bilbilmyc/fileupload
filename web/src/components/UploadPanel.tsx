@@ -1,17 +1,15 @@
-import { Upload, Progress, Button, Switch, Card, Space, Typography, Spin } from 'antd'
-const { Text } = Typography
-import { UploadOutlined, InboxOutlined, ClearOutlined } from '@ant-design/icons'
+import { Upload, Progress, Button, Switch, Typography, Spin } from 'antd'
+import { UploadOutlined, InboxOutlined, ClearOutlined, CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons'
 import type { UploadTask } from '../hooks/useUpload'
 
+const { Text } = Typography
 const { Dragger } = Upload
 
 interface UploadPanelProps {
   uploadTasks: UploadTask[]
   dirMode: boolean
-  showUpload: boolean
   hasActiveUploads: boolean
   onDirModeChange: (checked: boolean) => void
-  onShowUploadChange: (show: boolean) => void
   onCustomRequest: (options: any) => void
   onClearDone: () => void
 }
@@ -19,92 +17,91 @@ interface UploadPanelProps {
 export default function UploadPanel({
   uploadTasks,
   dirMode,
-  showUpload,
   hasActiveUploads,
   onDirModeChange,
-  onShowUploadChange,
   onCustomRequest,
   onClearDone,
 }: UploadPanelProps) {
+  const doneCount = uploadTasks.filter(t => t.status === 'done' || t.status === 'error').length
+  const allDone = doneCount === uploadTasks.length && uploadTasks.length > 0
+
+  const renderTaskIcon = (status: string) => {
+    switch (status) {
+      case 'done': return <CheckCircleOutlined className="text-green-500 text-xs" />
+      case 'error': return <CloseCircleOutlined className="text-red-500 text-xs" />
+      default: return <Spin size="small" className="text-blue-500" />
+    }
+  }
+
   return (
-    <Card
-      size="small"
-      className="shadow-sm"
-      title={
-        <Space>
+    <div className="bg-white rounded-lg shadow-sm p-4">
+      {/* Upload Bar */}
+      <div className="flex items-center gap-3 mb-3">
+        <div className="flex items-center gap-1.5 text-sm font-medium text-gray-700 min-w-[60px]">
           <UploadOutlined className="text-blue-500" />
-          <span className="text-sm font-medium">上传</span>
-        </Space>
-      }
-      extra={
-        <Space size="small">
+          <span>上传</span>
+        </div>
+        <div className="flex items-center gap-1.5">
           <Text className="text-xs text-gray-400">目录模式</Text>
           <Switch size="small" checked={dirMode} onChange={onDirModeChange} />
-          {!showUpload && (
-            <Button size="small" type="primary" ghost icon={<UploadOutlined />} onClick={() => onShowUploadChange(true)}>
-              展开
-            </Button>
-          )}
-        </Space>
-      }
-    >
-      {showUpload ? (
-        <>
+        </div>
+        <div className="flex-1">
           <Dragger
             multiple={!dirMode}
             directory={dirMode}
             customRequest={onCustomRequest}
             showUploadList={false}
-            className="bg-gray-50 border-dashed"
+            className="!bg-gray-50 !border-dashed !border-gray-300 hover:!border-blue-400 !rounded-md"
+            style={{ padding: '6px 16px' }}
           >
-            <p className="text-3xl text-blue-400 !mb-2"><InboxOutlined /></p>
-            <p className="text-sm text-gray-500">点击或拖拽文件{dirMode ? '夹' : ''}到此处</p>
-          </Dragger>
-          {uploadTasks.length > 0 && (
-            <div className="mt-3 space-y-1.5">
-              <div className="flex justify-between items-center">
-                <span className="text-xs text-gray-400">
-                  {uploadTasks.filter(t => t.status === 'done').length}/{uploadTasks.length}
-                  {hasActiveUploads && <Spin size="small" className="ml-2" />}
-                </span>
-                <Button type="link" size="small" onClick={onClearDone} className="text-xs">
-                  <ClearOutlined /> 清除已完成
-                </Button>
-              </div>
-              {uploadTasks.map((t) => (
-                <div key={t.id} className="flex items-center gap-3 py-1">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex justify-between text-xs">
-                      <span className="truncate">{t.name}</span>
-                      <span className="text-gray-400 shrink-0 ml-2">
-                        {t.status === 'done' ? '✓'
-                          : t.status === 'error' ? `✗ ${t.error || ''}`
-                          : `${t.speed || ''}`}
-                      </span>
-                    </div>
-                    <Progress
-                      percent={t.progress}
-                      size="small"
-                      status={t.status === 'error' ? 'exception' : undefined}
-                      showInfo={false}
-                      strokeColor={t.status === 'done' ? '#52c41a' : undefined}
-                    />
-                  </div>
-                </div>
-              ))}
+            <div className="flex items-center justify-center gap-2 text-xs text-gray-400">
+              <InboxOutlined className="text-base" />
+              <span>点击或拖拽文件{dirMode ? '夹' : ''}到此处</span>
             </div>
-          )}
-          <Button size="small" type="text" onClick={() => onShowUploadChange(false)} className="mt-2 text-xs text-gray-400">
-            收起
+          </Dragger>
+        </div>
+        {allDone && (
+          <Button size="small" type="text" onClick={onClearDone} className="text-xs text-gray-400">
+            <ClearOutlined /> 清除
           </Button>
-        </>
-      ) : (
-        <div className="flex items-center justify-center py-2">
-          <Button type="dashed" icon={<UploadOutlined />} onClick={() => onShowUploadChange(true)} className="text-gray-400">
-            点击展开上传区域
-          </Button>
+        )}
+      </div>
+
+      {/* Upload Task List */}
+      {uploadTasks.length > 0 && (
+        <div className="space-y-1.5 border-t border-gray-100 pt-3">
+          <div className="flex justify-between items-center mb-1">
+            <Text className="text-xs text-gray-400">
+              {doneCount}/{uploadTasks.length}
+              {hasActiveUploads && <Spin size="small" className="ml-1" />}
+            </Text>
+          </div>
+          {uploadTasks.map((t) => (
+            <div key={t.id} className="flex items-center gap-2 py-0.5">
+              {renderTaskIcon(t.status)}
+              <div className="flex-1 min-w-0">
+                <div className="flex justify-between items-center text-xs">
+                  <span className="truncate text-gray-600">{t.name}</span>
+                  <span className="text-gray-400 shrink-0 ml-2">
+                    {t.status === 'error' ? t.error || '失败'
+                      : t.status === 'done' ? ''
+                      : t.speed || ''}
+                  </span>
+                </div>
+                <Progress
+                  percent={t.progress}
+                  size="small"
+                  status={t.status === 'error' ? 'exception' : undefined}
+                  showInfo={true}
+                  strokeColor={t.status === 'done' ? '#52c41a' : undefined}
+                  format={(pct) => t.status === 'error' ? '' : t.status === 'done' ? '' : `${pct}%`}
+                  style={{ margin: 0 }}
+                />
+              </div>
+            </div>
+          ))}
         </div>
       )}
-    </Card>
+    </div>
   )
 }
