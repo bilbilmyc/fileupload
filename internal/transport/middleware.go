@@ -10,6 +10,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -97,8 +98,15 @@ func (m *Middleware) Namespace(next http.Handler) http.Handler {
 }
 
 // RateLimit 令牌桶限流（按 namespace / IP 隔离）
+// 上传和健康检查路径豁免限流，避免大量小文件并发上传被误拦。
 func (m *Middleware) RateLimit(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// 上传路径和健康检查豁免限流
+		path := r.URL.Path
+		if strings.HasPrefix(path, "/uploads") || strings.HasPrefix(path, "/v1/uploads") || path == "/health" {
+			next.ServeHTTP(w, r)
+			return
+		}
 		key := m.rateKey(r)
 		if !m.rateLimiter.Allow(key) {
 			w.Header().Set("Retry-After", "1")
