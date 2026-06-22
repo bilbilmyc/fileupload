@@ -186,7 +186,7 @@ export default function Files() {
     taskId: string
   }>>(new Map())
 
-  const uploadSingleFile = async (file: RcFile, taskId: string, dirRelPath?: string) => {
+  const uploadSingleFile = async (file: RcFile, taskId: string, dirRelPath?: string, dirName?: string) => {
     const size = file.size
     updateTask(taskId, { status: 'hashing', progress: 0 })
 
@@ -204,7 +204,7 @@ export default function Files() {
         if (exists) {
           updateTask(taskId, { status: 'done', progress: 100 })
           message.success(`秒传: ${file.name}`)
-          if (dirRelPath) recordDirFile(taskId, dirRelPath, exists.file_id)
+          if (dirRelPath && dirName) recordDirFile(dirName, dirRelPath, exists.file_id)
           else loadFiles()
           return
         }
@@ -252,9 +252,9 @@ export default function Files() {
       const result = await api.finalizeUpload(init.session_id)
       updateTask(taskId, { status: 'done', progress: 100 })
 
-      if (dirRelPath) {
+      if (dirRelPath && dirName) {
         // 目录模式：记录文件路径，提交 manifest
-        recordDirFile(taskId, dirRelPath, result.file_id)
+        recordDirFile(dirName, dirRelPath, result.file_id)
       } else {
         message.success(`上传完成: ${file.name}`)
         loadFiles()
@@ -266,23 +266,24 @@ export default function Files() {
   }
 
   // 记录目录文件并检测是否完成
-  const recordDirFile = (batchTaskId: string, relPath: string, fileId: string) => {
-    const batch = dirBatches.current.get(batchTaskId)
+  const recordDirFile = (dirName: string, relPath: string, fileId: string) => {
+    const batch = dirBatches.current.get(dirName)
     if (!batch) return
     batch.entries.push({ path: relPath, file_id: fileId })
     batch.done++
-    updateTask(batchTaskId, { progress: Math.round((batch.done / batch.total) * 100) })
+    updateTask(batch.taskId, { progress: Math.round((batch.done / batch.total) * 100) })
 
     if (batch.done >= batch.total) {
       // 所有文件上传完成，提交目录 manifest
-      updateTask(batchTaskId, { status: 'finalizing', progress: 99 })
+      updateTask(batch.taskId, { status: 'finalizing', progress: 99 })
       api.submitDir(batch.dirName, batch.entries).then(() => {
-        updateTask(batchTaskId, { status: 'done', progress: 100, name: `📁 ${batch.dirName}` })
+        updateTask(batch.taskId, { status: 'done', progress: 100, name: `📁 ${batch.dirName}` })
         message.success(`目录上传完成: ${batch.dirName} (${batch.entries.length} 个文件)`)
-        dirBatches.current.delete(batchTaskId)
+        dirBatches.current.delete(dirName)
+        dirBatches.current.delete(batch.taskId)
         loadFiles()
       }).catch((e: any) => {
-        updateTask(batchTaskId, { status: 'error', error: e.message })
+        updateTask(batch.taskId, { status: 'error', error: e.message })
       })
     }
   }
@@ -340,7 +341,7 @@ export default function Files() {
       // 每个文件单独一个 taskId 用于进度显示
       const taskId = addTask(file, dirName)
       try {
-        await uploadSingleFile(file, taskId, relPath)
+        await uploadSingleFile(file, taskId, relPath, dirName)
         onSuccess?.()
       } catch (e: any) {
         updateTask(taskId, { status: 'error', error: (e as Error).message })
