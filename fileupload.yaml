@@ -3,7 +3,7 @@
 # 也可通过 FILEUPLOAD_CONFIG 环境变量指定路径
 
 server:
-  addr: ":8080"              # 监听地址
+  addr: ":18080"              # 监听地址
   read_timeout: 30           # 读取超时（秒）
   write_timeout: 300         # 写入超时（秒），大文件需长超时
   idle_timeout: 60           # 空闲超时（秒）

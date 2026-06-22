@@ -34,7 +34,7 @@ export function useFileOperations(_namespace?: string) {
       if (res.dir && typeof res.dir === 'object' && 'name' in res.dir) {
         const d = res.dir as any
         setParentName(d.name as string)
-        setParentID(d.parent_id || null)
+        setParentID(d.parent_id || (currentDir !== '/' ? '/' : null))
       } else {
         setParentName('')
         setParentID(null)
