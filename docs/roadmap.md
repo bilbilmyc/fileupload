@@ -27,13 +27,13 @@
 
 ---
 
-## Phase 3 — 后端多功能支持（进行中）
+## Phase 3 — 后端多功能支持 ✅
 
 | # | 任务 | 状态 | 优先级 | 说明 |
 |---|------|------|--------|------|
 | 10 | JWT 真实鉴权 | ✅ | 🟡 P1 | 登录 API、JWT 签发/验证、namespace 从 token 解析 |
-| 11 | 管理后台 API | ⏳ | 🟡 P1 | 系统监控、审计日志持久化 |
-| 12 | PostgreSQL 适配 | ⏳ | 🟡 P1 | 新增 postgres.go 适配器 |
+| 11 | 管理后台 API | ✅ | 🟡 P1 | 系统监控、审计日志持久化 |
+| 12 | PostgreSQL 适配 | ✅ | 🟡 P1 | 新增 postgres.go 适配器（全部 Metadata 接口） |
 | 13 | 存储配额管理 | 📋 | 🟢 P2 | 按 namespace 设置存储上限 |
 | 14 | 高级压缩策略 | 📋 | 🟢 P2 | 图片 webp 转换、视频转码 |
 
@@ -195,5 +195,9 @@
 - **2026-06-22 18:00**: Phase 3 Task 10 JWT 鉴权完成
   - 分支: `phase3-backend-auth`
   - 提交: `ca0f47c` — "feat: JWT 鉴权 + 登录 API + 前端接入"
+
+- **2026-06-22 20:00**: Phase 3 后端多功能支持全部完成
+  - 分支: `phase3-backend-auth`
+  - 提交: `3dda065` — "feat: Phase 3 管理后台API + PostgreSQL适配"
 
 *最后更新: 2026-06-22*
