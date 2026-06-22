@@ -111,7 +111,7 @@ func newE2EFixture(t *testing.T) *e2eFixture {
 	tusHandler := NewTusHandler(uploadSvc)
 	restHandler := NewRESTHandler(uploadSvc, downloadSvc)
 	downloadHandler := NewDownloadHandler(downloadSvc)
-	router := NewRouter(mw, tusHandler, restHandler, downloadHandler, nil, nil, nil, uploadSvc, scanner, nil)
+	router := NewRouter(mw, tusHandler, restHandler, downloadHandler, nil, nil, nil, nil, nil, uploadSvc, scanner, nil)
 
 	// 10. httptest 服务器
 	srv := httptest.NewServer(router.Handler())

@@ -191,7 +191,8 @@ func main() {
 	downloadHandler := transport.NewDownloadHandler(downloadSvc)
 	batchHandler := transport.NewBatchHandler(batchSvc)
 	adminHandler := transport.NewAdminHandler(metaFacade, workerPool, cfg.Storage.DataDir, cfg.Storage.TempDir, cfg.Database.Path, cfg.Database.Type)
-router := transport.NewRouter(mw, tusHandler, restHandler, downloadHandler, batchHandler, authHandler, adminHandler, uploadSvc, scanner, healthChecker)
+wsHub := transport.NewWSHub()
+router := transport.NewRouter(mw, tusHandler, restHandler, downloadHandler, batchHandler, authHandler, adminHandler, nil, wsHub, uploadSvc, scanner, healthChecker)
 
 	// 首次启动时执行一次快速巡检
 	go func() {

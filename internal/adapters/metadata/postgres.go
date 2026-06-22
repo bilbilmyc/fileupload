@@ -68,6 +68,26 @@ func (s *PostgresStore) migrate() error {
 			PRIMARY KEY (file_id, tag)
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_file_tags_tag ON file_tags(tag)`,
+		`CREATE TABLE IF NOT EXISTS audit_log (
+			id         SERIAL PRIMARY KEY,
+			action     TEXT NOT NULL,
+			target_type TEXT NOT NULL DEFAULT '',
+			target_id  TEXT NOT NULL DEFAULT '',
+			user_id    TEXT NOT NULL DEFAULT '',
+			namespace  TEXT NOT NULL DEFAULT '',
+			detail     TEXT NOT NULL DEFAULT '',
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE TABLE IF NOT EXISTS shares (
+			token        TEXT PRIMARY KEY,
+			file_id      TEXT NOT NULL,
+			password_hash TEXT NOT NULL DEFAULT '',
+			expires_at   TEXT NOT NULL DEFAULT '',
+			max_downloads INTEGER NOT NULL DEFAULT 0,
+			cur_downloads INTEGER NOT NULL DEFAULT 0,
+			namespace    TEXT NOT NULL DEFAULT '',
+			created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
 	}
 
 	for _, q := range queries {

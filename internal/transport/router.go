@@ -20,6 +20,7 @@ type Router struct {
 	auth       *AuthHandler
 	admin      *AdminHandler
 	share      *ShareHandler
+	wsHub      *WSHub
 	uploadSvc  *domain.UploadService
 	scanner    Scanner
 	health     HealthChecker
@@ -36,7 +37,7 @@ type HealthChecker interface {
 }
 
 // NewRouter 创建路由器并注册所有路由
-func NewRouter(mw *Middleware, tus *TusHandler, rest *RESTHandler, download *DownloadHandler, batch *BatchHandler, auth *AuthHandler, admin *AdminHandler, share *ShareHandler, uploadSvc *domain.UploadService, scanner Scanner, health HealthChecker) *Router {
+func NewRouter(mw *Middleware, tus *TusHandler, rest *RESTHandler, download *DownloadHandler, batch *BatchHandler, auth *AuthHandler, admin *AdminHandler, share *ShareHandler, wsHub *WSHub, uploadSvc *domain.UploadService, scanner Scanner, health HealthChecker) *Router {
 	r := &Router{
 		mux:        http.NewServeMux(),
 		middleware: mw,
@@ -47,6 +48,7 @@ func NewRouter(mw *Middleware, tus *TusHandler, rest *RESTHandler, download *Dow
 		auth:       auth,
 		admin:      admin,
 		share:      share,
+		wsHub:      wsHub,
 		uploadSvc:  uploadSvc,
 		scanner:    scanner,
 		health:     health,
@@ -119,6 +121,11 @@ func (r *Router) registerRoutes() {
 	}
 	r.mux.HandleFunc("POST /v1/admin/scan", r.handleAdminScan)
 
+	if r.share != nil {
+		r.mux.HandleFunc("POST /v1/share", r.share.CreateShare)
+		r.mux.HandleFunc("GET /s/{token}", r.share.AccessShare)
+	}
+
 	// === 前端 React 构建产物 ===
 	staticFS, err := fs.Sub(web.DistFiles, "dist")
 	if err == nil {
@@ -126,6 +133,9 @@ func (r *Router) registerRoutes() {
 	}
 
 	// === 健康检查 ===
+	if r.wsHub != nil {
+		r.mux.HandleFunc("GET /ws", r.wsHub.HandleWebSocket)
+	}
 	r.mux.HandleFunc("GET /health", func(w http.ResponseWriter, req *http.Request) {
 		result := map[string]any{"status": "ok"}
 		if r.health != nil {

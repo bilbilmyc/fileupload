@@ -418,7 +418,256 @@ X-Namespace: my-ns
 
 ---
 
+
+## WebSocket
+
+### GET /ws — 实时事件推送
+
+WebSocket 端点，用于接收上传进度、完成、错误等实时事件。
+
+**连接：**
+```
+ws://host:8080/ws
+```
+
+**服务端推送事件格式：**
+```json
+{
+  "type": "upload_progress",
+  "payload": {
+    "task_id": "photo.jpg-1234567890-0.123",
+    "file_name": "photo.jpg",
+    "progress": 45,
+    "speed": "5.2 MB/s",
+    "status": "uploading"
+  }
+}
+```
+
+| 事件类型 | 说明 |
+|---------|------|
+| `upload_progress` | 上传进度更新 |
+| `upload_complete` | 上传完成，含 `file_id` |
+| `upload_error` | 上传失败，含 `error` 消息 |
+
+---
+
+### GET /health — 健康检查
+
+**请求：**
+```
+GET /health
+```
+
+**响应 `200 OK`：**
+```json
+{
+  "status": "ok"
+}
+```
+
+---
+
+## 鉴权 API
+
+### POST /v1/auth/login — 用户登录
+
+**请求：**
+```
+POST /v1/auth/login
+Content-Type: application/json
+
+{
+  "username": "admin",
+  "password": "admin123"
+}
+```
+
+**响应 `200 OK`：**
+```json
+{
+  "access_token": "eyJhbGciOiJIUzI1NiIs...",
+  "refresh_token": "eyJhbGciOiJIUzI1NiIs...",
+  "expires_in": 259200,
+  "user_id": "u-admin",
+  "namespace": "default"
+}
+```
+
+**响应 `401 Unauthorized`：**
+```json
+{ "error": "认证失败", "code": "auth_failed" }
+```
+
+### POST /v1/auth/refresh — 刷新 Token
+
+**请求：**
+```
+POST /v1/auth/refresh
+Content-Type: application/json
+
+{
+  "refresh_token": "eyJhbGciOiJIUzI1NiIs..."
+}
+```
+
+**响应 `200 OK`：** 返回新的 `access_token` 和 `refresh_token`。
+
+### GET /v1/auth/me — 获取当前用户
+
+**请求：**
+```
+GET /v1/auth/me
+Authorization: Bearer eyJhbGciOiJIUzI1NiIs...
+```
+
+**响应 `200 OK`：**
+```json
+{
+  "user_id": "u-admin",
+  "namespace": "default",
+  "roles": ["admin", "user"]
+}
+```
+
+---
+
+## 预览 API
+
+### GET /v1/preview/{file_id} — 在线预览文件
+
+流式读取文件内容，返回正确的 Content-Type 实现浏览器内联预览。
+
+**请求：**
+```
+GET /v1/preview/f1e2d3c40000000000000001
+```
+
+**支持的文件类型：**
+
+| 类别 | 扩展名 | Content-Type |
+|------|--------|-------------|
+| 图片 | jpg, png, gif, webp, svg | image/* |
+| 文档 | pdf | application/pdf |
+| 文本 | txt, md, log, json, xml, csv, yaml | text/plain; charset=utf-8 |
+| 代码 | go, js, py, ts, java, c, cpp, rs, sh | text/plain; charset=utf-8 |
+| 视频 | mp4, webm, avi, mov, mkv | video/* |
+| 音频 | mp3, wav, ogg, flac, aac | audio/* |
+
+**响应：**
+```
+Content-Type: image/png
+Content-Disposition: inline; filename="photo.png"
+Cache-Control: public, max-age=3600
+
+<binary data>
+```
+
+支持 Range 头分段读取，用于视频/音频拖拽播放。
+
+---
+
+## 分享链接 API
+
+### POST /v1/share — 创建分享链接
+
+**请求：**
+```
+POST /v1/share
+Content-Type: application/json
+Authorization: Bearer eyJhbGciOiJIUzI1NiIs...
+
+{
+  "file_id": "f1e2d3c40000000000000001",
+  "password": "optional-pass",
+  "expires_in": 24,
+  "max_downloads": 10
+}
+```
+
+| 参数 | 必填 | 说明 |
+|------|------|------|
+| `file_id` | 是 | 要分享的文件 ID |
+| `password` | 否 | 访问密码 |
+| `expires_in` | 否 | 过期小时数（0=不限） |
+| `max_downloads` | 否 | 最大下载次数（0=不限） |
+
+**响应 `201 Created`：**
+```json
+{
+  "token": "s-abc123def456...",
+  "file_id": "f1e2d3c40000000000000001",
+  "expires_at": "2026-06-23T22:00:00+08:00",
+  "max_downloads": 10,
+  "cur_downloads": 0,
+  "namespace": "default"
+}
+```
+
+### GET /s/{token} — 访问分享链接
+
+**请求：**
+```
+GET /s/s-abc123def456...
+X-Share-Password: optional-pass
+```
+
+**响应 `302 Found`：** 重定向到文件下载。
+
+**错误：**
+| 状态码 | 说明 |
+|--------|------|
+| 404 | 链接不存在或已过期 |
+| 401 | 密码错误（返回 `{"code": "share_password_required"}`） |
+| 410 | 下载次数已达上限或已过期 |
+
+---
+
+
 ## 管理 API
+
+### GET /v1/admin/status — 系统状态
+
+**请求：**
+```
+GET /v1/admin/status
+```
+
+**响应 `200 OK`：**
+```json
+{
+  "version": "dev",
+  "storage": {
+    "data_dir": "storage/data",
+    "temp_dir": "storage/tmp",
+    "total_files": 42,
+    "total_blobs": 38,
+    "total_size": 1048576000
+  },
+  "database": { "type": "postgres", "path": "..." },
+  "worker_pool": { "capacity": 128, "available": 126 }
+}
+```
+
+### GET /v1/admin/audit — 审计日志
+
+**请求：**
+```
+GET /v1/admin/audit?page=1&per_page=50
+```
+
+**响应 `200 OK`：**
+```json
+{
+  "entries": [
+    {
+      "id": 1, "action": "delete", "user_id": "u-admin",
+      "detail": "批量删除 3 个文件", "created_at": "2026-06-22T12:00:00Z"
+    }
+  ],
+  "total": 1, "page": 1, "per_page": 50
+}
+```
 
 ### POST /v1/admin/scan — 触发一致性巡检
 
@@ -444,48 +693,7 @@ POST /v1/admin/scan
 | `orphan_files` | 数据目录中无元数据记录的物理文件 |
 | `metadata_orphans` | 元数据记录了但物理文件不存在的 blob |
 | `ref_count_fixes` | 引用计数与实际引用文件数不一致的 blob 数量 |
-| `corrupted_files` | SHA-256 校验失败的文件（预留） |
-
----
-
-### GET /health — 健康检查
-
-**请求：**
-```
-GET /health
-```
-
-**响应 `200 OK`：**
-```json
-{
-  "status": "ok"
-}
-```
-
----
-
-## 错误处理
-
-所有错误响应统一格式：
-```json
-{
-  "error": "参数不合法"
-}
-```
-
-| HTTP | 错误码 | 说明 |
-|------|--------|------|
-| 400 | `ErrInvalidArgument` | 参数不合法（缺 size、sha256 为空等） |
-| 403 | `ErrForbidden` | 命名空间无权访问 |
-| 404 | `ErrNotFound` / `ErrSessionNotFound` | 资源或会话不存在 |
-| 409 | `ErrSessionState` / `ErrOffsetConflict` | 会话状态不允许操作 / 分片偏移冲突 |
-| 410 | `ErrCorrupted` | 文件已损坏 |
-| 422 | `ErrContentChecksum` | 整体 SHA-256 校验失败 |
-| 460 | `ErrSliceChecksum` | 分片 SHA-256 校验失败 |
-| 429 | — | 请求过于频繁（速率限制） |
-| 500 | — | 内部错误 |
-| 501 | — | 功能未启用（如 scanner 未配置） |
-| 503 | `ErrBusy` | 服务忙，请稍后重试 |
+| `corrupted_files` | SHA-256 校验失败的文件 |
 
 ---
 
