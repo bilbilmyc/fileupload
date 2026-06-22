@@ -562,7 +562,7 @@ func (s *UploadService) SubmitDir(ctx context.Context, manifest DirManifest, nam
 		if parentFile.SHA256 != "" {
 			blob, err := s.meta.GetBlobBySha(ctx, parentFile.SHA256)
 			if err == nil && blob != nil {
-				hierPath := fmt.Sprintf("%s/%s", namespace, entry.Path)
+				hierPath := fmt.Sprintf("%s/%s/%s", namespace, dirName, entry.Path)
 				if blob.StoragePath != hierPath {
 					reader, rErr := s.storage.Open(ctx, blob.StoragePath, 0, 0)
 					if rErr == nil {

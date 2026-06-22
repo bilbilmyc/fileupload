@@ -385,6 +385,15 @@ func (h *RESTHandler) ListDir(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 递归计算子目录的总文件大小
+	for i, child := range children {
+		if child.IsDir {
+			if size, err := h.downloadSvc.GetDirTotalSize(r.Context(), child.FileID); err == nil {
+				children[i].Size = size
+			}
+		}
+	}
+
 	respondJSON(w, http.StatusOK, map[string]any{
 		"dir":      dir,
 		"children": children,

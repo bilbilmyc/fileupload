@@ -27,6 +27,7 @@ export default function Files() {
     loading,
     search,
     page,
+    currentDir,
     selectedRowKeys,
     stats,
     breadcrumbItems,
@@ -37,6 +38,7 @@ export default function Files() {
     setSelectedRowKeys,
     loadFiles,
     navigateToDir,
+    navigateUp,
     handleDownload,
     handleDelete,
   } = useFileOperations()
@@ -210,13 +212,25 @@ export default function Files() {
       <Content className="px-6 py-4" style={{ maxWidth: 1200, margin: '0 auto' }}>
         <div className="flex flex-col gap-4">
           {/* Stats + Breadcrumb */}
-          <StatsBar
-            dirs={stats.dirs}
-            files={stats.files}
-            totalSize={stats.totalSize.toString()}
-          />
-
-          <BreadcrumbNav items={breadcrumbItems} />
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              {currentDir !== '/' && (
+                <button
+                  onClick={navigateUp}
+                  className="text-xs text-blue-500 hover:text-blue-700 border border-blue-200 rounded px-2 py-0.5"
+                  title="返回上一级"
+                >
+                  ↑ 上一级
+                </button>
+              )}
+              <BreadcrumbNav items={breadcrumbItems} />
+            </div>
+            <StatsBar
+              dirs={stats.dirs}
+              files={stats.files}
+              totalSize={stats.totalSize.toString()}
+            />
+          </div>
 
           {/* Hide Upload Area - click to show */}
           <UploadPanel

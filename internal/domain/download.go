@@ -281,6 +281,27 @@ func (s *DownloadService) ListDir(ctx context.Context, parentID, namespace strin
 	return dir, children, nil
 }
 
+// GetDirTotalSize 递归计算目录下所有文件的总大小
+func (s *DownloadService) GetDirTotalSize(ctx context.Context, dirID string) (int64, error) {
+	children, err := s.meta.ListChildren(ctx, dirID)
+	if err != nil {
+		return 0, err
+	}
+	var total int64
+	for _, child := range children {
+		if child.IsDir {
+			size, err := s.GetDirTotalSize(ctx, child.FileID)
+			if err != nil {
+				return 0, err
+			}
+			total += size
+		} else {
+			total += child.Size
+		}
+	}
+	return total, nil
+}
+
 // Stat 获取文件/目录元信息
 func (s *DownloadService) Stat(ctx context.Context, id, namespace string) (*FileMetadata, *ContentBlob, error) {
 	file, err := s.meta.GetFile(ctx, id)

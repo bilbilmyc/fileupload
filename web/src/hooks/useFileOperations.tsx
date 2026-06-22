@@ -14,8 +14,9 @@ export interface FileStats {
 export function useFileOperations(_namespace?: string) {
   const [files, setFiles] = useState<FileItem[]>([])
   const [loading, setLoading] = useState(false)
-  const [parent, setParent] = useState<string>('/')
+  const [currentDir, setCurrentDir] = useState<string>('/')
   const [parentName, setParentName] = useState<string>('')
+  const [parentID, setParentID] = useState<string | null>(null) // 上级目录 ID，用于"上一级"
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([])
@@ -23,12 +24,15 @@ export function useFileOperations(_namespace?: string) {
   const loadFiles = useCallback(async () => {
     setLoading(true)
     try {
-      const res = await api.listFiles(parent)
+      const res = await api.listFiles(currentDir)
       setFiles(res.children || [])
       if (res.dir && typeof res.dir === 'object' && 'name' in res.dir) {
-        setParentName((res.dir as any).name as string)
+        const d = res.dir as any
+        setParentName(d.name as string)
+        setParentID(d.parent_id || null)
       } else {
         setParentName('')
+        setParentID(null)
       }
     } catch (e: any) {
       message.error(`加载失败: ${e.message}`)
@@ -37,14 +41,22 @@ export function useFileOperations(_namespace?: string) {
     }
     setPage(1)
     setSelectedRowKeys([])
-  }, [parent])
+  }, [currentDir])
 
   const navigateToDir = useCallback((dirId: string) => {
-    setParent(dirId)
+    setCurrentDir(dirId)
   }, [])
 
+  const navigateUp = useCallback(() => {
+    if (parentID) {
+      setCurrentDir(parentID)
+    } else {
+      setCurrentDir('/')
+    }
+  }, [parentID])
+
   const navigateToRoot = useCallback(() => {
-    setParent('/')
+    setCurrentDir('/')
   }, [])
 
   const filteredFiles = useMemo(() => {
@@ -78,17 +90,17 @@ export function useFileOperations(_namespace?: string) {
         ),
       },
     ]
-    if (parent !== '/' && parentName) {
+    if (currentDir !== '/' && parentName) {
       items.push({
         title: (
-          <span className="text-gray-500">
+          <a onClick={navigateUp} className="text-gray-500 hover:text-blue-500 cursor-pointer">
             <span role="img" aria-label="folder">📁</span> {parentName.slice(0, 16)}
-          </span>
+          </a>
         ),
       })
     }
     return items
-  }, [parent, parentName, navigateToRoot])
+  }, [currentDir, parentName, navigateToRoot, navigateUp])
 
   const handleDownload = useCallback((record: FileItem) => {
     const url = record.is_dir
@@ -138,8 +150,9 @@ export function useFileOperations(_namespace?: string) {
   return {
     files,
     loading,
-    parent,
+    currentDir,
     parentName,
+    parentID,
     search,
     page,
     selectedRowKeys,
@@ -152,6 +165,7 @@ export function useFileOperations(_namespace?: string) {
     setSelectedRowKeys,
     loadFiles,
     navigateToDir,
+    navigateUp,
     navigateToRoot,
     handleDownload,
     handleDelete,
