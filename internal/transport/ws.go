@@ -2,7 +2,7 @@ package transport
 
 import (
 	"encoding/json"
-	"log"
+	"log/slog"
 	"net/http"
 	"sync"
 	"time"
@@ -50,7 +50,7 @@ func NewWSHub() *WSHub {
 func (h *WSHub) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Printf("[ws] 升级失败: %v", err)
+		slog.Warn("ws upgrade failed", "error", err)
 		return
 	}
 
@@ -72,7 +72,7 @@ func (h *WSHub) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 func (h *WSHub) Broadcast(event WSEvent) {
 	data, err := json.Marshal(event)
 	if err != nil {
-		log.Printf("[ws] 序列化事件失败: %v", err)
+		slog.Warn("ws marshal failed", "error", err)
 		return
 	}
 
@@ -84,7 +84,7 @@ func (h *WSHub) Broadcast(event WSEvent) {
 		case client.send <- data:
 		default:
 			// 发送缓冲区满，跳过该客户端
-			log.Printf("[ws] 客户端发送缓冲区满，跳过")
+			slog.Warn("ws client send buffer full")
 		}
 	}
 }
@@ -165,7 +165,7 @@ func (c *wsClient) writePump() {
 			}
 			c.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 			if err := c.conn.WriteMessage(websocket.TextMessage, message); err != nil {
-				log.Printf("[ws] 写入失败: %v", err)
+				slog.Warn("ws write failed", "error", err)
 				return
 			}
 		case <-ticker.C:

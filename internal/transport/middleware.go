@@ -8,7 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"strings"
@@ -112,7 +112,11 @@ func (m *Middleware) Recover(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if rec := recover(); rec != nil {
-				log.Printf("[panic] %v (request %s %s)", rec, r.Method, r.URL.Path)
+				slog.Error("panic recovered",
+					slog.Any("panic", rec),
+					slog.String("method", r.Method),
+					slog.String("path", r.URL.Path),
+				)
 				http.Error(w, `{"error":"内部错误"}`, http.StatusInternalServerError)
 			}
 		}()
@@ -332,14 +336,20 @@ func (m *Middleware) Auth(next http.Handler) http.Handler {
 	})
 }
 
-// Logging 请求日志中间件，记录方法、路径、状态码、耗时
+// Logging 请求日志中间件，记录方法、路径、状态码、耗时（slog 结构化格式）
 func (m *Middleware) Logging(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		rw := &responseWriter{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(rw, r)
 		elapsed := time.Since(start)
-		log.Printf("[%s] %s %s → %d (%s)", r.Method, r.URL.Path, GetNamespace(r.Context()), rw.status, elapsed)
+		slog.LogAttrs(r.Context(), slog.LevelInfo, "request",
+			slog.String("method", r.Method),
+			slog.String("path", r.URL.Path),
+			slog.String("namespace", GetNamespace(r.Context())),
+			slog.Int("status", rw.status),
+			slog.Duration("elapsed", elapsed),
+		)
 	})
 }
 
@@ -422,7 +432,10 @@ func respondJSON(w http.ResponseWriter, status int, data any) {
 
 // respondError 写 JSON 错误
 func respondError(w http.ResponseWriter, status int, err error) {
-	log.Printf("[error] %s (status=%d)", err.Error(), status)
+	slog.Error("response error",
+		slog.String("error", err.Error()),
+		slog.Int("status", status),
+	)
 	errMsg := err.Error()
 	var domainErr domain.DomainError
 	if errors.As(err, &domainErr) {

@@ -3,10 +3,11 @@ package domain
 import (
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"time"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 // ShareEntry 分享链接
@@ -60,8 +61,11 @@ func (s *ShareService) CreateShare(ctx context.Context, req CreateShareRequest, 
 	}
 
 	if req.Password != "" {
-		h := sha256.Sum256([]byte(req.Password))
-		entry.PasswordHash = hex.EncodeToString(h[:])
+		hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+		if err != nil {
+			return nil, fmt.Errorf("密码哈希失败: %w", err)
+		}
+		entry.PasswordHash = string(hash)
 	}
 	if req.ExpiresIn > 0 {
 		entry.ExpiresAt = time.Now().Add(time.Duration(req.ExpiresIn) * time.Hour).Format(time.RFC3339)
@@ -99,10 +103,9 @@ func (s *ShareService) AccessShare(ctx context.Context, token, password string) 
 		return nil, ErrShareExhausted
 	}
 
-	// 验证密码
+	// 验证密码（bcrypt）
 	if entry.PasswordHash != "" {
-		h := sha256.Sum256([]byte(password))
-		if hex.EncodeToString(h[:]) != entry.PasswordHash {
+		if err := bcrypt.CompareHashAndPassword([]byte(entry.PasswordHash), []byte(password)); err != nil {
 			return nil, ErrForbidden
 		}
 	}

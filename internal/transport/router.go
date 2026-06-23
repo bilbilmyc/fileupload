@@ -1,11 +1,16 @@
 package transport
+
 import (
 	"context"
+	"expvar"
 	"io/fs"
 	"net/http"
+	"net/http/pprof"
+
 	"github.com/bilbilmyc/fileupload/internal/domain"
 	"github.com/bilbilmyc/fileupload/web"
 )
+
 // Router HTTP 路由器，组装全部路由
 type Router struct {
 	mux        *http.ServeMux
@@ -22,14 +27,17 @@ type Router struct {
 	scanner    Scanner
 	health     HealthChecker
 }
+
 // Scanner 一致性巡检接口
 type Scanner interface {
 	Scan(ctx context.Context) (any, error)
 }
+
 // HealthChecker 健康检查接口
 type HealthChecker interface {
 	Check(ctx context.Context) map[string]any
 }
+
 // NewRouter 创建路由器并注册所有路由
 func NewRouter(mw *Middleware, tus *TusHandler, rest *RESTHandler, download *DownloadHandler, batch *BatchHandler, auth *AuthHandler, admin *AdminHandler, share *ShareHandler, wsHub *WSHub, uploadSvc *domain.UploadService, scanner Scanner, health HealthChecker) *Router {
 	r := &Router{
@@ -50,6 +58,7 @@ func NewRouter(mw *Middleware, tus *TusHandler, rest *RESTHandler, download *Dow
 	r.registerRoutes()
 	return r
 }
+
 // Handler 返回经过中间件包装的最终 handler
 func (r *Router) Handler() http.Handler {
 	var h http.Handler = r.mux
@@ -60,9 +69,10 @@ func (r *Router) Handler() http.Handler {
 	h = r.middleware.Logging(h)       // 请求日志
 	h = r.middleware.RequestID(h)
 	h = r.middleware.Recover(h)
-	h = r.middleware.CORS(h)
+	h = r.middleware.CORS(h)          // CORS（最外层）
 	return h
 }
+
 // registerRoutes 注册所有路由
 func (r *Router) registerRoutes() {
 	// === 鉴权 ===
@@ -71,54 +81,62 @@ func (r *Router) registerRoutes() {
 		r.mux.HandleFunc("POST /v1/auth/refresh", r.auth.Refresh)
 		r.mux.HandleFunc("GET /v1/auth/me", r.auth.Me)
 	}
+
 	// === tus 协议 ===
 	r.mux.HandleFunc("POST /uploads", r.tus.CreateUpload)
 	r.mux.HandleFunc("HEAD /uploads/{id}", r.tus.GetUploadInfo)
 	r.mux.HandleFunc("PATCH /uploads/{id}", r.tus.AppendChunk)
 	r.mux.HandleFunc("DELETE /uploads/{id}", r.tus.CancelUpload)
+
 	// === REST 上传 ===
 	r.mux.HandleFunc("POST /v1/uploads/init", r.rest.InitUpload)
 	r.mux.HandleFunc("GET /v1/uploads/{id}/status", r.rest.GetUploadStatus)
 	r.mux.HandleFunc("POST /v1/uploads/{id}/finalize", r.rest.FinalizeUpload)
 	r.mux.HandleFunc("PUT /v1/uploads/{id}/chunks/{index}", r.rest.UploadChunk)
+
 	// === 下载 ===
 	r.mux.HandleFunc("GET /v1/files/{id}", r.download.GetFile)
 	r.mux.HandleFunc("GET /v1/dirs/{id}", r.download.GetDir)
 	r.mux.HandleFunc("GET /v1/preview/{id}", r.download.GetPreview)
+
 	// === 目录管理 ===
 	r.mux.HandleFunc("POST /v1/dirs", r.rest.SubmitDir)
 	r.mux.HandleFunc("DELETE /v1/files/{id}", r.rest.DeleteFile)
 	r.mux.HandleFunc("DELETE /v1/dirs/{id}", r.rest.DeleteFile)
 	r.mux.HandleFunc("GET /v1/ls", r.rest.ListDir)
 	r.mux.HandleFunc("GET /v1/stat/{id}", r.rest.StatFile)
+
 	// === 秒传预检 ===
 	r.mux.HandleFunc("HEAD /v1/files", r.handleCheckExists)
+
 	// === 批量操作（表驱动调度）===
 	r.mux.HandleFunc("POST /v1/batch/{action}", r.batch.BatchHandle)
-	
 	r.mux.HandleFunc("GET /v1/batch/download", r.batch.BatchDownloadGet)
-	
-	
-	
+
 	// === 管理 ===
 	if r.admin != nil {
 		r.mux.HandleFunc("GET /v1/admin/status", r.admin.Status)
 		r.mux.HandleFunc("GET /v1/admin/audit", r.admin.AuditLog)
 	}
 	r.mux.HandleFunc("POST /v1/admin/scan", r.handleAdminScan)
+
 	if r.share != nil {
 		r.mux.HandleFunc("POST /v1/share", r.share.CreateShare)
 		r.mux.HandleFunc("GET /s/{token}", r.share.AccessShare)
 	}
+
 	// === 前端 React 构建产物 ===
 	staticFS, err := fs.Sub(web.DistFiles, "dist")
 	if err == nil {
 		r.mux.Handle("GET /", http.FileServer(http.FS(staticFS)))
 	}
-	// === 健康检查 ===
+
+	// === WebSocket ===
 	if r.wsHub != nil {
 		r.mux.HandleFunc("GET /ws", r.wsHub.HandleWebSocket)
 	}
+
+	// === 健康检查 ===
 	r.mux.HandleFunc("GET /health", func(w http.ResponseWriter, req *http.Request) {
 		result := map[string]any{"status": "ok"}
 		if r.health != nil {
@@ -137,7 +155,21 @@ func (r *Router) registerRoutes() {
 		}
 		respondJSON(w, http.StatusOK, result)
 	})
+
+	// === 调试（pprof + expvar）===
+	r.mux.HandleFunc("GET /debug/pprof/", pprof.Index)
+	r.mux.HandleFunc("GET /debug/pprof/cmdline", pprof.Cmdline)
+	r.mux.HandleFunc("GET /debug/pprof/profile", pprof.Profile)
+	r.mux.HandleFunc("GET /debug/pprof/symbol", pprof.Symbol)
+	r.mux.HandleFunc("GET /debug/pprof/trace", pprof.Trace)
+	r.mux.Handle("GET /debug/pprof/goroutine", pprof.Handler("goroutine"))
+	r.mux.Handle("GET /debug/pprof/heap", pprof.Handler("heap"))
+	r.mux.Handle("GET /debug/pprof/threadcreate", pprof.Handler("threadcreate"))
+	r.mux.Handle("GET /debug/pprof/block", pprof.Handler("block"))
+	r.mux.Handle("GET /debug/pprof/mutex", pprof.Handler("mutex"))
+	r.mux.Handle("GET /debug/vars", expvar.Handler())
 }
+
 // handleCheckExists 秒传预检
 func (r *Router) handleCheckExists(w http.ResponseWriter, req *http.Request) {
 	sha256 := req.URL.Query().Get("sha256")
@@ -147,6 +179,7 @@ func (r *Router) handleCheckExists(w http.ResponseWriter, req *http.Request) {
 	}
 	namespace := GetNamespace(req.Context())
 	name := req.URL.Query().Get("name")
+
 	result, err := r.uploadSvc.CheckExists(req.Context(), sha256, namespace, name)
 	if err != nil {
 		respondError(w, domainErrorToStatus(err), err)
@@ -156,22 +189,26 @@ func (r *Router) handleCheckExists(w http.ResponseWriter, req *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
+
 	respondJSON(w, http.StatusOK, map[string]any{
 		"file_id": result.FileID,
 		"sha256":  result.SHA256,
 		"size":    result.Size,
 	})
 }
+
 // handleAdminScan 触发一致性巡检
 func (r *Router) handleAdminScan(w http.ResponseWriter, req *http.Request) {
 	if r.scanner == nil {
 		respondError(w, http.StatusNotImplemented, domain.ErrInvalidArgument)
 		return
 	}
+
 	report, err := r.scanner.Scan(req.Context())
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err)
 		return
 	}
+
 	respondJSON(w, http.StatusOK, report)
 }

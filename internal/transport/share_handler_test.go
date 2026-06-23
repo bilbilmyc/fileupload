@@ -2,8 +2,6 @@ package transport
 
 import (
 	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"context"
 	"net/http"
@@ -11,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/bilbilmyc/fileupload/internal/domain"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // mockShareStore implements domain.ShareStore
@@ -111,9 +110,9 @@ func TestShareHandler_AccessShare_PasswordRequired(t *testing.T) {
 	handler := NewShareHandler(domain.NewShareService(store), nil)
 
 	// Create share with password
-	h := sha256.Sum256([]byte("pw"))
+	hash, _ := bcrypt.GenerateFromPassword([]byte("pw"), bcrypt.DefaultCost)
 	store.CreateShare(context.Background(), "s-test", &domain.ShareEntry{
-		Token: "s-test", FileID: "f1", PasswordHash: hex.EncodeToString(h[:]), Namespace: "demo",
+		Token: "s-test", FileID: "f1", PasswordHash: string(hash), Namespace: "demo",
 	})
 
 	// Access without password
@@ -130,9 +129,9 @@ func TestShareHandler_AccessShare_WithPassword(t *testing.T) {
 	store := newMockShareStore()
 	handler := NewShareHandler(domain.NewShareService(store), nil)
 
-	h := sha256.Sum256([]byte("pw"))
+	hash, _ := bcrypt.GenerateFromPassword([]byte("pw"), bcrypt.DefaultCost)
 	store.CreateShare(context.Background(), "s-test", &domain.ShareEntry{
-		Token: "s-test", FileID: "f1", PasswordHash: hex.EncodeToString(h[:]), Namespace: "demo",
+		Token: "s-test", FileID: "f1", PasswordHash: string(hash), Namespace: "demo",
 	})
 
 	req := httptest.NewRequest("GET", "/s/s-test", nil)
