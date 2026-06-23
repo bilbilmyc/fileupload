@@ -9,6 +9,7 @@ import (
 )
 
 // BatchHandler 批量操作 HTTP 处理器
+// 使用表驱动调度：POST /v1/batch/{action}
 type BatchHandler struct {
 	batchSvc *domain.BatchService
 }
@@ -26,179 +27,178 @@ type batchRequest struct {
 	Tags        []string `json:"tags,omitempty"`
 }
 
-// POST /v1/batch/delete
-func (h *BatchHandler) BatchDelete(w http.ResponseWriter, r *http.Request) {
+// batchAction 表驱动调度中的一个动作
+type batchAction struct {
+	// validate 验证请求体字段，返回错误码和错误
+	validate func(req batchRequest) error
+	// execute 执行业务操作
+	execute func(h *BatchHandler, w http.ResponseWriter, r *http.Request, req batchRequest) error
+}
+
+// batchActions 动作调度表
+var batchActions = map[string]batchAction{
+	"delete": {
+		validate: func(req batchRequest) error {
+			if len(req.IDs) == 0 {
+				return domain.ErrInvalidArgument
+			}
+			return nil
+		},
+		execute: func(h *BatchHandler, w http.ResponseWriter, r *http.Request, req batchRequest) error {
+			namespace := GetNamespace(r.Context())
+			result, err := h.batchSvc.BatchDelete(r.Context(), req.IDs, namespace)
+			if err != nil {
+				return err
+			}
+			respondJSON(w, http.StatusOK, result)
+			return nil
+		},
+	},
+	"download": {
+		validate: func(req batchRequest) error {
+			if len(req.IDs) == 0 {
+				return domain.ErrInvalidArgument
+			}
+			return nil
+		},
+		execute: func(h *BatchHandler, w http.ResponseWriter, r *http.Request, req batchRequest) error {
+			format := domain.CompZip
+			if req.Format != "" {
+				format = domain.CompressionFormat(req.Format)
+			}
+			namespace := GetNamespace(r.Context())
+			return h.streamDownload(w, r, req.IDs, namespace, format)
+		},
+	},
+	"move": {
+		validate: func(req batchRequest) error {
+			if len(req.IDs) == 0 {
+				return domain.ErrInvalidArgument
+			}
+			return nil
+		},
+		execute: func(h *BatchHandler, w http.ResponseWriter, r *http.Request, req batchRequest) error {
+			namespace := GetNamespace(r.Context())
+			if err := h.batchSvc.BatchMove(r.Context(), req.IDs, req.TargetDirID, namespace); err != nil {
+				return err
+			}
+			respondJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+			return nil
+		},
+	},
+	"copy": {
+		validate: func(req batchRequest) error {
+			if len(req.IDs) == 0 {
+				return domain.ErrInvalidArgument
+			}
+			return nil
+		},
+		execute: func(h *BatchHandler, w http.ResponseWriter, r *http.Request, req batchRequest) error {
+			namespace := GetNamespace(r.Context())
+			if err := h.batchSvc.BatchCopy(r.Context(), req.IDs, req.TargetDirID, namespace); err != nil {
+				return err
+			}
+			respondJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+			return nil
+		},
+	},
+	"tags": {
+		validate: func(req batchRequest) error {
+			if len(req.IDs) == 0 {
+				return domain.ErrInvalidArgument
+			}
+			return nil
+		},
+		execute: func(h *BatchHandler, w http.ResponseWriter, r *http.Request, req batchRequest) error {
+			namespace := GetNamespace(r.Context())
+			if err := h.batchSvc.BatchTag(r.Context(), req.IDs, req.Tags, namespace); err != nil {
+				return err
+			}
+			respondJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+			return nil
+		},
+	},
+}
+
+// BatchHandle POST /v1/batch/{action}
+// 表驱动调度：根据 action 参数分发到对应的处理逻辑。
+func (h *BatchHandler) BatchHandle(w http.ResponseWriter, r *http.Request) {
+	action := r.PathValue("action")
+	act, ok := batchActions[action]
+	if !ok {
+		respondError(w, http.StatusBadRequest, domain.ErrInvalidArgument)
+		return
+	}
+
 	var req batchRequest
 	if err := decodeJSON(r.Body, &req); err != nil {
 		respondError(w, http.StatusBadRequest, domain.ErrInvalidArgument)
 		return
 	}
-	if len(req.IDs) == 0 {
-		respondError(w, http.StatusBadRequest, domain.ErrInvalidArgument)
-		return
-	}
 
-	namespace := GetNamespace(r.Context())
-	result, err := h.batchSvc.BatchDelete(r.Context(), req.IDs, namespace)
-	if err != nil {
+	if err := act.validate(req); err != nil {
 		respondError(w, domainErrorToStatus(err), err)
 		return
 	}
 
-	respondJSON(w, http.StatusOK, result)
+	if err := act.execute(h, w, r, req); err != nil {
+		respondError(w, domainErrorToStatus(err), err)
+	}
 }
 
-// GET /v1/batch/download — 流式批量下载，ids 用逗号分隔
+// streamDownload 流式响应批量下载（被表驱动和 GET handler 共用）
+func (h *BatchHandler) streamDownload(w http.ResponseWriter, r *http.Request, ids []string, namespace string, format domain.CompressionFormat) error {
+	reader, err := h.batchSvc.BatchDownload(r.Context(), ids, namespace, format)
+	if err != nil {
+		return err
+	}
+	defer reader.Close()
+
+	filename := "batch." + string(format)
+	w.Header().Set("Content-Disposition", "attachment; filename=\""+filename+"\"")
+	w.Header().Set("Content-Type", contentTypeForFormat(format))
+
+	w.WriteHeader(http.StatusOK)
+	_, err = io.Copy(w, reader)
+	return err
+}
+
+// BatchDownloadGet GET /v1/batch/download — ids 用逗号分隔的查询参数
 func (h *BatchHandler) BatchDownloadGet(w http.ResponseWriter, r *http.Request) {
 	idsParam := r.URL.Query().Get("ids")
 	if idsParam == "" {
 		respondError(w, http.StatusBadRequest, domain.ErrInvalidArgument)
 		return
 	}
-	req := batchRequest{
-		IDs:    splitCSV(idsParam),
-		Format: r.URL.Query().Get("format"),
-	}
-	if len(req.IDs) == 0 {
+	ids := splitCSV(idsParam)
+	if len(ids) == 0 {
 		respondError(w, http.StatusBadRequest, domain.ErrInvalidArgument)
 		return
 	}
 
 	format := domain.CompZip
-	if req.Format != "" {
-		format = domain.CompressionFormat(req.Format)
+	if f := r.URL.Query().Get("format"); f != "" {
+		format = domain.CompressionFormat(f)
 	}
 
 	namespace := GetNamespace(r.Context())
-	reader, err := h.batchSvc.BatchDownload(r.Context(), req.IDs, namespace, format)
-	if err != nil {
+	if err := h.streamDownload(w, r, ids, namespace, format); err != nil {
 		respondError(w, domainErrorToStatus(err), err)
-		return
 	}
-	defer reader.Close()
+}
 
-	filename := "batch." + string(format)
-	w.Header().Set("Content-Disposition", "attachment; filename=\""+filename+"\"")
+// contentTypeForFormat 返回压缩格式对应的 Content-Type
+func contentTypeForFormat(format domain.CompressionFormat) string {
 	switch format {
 	case domain.CompZip:
-		w.Header().Set("Content-Type", "application/zip")
+		return "application/zip"
 	case domain.CompTarGz:
-		w.Header().Set("Content-Type", "application/gzip")
+		return "application/gzip"
 	case domain.CompTarZst:
-		w.Header().Set("Content-Type", "application/zstd")
+		return "application/zstd"
 	default:
-		w.Header().Set("Content-Type", "application/octet-stream")
+		return "application/octet-stream"
 	}
-
-	w.WriteHeader(http.StatusOK)
-	io.Copy(w, reader)
-}
-
-// POST /v1/batch/download
-func (h *BatchHandler) BatchDownload(w http.ResponseWriter, r *http.Request) {
-	var req batchRequest
-	if err := decodeJSON(r.Body, &req); err != nil {
-		respondError(w, http.StatusBadRequest, domain.ErrInvalidArgument)
-		return
-	}
-	if len(req.IDs) == 0 {
-		respondError(w, http.StatusBadRequest, domain.ErrInvalidArgument)
-		return
-	}
-
-	// 默认使用 zip 格式
-	format := domain.CompZip
-	if req.Format != "" {
-		format = domain.CompressionFormat(req.Format)
-	}
-
-	namespace := GetNamespace(r.Context())
-	reader, err := h.batchSvc.BatchDownload(r.Context(), req.IDs, namespace, format)
-	if err != nil {
-		respondError(w, domainErrorToStatus(err), err)
-		return
-	}
-	defer reader.Close()
-
-	// 设置响应头
-	filename := "batch." + string(format)
-	w.Header().Set("Content-Disposition", "attachment; filename=\""+filename+"\"")
-	switch format {
-	case domain.CompZip:
-		w.Header().Set("Content-Type", "application/zip")
-	case domain.CompTarGz:
-		w.Header().Set("Content-Type", "application/gzip")
-	case domain.CompTarZst:
-		w.Header().Set("Content-Type", "application/zstd")
-	default:
-		w.Header().Set("Content-Type", "application/octet-stream")
-	}
-
-	w.WriteHeader(http.StatusOK)
-	io.Copy(w, reader)
-}
-
-// POST /v1/batch/move
-func (h *BatchHandler) BatchMove(w http.ResponseWriter, r *http.Request) {
-	var req batchRequest
-	if err := decodeJSON(r.Body, &req); err != nil {
-		respondError(w, http.StatusBadRequest, domain.ErrInvalidArgument)
-		return
-	}
-	if len(req.IDs) == 0 {
-		respondError(w, http.StatusBadRequest, domain.ErrInvalidArgument)
-		return
-	}
-
-	namespace := GetNamespace(r.Context())
-	if err := h.batchSvc.BatchMove(r.Context(), req.IDs, req.TargetDirID, namespace); err != nil {
-		respondError(w, domainErrorToStatus(err), err)
-		return
-	}
-
-	respondJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-}
-
-// POST /v1/batch/copy
-func (h *BatchHandler) BatchCopy(w http.ResponseWriter, r *http.Request) {
-	var req batchRequest
-	if err := decodeJSON(r.Body, &req); err != nil {
-		respondError(w, http.StatusBadRequest, domain.ErrInvalidArgument)
-		return
-	}
-	if len(req.IDs) == 0 {
-		respondError(w, http.StatusBadRequest, domain.ErrInvalidArgument)
-		return
-	}
-
-	namespace := GetNamespace(r.Context())
-	if err := h.batchSvc.BatchCopy(r.Context(), req.IDs, req.TargetDirID, namespace); err != nil {
-		respondError(w, domainErrorToStatus(err), err)
-		return
-	}
-
-	respondJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-}
-
-// POST /v1/batch/tags
-func (h *BatchHandler) BatchTags(w http.ResponseWriter, r *http.Request) {
-	var req batchRequest
-	if err := decodeJSON(r.Body, &req); err != nil {
-		respondError(w, http.StatusBadRequest, domain.ErrInvalidArgument)
-		return
-	}
-	if len(req.IDs) == 0 {
-		respondError(w, http.StatusBadRequest, domain.ErrInvalidArgument)
-		return
-	}
-
-	namespace := GetNamespace(r.Context())
-	if err := h.batchSvc.BatchTag(r.Context(), req.IDs, req.Tags, namespace); err != nil {
-		respondError(w, domainErrorToStatus(err), err)
-		return
-	}
-
-	respondJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 // splitCSV 将逗号分隔的字符串拆分为切片

@@ -8,17 +8,9 @@ import (
 	"time"
 )
 
-func setupBatchTest(t *testing.T) (*BatchService, *mockMetadata, *mockStorage) {
+func setupBatchTest(t *testing.T) (*BatchService, *mockMetadata) {
 	t.Helper()
 	meta := newMockMetadata()
-	storage := newMockStorage()
-	compress := newMockCompressor()
-	hasher := newMockHasher()
-
-	wp := newMockWorkerPool()
-	uploadSvc := NewUploadService(meta, storage, storage, compress, hasher, wp, UploadConfig{
-		DataDir: "data", SessionTTL: time.Minute, DefaultChunkSize: 1024,
-	})
 
 	now := time.Now()
 	meta.PutFile(ctx, &FileMetadata{
@@ -32,16 +24,28 @@ func setupBatchTest(t *testing.T) (*BatchService, *mockMetadata, *mockStorage) {
 	})
 	meta.PutBlob(ctx, &ContentBlob{SHA256: "blob1", StoragePath: "p1", Size: 100, RefCount: 1})
 	meta.PutBlob(ctx, &ContentBlob{SHA256: "blob2", StoragePath: "p2", Size: 200, RefCount: 1})
+
+	// 创建 UploadService 作为 FileDeleter / FileMover 的实现
+	storage := newMockStorage()
 	storage.Write(ctx, "p1", bytes.NewReader(make([]byte, 100)))
 	storage.Write(ctx, "p2", bytes.NewReader(make([]byte, 200)))
 
-	return NewBatchService(uploadSvc, meta, storage, compress), meta, storage
+	compress := newMockCompressor()
+	hasher := newMockHasher()
+	wp := newMockWorkerPool()
+
+	uploadSvc := NewUploadService(meta, storage, storage, compress, hasher, wp, UploadConfig{
+		DataDir: "data", SessionTTL: time.Minute, DefaultChunkSize: 1024,
+	})
+	downloadSvc := NewDownloadService(meta, storage, compress, hasher, DownloadConfig{DataDir: "data"})
+
+	return NewBatchService(uploadSvc, uploadSvc, downloadSvc, meta), meta
 }
 
 var ctx = context.Background()
 
 func TestBatchService_BatchDelete(t *testing.T) {
-	svc, _, _ := setupBatchTest(t)
+	svc, _ := setupBatchTest(t)
 	result, err := svc.BatchDelete(ctx, []string{"f1", "f2"}, "demo")
 	if err != nil {
 		t.Fatalf("BatchDelete error = %v", err)
@@ -52,7 +56,7 @@ func TestBatchService_BatchDelete(t *testing.T) {
 }
 
 func TestBatchService_BatchDelete_NotFound(t *testing.T) {
-	svc, _, _ := setupBatchTest(t)
+	svc, _ := setupBatchTest(t)
 	result, err := svc.BatchDelete(ctx, []string{"no-such"}, "demo")
 	if err != nil {
 		t.Fatalf("BatchDelete error = %v", err)
@@ -63,7 +67,7 @@ func TestBatchService_BatchDelete_NotFound(t *testing.T) {
 }
 
 func TestBatchService_BatchMove(t *testing.T) {
-	svc, meta, _ := setupBatchTest(t)
+	svc, meta := setupBatchTest(t)
 	now := time.Now()
 	meta.PutFile(ctx, &FileMetadata{
 		FileID: "target-dir", Name: "target", Namespace: "demo", IsDir: true, CreatedAt: now,
@@ -81,7 +85,7 @@ func TestBatchService_BatchMove(t *testing.T) {
 }
 
 func TestBatchService_BatchCopy(t *testing.T) {
-	svc, meta, _ := setupBatchTest(t)
+	svc, meta := setupBatchTest(t)
 	now := time.Now()
 	meta.PutFile(ctx, &FileMetadata{
 		FileID: "target-dir", Name: "target", Namespace: "demo", IsDir: true, CreatedAt: now,
@@ -94,7 +98,7 @@ func TestBatchService_BatchCopy(t *testing.T) {
 }
 
 func TestBatchService_BatchTag(t *testing.T) {
-	svc, _, _ := setupBatchTest(t)
+	svc, _ := setupBatchTest(t)
 	err := svc.BatchTag(ctx, []string{"f1", "f2"}, []string{"important"}, "demo")
 	if err != nil {
 		t.Fatalf("BatchTag error = %v", err)
@@ -102,7 +106,7 @@ func TestBatchService_BatchTag(t *testing.T) {
 }
 
 func TestBatchService_BatchDownload(t *testing.T) {
-	svc, _, _ := setupBatchTest(t)
+	svc, _ := setupBatchTest(t)
 	reader, err := svc.BatchDownload(ctx, []string{"f1", "f2"}, "demo", CompZip)
 	if err != nil {
 		t.Fatalf("BatchDownload error = %v", err)
@@ -116,7 +120,7 @@ func TestBatchService_BatchDownload(t *testing.T) {
 }
 
 func TestBatchService_BatchDownload_EmptyIDs(t *testing.T) {
-	svc, _, _ := setupBatchTest(t)
+	svc, _ := setupBatchTest(t)
 	_, err := svc.BatchDownload(ctx, []string{}, "demo", CompZip)
 	if err == nil {
 		t.Fatal("expected error for empty IDs")
@@ -124,7 +128,7 @@ func TestBatchService_BatchDownload_EmptyIDs(t *testing.T) {
 }
 
 func TestBatchService_BatchDelete_EmptyIDs(t *testing.T) {
-	svc, _, _ := setupBatchTest(t)
+	svc, _ := setupBatchTest(t)
 	result, err := svc.BatchDelete(ctx, []string{}, "demo")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -135,7 +139,7 @@ func TestBatchService_BatchDelete_EmptyIDs(t *testing.T) {
 }
 
 func TestBatchService_BatchMove_EmptyIDs(t *testing.T) {
-	svc, _, _ := setupBatchTest(t)
+	svc, _ := setupBatchTest(t)
 	err := svc.BatchMove(ctx, []string{}, "target", "demo")
 	if err == nil {
 		t.Fatal("expected error for empty IDs")
@@ -143,7 +147,7 @@ func TestBatchService_BatchMove_EmptyIDs(t *testing.T) {
 }
 
 func TestBatchService_BatchCopy_EmptyIDs(t *testing.T) {
-	svc, _, _ := setupBatchTest(t)
+	svc, _ := setupBatchTest(t)
 	err := svc.BatchCopy(ctx, []string{}, "target", "demo")
 	if err == nil {
 		t.Fatal("expected error for empty IDs")
@@ -151,7 +155,7 @@ func TestBatchService_BatchCopy_EmptyIDs(t *testing.T) {
 }
 
 func TestBatchService_BatchTag_EmptyIDs(t *testing.T) {
-	svc, _, _ := setupBatchTest(t)
+	svc, _ := setupBatchTest(t)
 	err := svc.BatchTag(ctx, []string{}, []string{"tag"}, "demo")
 	if err != nil {
 		t.Fatalf("expected no error for empty IDs, got: %v", err)

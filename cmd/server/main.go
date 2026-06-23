@@ -162,7 +162,7 @@ func main() {
 	}
 	downloadSvc := domain.NewDownloadService(metaFacade, localFS, compress, hasher, downloadCfg)
 
-	batchSvc := domain.NewBatchService(uploadSvc, metaFacade, localFS, compress)
+	batchSvc := domain.NewBatchService(uploadSvc, uploadSvc, downloadSvc, metaFacade)
 
 	// === 后台任务 ===
 

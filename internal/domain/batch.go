@@ -5,25 +5,49 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"sort"
 	"time"
 )
 
+// ============================================================
+// BatchService 依赖接口
+// ============================================================
+
+// FileDeleter 文件/目录删除接口 — 由 UploadService 实现
+type FileDeleter interface {
+	DeleteFile(ctx context.Context, fileID, namespace string) error
+	DeleteDir(ctx context.Context, dirID string, recursive bool, namespace string) error
+}
+
+// FileMover 文件移动接口 — 由 UploadService 实现
+type FileMover interface {
+	MoveFile(ctx context.Context, fileID, targetDirID, namespace string) error
+}
+
+// DownloadPacker 批量下载打包接口 — 由 DownloadService 实现
+type DownloadPacker interface {
+	StreamBatch(ctx context.Context, ids []string, namespace string, format CompressionFormat) (io.ReadCloser, error)
+}
+
+// ============================================================
+// BatchService
+// ============================================================
+
 // BatchService 批量操作编排
+// 依赖接口而非具体服务类型，便于单元测试。
 type BatchService struct {
-	uploadSvc *UploadService
-	meta      Metadata
-	storage   Storage
-	compress  Compressor
+	deleter  FileDeleter
+	mover    FileMover
+	packer   DownloadPacker
+	meta     FileStore
 }
 
 // NewBatchService 创建批量操作服务
-func NewBatchService(uploadSvc *UploadService, meta Metadata, storage Storage, compress Compressor) *BatchService {
+func NewBatchService(deleter FileDeleter, mover FileMover, packer DownloadPacker, meta FileStore) *BatchService {
 	return &BatchService{
-		uploadSvc: uploadSvc,
-		meta:      meta,
-		storage:   storage,
-		compress:  compress,
+		deleter: deleter,
+		mover:   mover,
+		packer:  packer,
+		meta:    meta,
 	}
 }
 
@@ -42,8 +66,29 @@ type BatchDeleteResult struct {
 func (s *BatchService) BatchDelete(ctx context.Context, ids []string, namespace string) (*BatchDeleteResult, error) {
 	var result BatchDeleteResult
 	for _, id := range ids {
-		if err := s.uploadSvc.Delete(ctx, id, namespace); err != nil {
-			log.Printf("[batch] 删除失败 id=%s: %v", id, err)
+		// 先判断是文件还是目录
+		file, err := s.meta.GetFile(ctx, id)
+		if err != nil {
+			result.Failed++
+			continue
+		}
+		if file == nil {
+			result.Failed++
+			continue
+		}
+		if file.Namespace != namespace {
+			result.Failed++
+			continue
+		}
+
+		var delErr error
+		if file.IsDir {
+			delErr = s.deleter.DeleteDir(ctx, id, true, namespace)
+		} else {
+			delErr = s.deleter.DeleteFile(ctx, id, namespace)
+		}
+		if delErr != nil {
+			log.Printf("[batch] 删除失败 id=%s: %v", id, delErr)
 			result.Failed++
 		} else {
 			result.Success++
@@ -52,106 +97,10 @@ func (s *BatchService) BatchDelete(ctx context.Context, ids []string, namespace 
 	return &result, nil
 }
 
-// BatchDownloadRequest 批量下载请求
-type BatchDownloadRequest struct {
-	IDs    []string          `json:"ids"`
-	Format CompressionFormat `json:"format"`
-}
-
 // BatchDownload 批量打包下载（流式）
 // 返回 io.ReadCloser，读取它即获得打包数据流。
 func (s *BatchService) BatchDownload(ctx context.Context, ids []string, namespace string, format CompressionFormat) (io.ReadCloser, error) {
-	// 收集所有文件信息
-	type fileEntry struct {
-		name   string
-		fullPath string
-		size   int64
-		sha256 string
-		blob   *ContentBlob
-	}
-
-	var entries []fileEntry
-	nameCount := make(map[string]int) // 重名计数
-
-	for _, id := range ids {
-		file, err := s.meta.GetFile(ctx, id)
-		if err != nil {
-			continue
-		}
-		if file == nil || file.IsDir {
-			continue
-		}
-		if file.Namespace != namespace {
-			continue
-		}
-
-		blob, err := s.meta.GetBlobBySha(ctx, file.SHA256)
-		if err != nil || blob == nil {
-			continue
-		}
-
-		// 处理重名
-		name := file.Name
-		nameCount[name]++
-		if nameCount[name] > 1 {
-			name = fmt.Sprintf("%d_%s", nameCount[name]-1, name)
-		}
-
-		entries = append(entries, fileEntry{
-			name:     name,
-			fullPath: blob.StoragePath,
-			size:     file.Size,
-			sha256:   file.SHA256,
-			blob:     blob,
-		})
-	}
-
-	if len(entries) == 0 {
-		return nil, ErrNotFound
-	}
-
-	// 排序确保确定性
-	sort.Slice(entries, func(i, j int) bool {
-		return entries[i].name < entries[j].name
-	})
-
-	// 流式打包
-	pr, pw := io.Pipe()
-	go func() {
-		archiveWriter, err := s.compress.NewArchiveWriter(ctx, pw, format)
-		if err != nil {
-			pw.CloseWithError(fmt.Errorf("创建归档器: %w", err))
-			return
-		}
-
-		for _, entry := range entries {
-			reader, err := s.storage.Open(ctx, entry.blob.StoragePath, 0, 0)
-			if err != nil {
-				continue
-			}
-
-			if err := archiveWriter.AddFile(ctx, entry.name, entry.size, reader); err != nil {
-				reader.Close()
-				pw.CloseWithError(fmt.Errorf("写入归档条目 %s: %w", entry.name, err))
-				return
-			}
-			reader.Close()
-		}
-
-		if err := archiveWriter.Close(); err != nil {
-			pw.CloseWithError(fmt.Errorf("关闭归档器: %w", err))
-			return
-		}
-		pw.Close()
-	}()
-
-	return pr, nil
-}
-
-// BatchMoveRequest 批量移动请求
-type BatchMoveRequest struct {
-	IDs         []string `json:"ids"`
-	TargetDirID string   `json:"target_dir_id"`
+	return s.packer.StreamBatch(ctx, ids, namespace, format)
 }
 
 // BatchMove 批量移动到目标目录
@@ -174,22 +123,9 @@ func (s *BatchService) BatchMove(ctx context.Context, ids []string, targetDirID 
 	}
 
 	for _, id := range ids {
-		file, err := s.meta.GetFile(ctx, id)
-		if err != nil {
-			continue
+		if err := s.mover.MoveFile(ctx, id, targetDirID, namespace); err != nil {
+			log.Printf("[batch] 移动失败 id=%s: %v", id, err)
 		}
-		if file == nil {
-			continue
-		}
-		if file.Namespace != namespace {
-			continue
-		}
-
-		var parentID *string
-		if targetDirID != "" {
-			parentID = &targetDirID
-		}
-		_ = s.meta.UpdateFileParent(ctx, id, parentID)
 	}
 
 	log.Printf("[batch] 移动 %d 个文件到 %s", len(ids), targetDirID)
@@ -271,13 +207,23 @@ func (s *BatchService) BatchCopy(ctx context.Context, ids []string, targetDirID 
 				continue
 			}
 			if file.SHA256 != "" {
-				_ = s.meta.IncrBlobRef(ctx, file.SHA256)
+				_ = s.IncrBlobRefIfAvailable(ctx, file.SHA256)
 			}
 			copied++
 		}
 	}
 
 	log.Printf("[batch] 复制 %d 个文件到 %s", copied, targetDirID)
+	return nil
+}
+
+// IncrBlobRefIfAvailable 安全增加 blob 引用计数。
+// FileStore 接口不包含 IncrBlobRef，但 BlobStore 包含。
+// 这里通过 type assertion 尝试，如果 meta 恰好也实现了 BlobStore 则执行。
+func (s *BatchService) IncrBlobRefIfAvailable(ctx context.Context, sha256 string) error {
+	if bs, ok := s.meta.(interface{ IncrBlobRef(context.Context, string) error }); ok {
+		return bs.IncrBlobRef(ctx, sha256)
+	}
 	return nil
 }
 
@@ -323,7 +269,7 @@ func (s *BatchService) copyDirChildren(ctx context.Context, sourceDirID, targetD
 				continue
 			}
 			if child.SHA256 != "" {
-				_ = s.meta.IncrBlobRef(ctx, child.SHA256)
+				_ = s.IncrBlobRefIfAvailable(ctx, child.SHA256)
 			}
 		}
 	}

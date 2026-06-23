@@ -383,40 +383,20 @@ func (m *mockMetadata) ListAllFiles(_ context.Context) ([]*FileMetadata, error) 
 	return files, nil
 }
 
-// containsIgnoreCase 检查 s 是否包含 substr（大小写不敏感）
-func containsIgnoreCase(s, substr string) bool {
-	if len(s) < len(substr) {
-		return false
-	}
-	// 简单的写法，用 strings 包但 mock 文件通常不会引入它
-	for i := 0; i <= len(s)-len(substr); i++ {
-		match := true
-		for j := 0; j < len(substr); j++ {
-			sc, tc := s[i+j], substr[j]
-			if sc >= 'A' && sc <= 'Z' {
-				sc += 32
-			}
-			if tc >= 'A' && tc <= 'Z' {
-				tc += 32
-			}
-			if sc != tc {
-				match = false
-				break
-			}
-		}
-		if match {
-			return true
-		}
-	}
-	return false
-}
-
-// ===== Mock AdminStore =====
+// ===== AdminStore =====
 
 func (m *mockMetadata) WriteAuditLog(_ context.Context, _ *AuditLogEntry) error { return nil }
 func (m *mockMetadata) ListAuditLogs(_ context.Context, _, _ int) ([]*AuditLogEntry, int, error) { return nil, 0, nil }
-func (m *mockMetadata) AdminCountFiles(_ context.Context) (int, error) { return len(m.files), nil }
-func (m *mockMetadata) AdminCountBlobs(_ context.Context) (int, error) { return len(m.blobs), nil }
+func (m *mockMetadata) AdminCountFiles(_ context.Context) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.files), nil
+}
+func (m *mockMetadata) AdminCountBlobs(_ context.Context) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.blobs), nil
+}
 func (m *mockMetadata) AdminTotalBlobSize(_ context.Context) (int64, error) { return 0, nil }
 
 func (m *mockMetadata) hasBlob(sha256 string) bool {
@@ -532,3 +512,30 @@ var (
 	_ WorkerPool    = (*mockWorkerPool)(nil)
 	_ ArchiveWriter = (*mockArchiveWriter)(nil)
 )
+
+// containsIgnoreCase 检查 s 是否包含 substr（大小写不敏感）
+func containsIgnoreCase(s, substr string) bool {
+	if len(s) < len(substr) {
+		return false
+	}
+	for i := 0; i <= len(s)-len(substr); i++ {
+		match := true
+		for j := 0; j < len(substr); j++ {
+			sc, tc := s[i+j], substr[j]
+			if sc >= 'A' && sc <= 'Z' {
+				sc += 32
+			}
+			if tc >= 'A' && tc <= 'Z' {
+				tc += 32
+			}
+			if sc != tc {
+				match = false
+				break
+			}
+		}
+		if match {
+			return true
+		}
+	}
+	return false
+}

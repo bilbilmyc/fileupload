@@ -345,6 +345,96 @@ func (s *DownloadService) Stat(ctx context.Context, id, namespace string) (*File
 	return file, blob, nil
 }
 
+// StreamBatch 批量打包下载多个文件
+// 实现 DownloadPacker 接口。返回 io.ReadCloser，读取它即获得打包数据流。
+func (s *DownloadService) StreamBatch(ctx context.Context, ids []string, namespace string, format CompressionFormat) (io.ReadCloser, error) {
+	// 收集所有文件信息
+	type fileEntry struct {
+		name     string
+		fullPath string
+		size     int64
+		sha256   string
+		blob     *ContentBlob
+	}
+
+	var entries []fileEntry
+	nameCount := make(map[string]int) // 重名计数
+
+	for _, id := range ids {
+		file, err := s.meta.GetFile(ctx, id)
+		if err != nil {
+			continue
+		}
+		if file == nil || file.IsDir {
+			continue
+		}
+		if file.Namespace != namespace {
+			continue
+		}
+
+		blob, err := s.meta.GetBlobBySha(ctx, file.SHA256)
+		if err != nil || blob == nil {
+			continue
+		}
+
+		// 处理重名
+		name := file.Name
+		nameCount[name]++
+		if nameCount[name] > 1 {
+			name = fmt.Sprintf("%d_%s", nameCount[name]-1, name)
+		}
+
+		entries = append(entries, fileEntry{
+			name:     name,
+			fullPath: blob.StoragePath,
+			size:     file.Size,
+			sha256:   file.SHA256,
+			blob:     blob,
+		})
+	}
+
+	if len(entries) == 0 {
+		return nil, ErrNotFound
+	}
+
+	// 排序确保确定性
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].name < entries[j].name
+	})
+
+	// 流式打包
+	pr, pw := io.Pipe()
+	go func() {
+		archiveWriter, err := s.compress.NewArchiveWriter(ctx, pw, format)
+		if err != nil {
+			pw.CloseWithError(fmt.Errorf("创建归档器: %w", err))
+			return
+		}
+
+		for _, entry := range entries {
+			reader, err := s.storage.Open(ctx, entry.blob.StoragePath, 0, 0)
+			if err != nil {
+				continue
+			}
+
+			if err := archiveWriter.AddFile(ctx, entry.name, entry.size, reader); err != nil {
+				reader.Close()
+				pw.CloseWithError(fmt.Errorf("写入归档条目 %s: %w", entry.name, err))
+				return
+			}
+			reader.Close()
+		}
+
+		if err := archiveWriter.Close(); err != nil {
+			pw.CloseWithError(fmt.Errorf("关闭归档器: %w", err))
+			return
+		}
+		pw.Close()
+	}()
+
+	return pr, nil
+}
+
 // Must be implemented in model.go or utils.go
 func init() {
 	_ = strings.Compare // prevent unused import

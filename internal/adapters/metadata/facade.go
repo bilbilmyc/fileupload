@@ -56,14 +56,20 @@ type ColdStore interface {
 	Close() error
 }
 
-// Facade Metadata 门面，路由请求到 RedisStore（热）或 ColdStore（冷）
+// HotStore 热数据存储接口（Redis）。扩展 domain.SessionStore 加上 Close()。
+type HotStore interface {
+	domain.SessionStore
+	Close() error
+}
+
+// Facade Metadata 门面，路由请求到 HotStore（热）或 ColdStore（冷）
 type Facade struct {
-	hot  *RedisStore // 热数据：会话/分片/offset
-	cold ColdStore   // 冷数据：content_blobs / files
+	hot  HotStore  // 热数据：会话/分片/offset
+	cold ColdStore // 冷数据：content_blobs / files
 }
 
 // NewFacade 创建 Metadata 门面
-func NewFacade(hot *RedisStore, cold ColdStore) *Facade {
+func NewFacade(hot HotStore, cold ColdStore) *Facade {
 	return &Facade{hot: hot, cold: cold}
 }
 

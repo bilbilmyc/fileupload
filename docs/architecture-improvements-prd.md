@@ -1,6 +1,13 @@
 # Architecture Improvements — PRD
 
-**Status:** Draft
+**Status:** Completed
+
+✅ **Item 1 completed** — `domain.Metadata` split into `SessionStore`/`BlobStore`/`FileStore`/`AdminStore`, commit `65ad793`
+✅ **Item 2 completed** — shared mock package `internal/testutil`, transport mocks consolidated`
+✅ **Item 3 completed** — `BatchService` depends on `FileDeleter`/`FileMover`/`DownloadPacker` interfaces`
+✅ **Item 4 completed** — `Finalize` decomposed into `mergeChunks`/`verifyStream`/`commitStream` phases, 13 new tests`
+✅ **Item 5 (Phase 1) completed** — `HotStore` interface extracted, `Facade.hot` changed from `*RedisStore` to `HotStore``
+✅ **Item 6 completed** — batch handlers consolidated into table-driven `BatchHandle``
 **Date:** 2026-06-23
 **Source:** `fileupload` architecture review (2026-06-23)
 

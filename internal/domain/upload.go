@@ -298,6 +298,9 @@ func safeStorageName(name string) string {
 	return base
 }
 // Finalize 完成上传：合并分片 → 解压 → 整体 SHA-256 校验 → 写入 Storage
+//
+// 使用三阶段流水线：mergeChunks → verifyStream → commitStream
+// 各阶段可独立测试（见 finalize_test.go）。
 func (s *UploadService) Finalize(ctx context.Context, sessionID string) (*FileMetadata, error) {
 	session, err := s.meta.GetSession(ctx, sessionID)
 	if err != nil {
@@ -319,152 +322,46 @@ func (s *UploadService) Finalize(ctx context.Context, sessionID string) (*FileMe
 	if err != nil {
 		return nil, fmt.Errorf("列举分片: %w", err)
 	}
-	// 0 字节文件处理：无分片，直接创建空 blob 和文件记录
-	if len(chunks) == 0 {
-		fileID := NewID()
-		fileName := session.FileName
-		if fileName == "" {
-			fileName = fileID
-		}
-		actualSha := session.SHA256
-		if actualSha == "" {
-			actualSha = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" // sha256 of empty
-		}
-		storagePath := fmt.Sprintf("%s/%s", session.Namespace, fileName)
-		// 写入空文件
-		if _, err := s.storage.Write(ctx, storagePath, bytes.NewReader(nil)); err != nil {
-			return nil, fmt.Errorf("写入空文件: %w", err)
-		}
-		blob := &ContentBlob{
-			SHA256:      actualSha,
-			StoragePath: storagePath,
-			Size:        0,
-			RefCount:    1,
-			CreatedAt:   time.Now(),
-		}
-		if err := s.meta.PutBlob(ctx, blob); err != nil {
-			_ = s.storage.Delete(ctx, storagePath)
-			return nil, fmt.Errorf("写入去重记录: %w", err)
-		}
-		fileMeta := &FileMetadata{
-			FileID:    fileID,
-			SHA256:    actualSha,
-			Name:      filepath.Base(fileName),
-			Path:      fileName,
-			Size:      0,
-			Namespace: session.Namespace,
-			IsDir:     false,
-			CreatedAt: time.Now(),
-		}
-		if err := s.meta.PutFile(ctx, fileMeta); err != nil {
-			_, _ = s.meta.DecrBlobRef(ctx, actualSha)
-			return nil, fmt.Errorf("写入文件记录: %w", err)
-		}
-		session.Status = SessionCompleted
-		session.FileID = fileID
-		_ = s.meta.DeleteSession(ctx, sessionID)
-		log.Printf("[upload] Finalize %s → %s (0 字节, ns=%s)", sessionID, fileID, session.Namespace)
-		return fileMeta, nil
+
+	// 0 字节无声明 SHA → 使用空内容标准哈希
+	if len(chunks) == 0 && session.SHA256 == "" {
+		session.SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 	}
 
-	// 按 index 排序
-	sort.Slice(chunks, func(i, j int) bool { return chunks[i].Index < chunks[j].Index })
+	// Phase 1: 合并分片（流式）
+	mergedReader, cleanup, err := mergeChunks(ctx, sessionID, chunks, s.tempStorage)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
+	defer mergedReader.Close()
 
-	// 流式合并所有分片到一个 pipe
-	pr, pw := io.Pipe()
-	go func() {
-		for _, chunk := range chunks {
-			relPath := sessionID + "/" + fmt.Sprintf("%d.part", chunk.Index)
-			r, err := s.tempStorage.Open(ctx, relPath, 0, 0)
-			if err != nil {
-				pw.CloseWithError(fmt.Errorf("打开分片 %d: %w", chunk.Index, err))
-				return
-			}
-			_, err = io.Copy(pw, r)
-			r.Close()
-			if err != nil {
-				pw.CloseWithError(fmt.Errorf("合并分片 %d: %w", chunk.Index, err))
-				return
-			}
-		}
-		pw.Close()
-	}()
-
-	// 是否需要解压
-	var originalReader io.Reader = pr
-	if session.Compression != CompNone && session.Compression != "" {
-		decompressed, err := s.compress.Decompress(ctx, pr, session.Compression)
-		if err != nil {
-			return nil, fmt.Errorf("解压失败: %w", err)
-		}
-		defer decompressed.Close()
-		originalReader = decompressed
+	// Phase 2: 解压 + 哈希累积
+	verifiedReader, hashRes, err := verifyStream(ctx, mergedReader, session.Compression, s.compress, s.hasher)
+	if err != nil {
+		return nil, err
 	}
 
-	// 边读边算整体 SHA-256 + 写入 Storage
-	fileID := NewID()
+	// 确定存储路径
 	fileName := session.FileName
 	if fileName == "" {
-		fileName = fileID
+		fileName = NewID()
 	}
-	// 存储路径用 namespace/original_path，保留原始文件名和目录结构
-	// 方便直接从存储目录拷贝文件。LocalFS 自带路径穿越防护。
 	storagePath := fmt.Sprintf("%s/%s", session.Namespace, fileName)
-	teeReader, acc := s.hasher.TeeReader(originalReader)
 
-	written, err := s.storage.Write(ctx, storagePath, teeReader)
+	// Phase 3: 写入存储 + 创建去重和文件记录
+	fileMeta, err := commitStream(ctx, verifiedReader, storagePath, session, s.storage, s.meta, s.meta, hashRes)
 	if err != nil {
-		return nil, fmt.Errorf("写入存储: %w", err)
+		return nil, err
 	}
-
-	actualSha := acc.SumHex()
-
-	// 比对整体 SHA-256
-	if session.SHA256 != "" && actualSha != session.SHA256 {
-		// 校验失败：删除已写数据
-		_ = s.storage.Delete(ctx, storagePath)
-		return nil, ErrContentChecksum
-	}
-
-	// 创建 content_blob
-	blob := &ContentBlob{
-		SHA256:      actualSha,
-		StoragePath: storagePath,
-		Size:        written,
-		RefCount:    1,
-		CreatedAt:   time.Now(),
-	}
-	if err := s.meta.PutBlob(ctx, blob); err != nil {
-		_ = s.storage.Delete(ctx, storagePath)
-		return nil, fmt.Errorf("写入去重记录: %w", err)
-	}
-
-		// 创建逻辑文件记录
-		// Name=基本名（展示用），Path=原始路径（目录上传时含相对路径）
-		fileMeta := &FileMetadata{
-			FileID:    fileID,
-			SHA256:    actualSha,
-			Name:      filepath.Base(fileName),
-			Path:      fileName,
-			Size:      written,
-			Namespace: session.Namespace,
-			IsDir:     false,
-			CreatedAt: time.Now(),
-	}
-	if err := s.meta.PutFile(ctx, fileMeta); err != nil {
-		_, _ = s.meta.DecrBlobRef(ctx, actualSha)
-		return nil, fmt.Errorf("写入文件记录: %w", err)
-	}
-
-	// 清理临时分片
-	go s.cleanupTempChunks(ctx, sessionID, chunks)
 
 	// 标记会话完成
 	session.Status = SessionCompleted
-	session.FileID = fileID
+	session.FileID = fileMeta.FileID
 	_ = s.meta.DeleteSession(ctx, sessionID)
 
-	log.Printf("[upload] Finalize %s → %s (%d 字节, sha256=%s, ns=%s)", sessionID, fileID, written, shaPrefix(actualSha), session.Namespace)
+	log.Printf("[upload] Finalize %s → %s (%d bytes, sha256=%s, ns=%s)",
+		sessionID, fileMeta.FileID, fileMeta.Size, shaPrefix(fileMeta.SHA256), session.Namespace)
 	return fileMeta, nil
 }
 
@@ -590,7 +487,65 @@ func (s *UploadService) SubmitDir(ctx context.Context, manifest DirManifest, nam
 	return root, nil
 }
 
+// DeleteFile 删除一个逻辑文件（不处理目录）
+// 实现 FileDeleter 接口。由 Delete 和 BatchService 调用。
+func (s *UploadService) DeleteFile(ctx context.Context, fileID, namespace string) error {
+	file, err := s.meta.GetFile(ctx, fileID)
+	if err != nil {
+		return fmt.Errorf("获取文件: %w", err)
+	}
+	if file == nil {
+		return ErrNotFound
+	}
+	if file.Namespace != namespace {
+		return ErrForbidden
+	}
+	return s.deleteFile(ctx, file)
+}
+
+// DeleteDir 删除一个目录及其子节点（递归）
+// recursive=true 时递归删除所有子节点。
+// 实现 FileDeleter 接口。
+func (s *UploadService) DeleteDir(ctx context.Context, dirID string, recursive bool, namespace string) error {
+	dir, err := s.meta.GetFile(ctx, dirID)
+	if err != nil {
+		return fmt.Errorf("获取目录: %w", err)
+	}
+	if dir == nil {
+		return ErrNotFound
+	}
+	if dir.Namespace != namespace {
+		return ErrForbidden
+	}
+	if !dir.IsDir {
+		return ErrInvalidArgument
+	}
+	return s.deleteDir(ctx, dir, namespace)
+}
+
+// MoveFile 将单个文件移动到目标目录
+// 实现 FileMover 接口。
+func (s *UploadService) MoveFile(ctx context.Context, fileID, targetDirID, namespace string) error {
+	file, err := s.meta.GetFile(ctx, fileID)
+	if err != nil {
+		return err
+	}
+	if file == nil {
+		return nil
+	}
+	if file.Namespace != namespace {
+		return nil
+	}
+
+	var parentID *string
+	if targetDirID != "" {
+		parentID = &targetDirID
+	}
+	return s.meta.UpdateFileParent(ctx, fileID, parentID)
+}
+
 // Delete 删除逻辑文件/目录（目录递归）
+// 便捷入口，由 HTTP handler 调用。
 func (s *UploadService) Delete(ctx context.Context, id string, namespace string) error {
 	file, err := s.meta.GetFile(ctx, id)
 	if err != nil {
