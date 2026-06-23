@@ -1,11 +1,33 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
+import { Layout } from 'antd'
 import Login from './pages/Login'
 import Files from './pages/Files'
+import Admin from './pages/Admin'
+import Logs from './pages/Logs'
+import Settings from './pages/Settings'
+import Sidebar from './components/Sidebar'
+import UploadProgressBar from './components/UploadProgressBar'
+import { UploadProvider } from './context/UploadContext'
 import ErrorBoundary from './components/ErrorBoundary'
 
+const { Content } = Layout
+
 function RequireAuth({ children }: { children: React.ReactNode }) {
-  // 当前版本允许未登录访问（登录为预留），后续通过 useAuth() 检查 isAuthenticated
   return <>{children}</>
+}
+
+function AppLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <Layout className="min-h-screen">
+      <Sidebar />
+      <Layout>
+        <Content className="bg-gray-50 dark:bg-gray-900 flex flex-col">
+          {children}
+          <UploadProgressBar />
+        </Content>
+      </Layout>
+    </Layout>
+  )
 }
 
 export default function App() {
@@ -14,16 +36,27 @@ export default function App() {
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route
-          path="/"
+          path="/*"
           element={
             <RequireAuth>
-              <ErrorBoundary title="文件管理异常">
-                <Files />
-              </ErrorBoundary>
+              <UploadProvider>
+                <AppLayout>
+                  <Routes>
+                    <Route path="/" element={
+                      <ErrorBoundary title="文件管理异常">
+                        <Files />
+                      </ErrorBoundary>
+                    } />
+                    <Route path="/admin" element={<Admin />} />
+                    <Route path="/logs" element={<Logs />} />
+                    <Route path="/settings" element={<Settings />} />
+                    <Route path="*" element={<Navigate to="/" />} />
+                  </Routes>
+                </AppLayout>
+              </UploadProvider>
             </RequireAuth>
           }
         />
-        <Route path="*" element={<Navigate to="/" />} />
       </Routes>
     </ErrorBoundary>
   )
