@@ -10,11 +10,12 @@ import (
 )
 
 // 从环境变量读取 PG DSN，未设置时跳过测试
+// CI 中无 PostgreSQL 实例，需显式设置环境变量才会运行
 func pgDSN(t *testing.T) string {
 	t.Helper()
 	dsn := os.Getenv("FILEUPLOAD_PG_DSN")
 	if dsn == "" {
-		dsn = "postgres://postgres:Postgres%402026@12.2.40.40:35432/fileupload?sslmode=disable"
+		t.Skip("跳过 PostgreSQL 集成测试：未设置 FILEUPLOAD_PG_DSN")
 	}
 	return dsn
 }
