@@ -3,7 +3,7 @@
 # 也可通过 FILEUPLOAD_CONFIG 环境变量指定路径
 
 server:
-  addr: "8080"              # 监听地址
+  addr: ":8080"              # 监听地址（含冒号前缀，默认 :8080）
   read_timeout: 30           # 读取超时（秒）
   write_timeout: 300         # 写入超时（秒），大文件需长超时
   idle_timeout: 60           # 空闲超时（秒）
@@ -14,9 +14,9 @@ storage:
   temp_dir: "storage/tmp"            # 上传分片临时目录
 
 redis:
-  addr: "12.2.40.40:6002"     # Redis 地址
-  password: "dev123"               # 密码
-  db: 10                      # 数据库编号
+  addr: "localhost:6379"     # Redis 地址
+  password: ""               # 密码
+  db: 0                      # 数据库编号
   prefix: "upload:"          # key 前缀
 
 database:
