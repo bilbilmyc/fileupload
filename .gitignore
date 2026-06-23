@@ -30,10 +30,10 @@ fileupload.yaml
 
 # 前端
 web/node_modules/
-# web/dist: 构建产物忽略，但占位 index.html 要跟踪（确保 CI embed 编译通过）
-web/dist/assets/
+# web/dist: 构建产物忽略，占位文件（index.html, assets/placeholder）需跟踪以保 embed 编译通过
+web/dist/assets/*.css
+web/dist/assets/*.js
 web/dist/*.js
 web/dist/*.css
 web/dist/*.map
 web/dist/vite.svg
-# 保持 web/dist/index.html 被跟踪 — 占位文件保证 embed 编译不依赖前端构建
