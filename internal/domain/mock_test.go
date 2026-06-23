@@ -262,6 +262,29 @@ func (m *mockMetadata) GetFileByPath(_ context.Context, namespace, path string) 
 	return nil, nil
 }
 
+
+func (m *mockMetadata) ListChildrenPage(_ context.Context, parentID string, search string, page, perPage int, sortBy, sortOrder string) ([]*FileMetadata, int, error) {
+	all, _ := m.ListChildren(context.Background(), parentID, search)
+	total := len(all)
+	start := (page - 1) * perPage
+	if start < 0 { start = 0 }
+	if start >= total { return nil, total, nil }
+	end := start + perPage
+	if end > total { end = total }
+	return all[start:end], total, nil
+}
+
+func (m *mockMetadata) ListRootPage(_ context.Context, namespace string, search string, page, perPage int, sortBy, sortOrder string) ([]*FileMetadata, int, error) {
+	all, _ := m.ListRoot(context.Background(), namespace, search)
+	total := len(all)
+	start := (page - 1) * perPage
+	if start < 0 { start = 0 }
+	if start >= total { return nil, total, nil }
+	end := start + perPage
+	if end > total { end = total }
+	return all[start:end], total, nil
+}
+
 func (m *mockMetadata) ListChildren(_ context.Context, parentID string, search string) ([]*FileMetadata, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

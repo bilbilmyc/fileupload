@@ -159,7 +159,18 @@ func (h *RESTHandler) ListDir(w http.ResponseWriter, r *http.Request) {
 	search := r.URL.Query().Get("search")
 	namespace := GetNamespace(r.Context())
 
-	dir, children, err := h.downloadSvc.ListDir(r.Context(), parentID, namespace, search)
+	// 分页参数
+	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	if page < 1 { page = 1 }
+	perPage, _ := strconv.Atoi(r.URL.Query().Get("per_page"))
+	if perPage < 1 { perPage = 50 }
+	if perPage > 200 { perPage = 200 }
+	sortBy := r.URL.Query().Get("sort_by")
+	if sortBy == "" { sortBy = "name" }
+	sortOrder := r.URL.Query().Get("sort_order")
+	if sortOrder == "" { sortOrder = "asc" }
+
+	dir, children, total, err := h.downloadSvc.ListDirPage(r.Context(), parentID, namespace, search, page, perPage, sortBy, sortOrder)
 	if err != nil {
 		respondError(w, domainErrorToStatus(err), err)
 		return
@@ -184,6 +195,9 @@ func (h *RESTHandler) ListDir(w http.ResponseWriter, r *http.Request) {
 		"dir":       dir,
 		"children":  children,
 		"ancestors": ancestors,
+		"total":     total,
+		"page":      page,
+		"per_page":  perPage,
 	})
 }
 

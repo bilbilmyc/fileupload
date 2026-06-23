@@ -24,9 +24,11 @@ type ColdStore interface {
 	GetFile(ctx context.Context, id string) (*domain.FileMetadata, error)
 	GetFileByPath(ctx context.Context, namespace, path string) (*domain.FileMetadata, error)
 	ListChildren(ctx context.Context, parentID string, search string) ([]*domain.FileMetadata, error)
+	ListChildrenPage(ctx context.Context, parentID string, search string, page, perPage int, sortBy, sortOrder string) ([]*domain.FileMetadata, int, error)
 	DeleteFile(ctx context.Context, id string) error
 	ListFilesByBlob(ctx context.Context, sha256 string) ([]*domain.FileMetadata, error)
 	ListRoot(ctx context.Context, namespace string, search string) ([]*domain.FileMetadata, error)
+	ListRootPage(ctx context.Context, namespace string, search string, page, perPage int, sortBy, sortOrder string) ([]*domain.FileMetadata, int, error)
 
 	// 标签
 	SetFileTags(ctx context.Context, fileID string, tags []string) error
@@ -134,6 +136,10 @@ func (f *Facade) GetFileByPath(ctx context.Context, namespace, path string) (*do
 	return f.cold.GetFileByPath(ctx, namespace, path)
 }
 
+func (f *Facade) ListChildrenPage(ctx context.Context, parentID string, search string, page, perPage int, sortBy, sortOrder string) ([]*domain.FileMetadata, int, error) {
+	return f.cold.ListChildrenPage(ctx, parentID, search, page, perPage, sortBy, sortOrder)
+}
+
 func (f *Facade) ListChildren(ctx context.Context, parentID string, search string) ([]*domain.FileMetadata, error) {
 	return f.cold.ListChildren(ctx, parentID, search)
 }
@@ -144,6 +150,10 @@ func (f *Facade) DeleteFile(ctx context.Context, id string) error {
 
 func (f *Facade) ListFilesByBlob(ctx context.Context, sha256 string) ([]*domain.FileMetadata, error) {
 	return f.cold.ListFilesByBlob(ctx, sha256)
+}
+
+func (f *Facade) ListRootPage(ctx context.Context, namespace string, search string, page, perPage int, sortBy, sortOrder string) ([]*domain.FileMetadata, int, error) {
+	return f.cold.ListRootPage(ctx, namespace, search, page, perPage, sortBy, sortOrder)
 }
 
 func (f *Facade) ListRoot(ctx context.Context, namespace string, search string) ([]*domain.FileMetadata, error) {

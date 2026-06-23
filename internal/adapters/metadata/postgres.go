@@ -162,6 +162,50 @@ func (s *PostgresStore) GetFileByPath(ctx context.Context, namespace, path strin
 	return scanFilePG(row)
 }
 
+func (s *PostgresStore) ListChildrenPage(ctx context.Context, parentID string, search string, page, perPage int, sortBy, sortOrder string) ([]*domain.FileMetadata, int, error) {
+	safeSort := "name"
+	switch sortBy {
+	case "name", "size", "created_at":
+		safeSort = sortBy
+	}
+	order := "ASC"
+	if sortOrder == "desc" {
+		order = "DESC"
+	}
+	offset := (page - 1) * perPage
+	if offset < 0 {
+		offset = 0
+	}
+	var total int
+	countSQL := "SELECT COUNT(*) FROM files WHERE parent_id=$1"
+	countArgs := []any{parentID}
+	if search != "" {
+		countSQL += " AND name ILIKE $2"
+		countArgs = append(countArgs, "%"+search+"%")
+	}
+	s.db.QueryRowContext(ctx, countSQL, countArgs...).Scan(&total)
+	sql := "SELECT file_id, sha256, name, path, size, namespace, is_dir, parent_id, created_at FROM files WHERE parent_id=$1"
+	queryArgs := []any{parentID}
+	paramIdx := 2
+	if search != "" {
+		sql += fmt.Sprintf(" AND name ILIKE $%d", paramIdx)
+		queryArgs = append(queryArgs, "%"+search+"%")
+		paramIdx++
+	}
+	sql += fmt.Sprintf(" ORDER BY %s %s LIMIT $%d OFFSET $%d", safeSort, order, paramIdx, paramIdx+1)
+	queryArgs = append(queryArgs, perPage, offset)
+	rows, err := s.db.QueryContext(ctx, sql, queryArgs...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	files, err := scanFiles(rows)
+	if err != nil {
+		return nil, 0, err
+	}
+	return files, total, nil
+}
+
 func (s *PostgresStore) ListChildren(ctx context.Context, parentID string, search string) ([]*domain.FileMetadata, error) {
 	var rows *sql.Rows
 	var err error
@@ -194,6 +238,50 @@ func (s *PostgresStore) ListFilesByBlob(ctx context.Context, sha256 string) ([]*
 	}
 	defer rows.Close()
 	return scanFilesPG(rows)
+}
+
+func (s *PostgresStore) ListRootPage(ctx context.Context, namespace string, search string, page, perPage int, sortBy, sortOrder string) ([]*domain.FileMetadata, int, error) {
+	safeSort := "name"
+	switch sortBy {
+	case "name", "size", "created_at":
+		safeSort = sortBy
+	}
+	order := "ASC"
+	if sortOrder == "desc" {
+		order = "DESC"
+	}
+	offset := (page - 1) * perPage
+	if offset < 0 {
+		offset = 0
+	}
+	var total int
+	countSQL := "SELECT COUNT(*) FROM files WHERE (parent_id IS NULL OR parent_id='') AND namespace=$1"
+	countArgs := []any{namespace}
+	if search != "" {
+		countSQL += " AND name ILIKE $2"
+		countArgs = append(countArgs, "%"+search+"%")
+	}
+	s.db.QueryRowContext(ctx, countSQL, countArgs...).Scan(&total)
+	sql := "SELECT file_id, sha256, name, path, size, namespace, is_dir, parent_id, created_at FROM files WHERE (parent_id IS NULL OR parent_id='') AND namespace=$1"
+	queryArgs := []any{namespace}
+	paramIdx := 2
+	if search != "" {
+		sql += fmt.Sprintf(" AND name ILIKE $%d", paramIdx)
+		queryArgs = append(queryArgs, "%"+search+"%")
+		paramIdx++
+	}
+	sql += fmt.Sprintf(" ORDER BY %s %s LIMIT $%d OFFSET $%d", safeSort, order, paramIdx, paramIdx+1)
+	queryArgs = append(queryArgs, perPage, offset)
+	rows, err := s.db.QueryContext(ctx, sql, queryArgs...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	files, err := scanFiles(rows)
+	if err != nil {
+		return nil, 0, err
+	}
+	return files, total, nil
 }
 
 func (s *PostgresStore) ListRoot(ctx context.Context, namespace string, search string) ([]*domain.FileMetadata, error) {

@@ -61,7 +61,9 @@ type FileStore interface {
 	GetFile(ctx context.Context, id string) (*FileMetadata, error)
 	GetFileByPath(ctx context.Context, namespace, path string) (*FileMetadata, error)
 	ListChildren(ctx context.Context, parentID string, search string) ([]*FileMetadata, error)
+	ListChildrenPage(ctx context.Context, parentID string, search string, page, perPage int, sortBy, sortOrder string) ([]*FileMetadata, int, error)
 	ListRoot(ctx context.Context, namespace string, search string) ([]*FileMetadata, error)
+	ListRootPage(ctx context.Context, namespace string, search string, page, perPage int, sortBy, sortOrder string) ([]*FileMetadata, int, error)
 	DeleteFile(ctx context.Context, id string) error
 	ListFilesByBlob(ctx context.Context, sha256 string) ([]*FileMetadata, error)
 	ReparentFile(ctx context.Context, fileID string, parentID *string, path string) error

@@ -195,6 +195,49 @@ func (s *SQLiteStore) GetFileByPath(_ context.Context, namespace, path string) (
 }
 
 // ListChildren 列目录子节点，支持可选搜索
+func (s *SQLiteStore) ListChildrenPage(ctx context.Context, parentID string, search string, page, perPage int, sortBy, sortOrder string) ([]*domain.FileMetadata, int, error) {
+	// Validate sort
+	safeSort := "name"
+	switch sortBy {
+	case "name", "size", "created_at":
+		safeSort = sortBy
+	}
+	order := "ASC"
+	if sortOrder == "desc" {
+		order = "DESC"
+	}
+	offset := (page - 1) * perPage
+	if offset < 0 { offset = 0 }
+
+	// Count
+	var total int
+	countSQL := "SELECT COUNT(*) FROM files WHERE parent_id=?"
+	args := []any{parentID}
+	if search != "" {
+		countSQL += " AND name LIKE ?"
+		args = append(args, "%"+search+"%")
+	}
+	s.db.QueryRowContext(ctx, countSQL, args...).Scan(&total)
+
+	// Query with limit
+	sql := fmt.Sprintf("SELECT file_id, sha256, name, path, size, namespace, is_dir, parent_id, created_at FROM files WHERE parent_id=?")
+	searchArgs := []any{parentID}
+	if search != "" {
+		sql += " AND name LIKE ?"
+		searchArgs = append(searchArgs, "%"+search+"%")
+	}
+	sql += fmt.Sprintf(" ORDER BY %s %s LIMIT ? OFFSET ?", safeSort, order)
+	searchArgs = append(searchArgs, perPage, offset)
+	rows, err := s.db.QueryContext(ctx, sql, searchArgs...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	files, err := scanFiles(rows)
+	if err != nil { return nil, 0, err }
+	return files, total, nil
+}
+
 func (s *SQLiteStore) ListChildren(_ context.Context, parentID string, search string) ([]*domain.FileMetadata, error) {
 	var rows *sql.Rows
 	var err error
@@ -237,6 +280,46 @@ func (s *SQLiteStore) ListFilesByBlob(_ context.Context, sha256 string) ([]*doma
 }
 
 // ListRoot 列 root 节点（parent_id IS NULL 且 namespace 匹配），支持可选搜索
+func (s *SQLiteStore) ListRootPage(ctx context.Context, namespace string, search string, page, perPage int, sortBy, sortOrder string) ([]*domain.FileMetadata, int, error) {
+	safeSort := "name"
+	switch sortBy {
+	case "name", "size", "created_at":
+		safeSort = sortBy
+	}
+	order := "ASC"
+	if sortOrder == "desc" {
+		order = "DESC"
+	}
+	offset := (page - 1) * perPage
+	if offset < 0 { offset = 0 }
+
+	var total int
+	countSQL := "SELECT COUNT(*) FROM files WHERE (parent_id IS NULL OR parent_id='') AND namespace=?"
+	args := []any{namespace}
+	if search != "" {
+		countSQL += " AND name LIKE ?"
+		args = append(args, "%"+search+"%")
+	}
+	s.db.QueryRowContext(ctx, countSQL, args...).Scan(&total)
+
+	sql := fmt.Sprintf("SELECT file_id, sha256, name, path, size, namespace, is_dir, parent_id, created_at FROM files WHERE (parent_id IS NULL OR parent_id='') AND namespace=?")
+	searchArgs := []any{namespace}
+	if search != "" {
+		sql += " AND name LIKE ?"
+		searchArgs = append(searchArgs, "%"+search+"%")
+	}
+	sql += fmt.Sprintf(" ORDER BY %s %s LIMIT ? OFFSET ?", safeSort, order)
+	searchArgs = append(searchArgs, perPage, offset)
+	rows, err := s.db.QueryContext(ctx, sql, searchArgs...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	files, err := scanFiles(rows)
+	if err != nil { return nil, 0, err }
+	return files, total, nil
+}
+
 func (s *SQLiteStore) ListRoot(_ context.Context, namespace string, search string) ([]*domain.FileMetadata, error) {
 	var rows *sql.Rows
 	var err error

@@ -251,6 +251,33 @@ func computeTreeSHA256(entries []DirEntryInfo) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
+
+// ListDirPage 列目录，支持分页+排序
+func (s *DownloadService) ListDirPage(ctx context.Context, parentID, namespace, search string, page, perPage int, sortBy, sortOrder string) (*FileMetadata, []*FileMetadata, int, error) {
+	if parentID == "" || parentID == "/" || parentID == "root" {
+		children, total, err := s.meta.ListRootPage(ctx, namespace, search, page, perPage, sortBy, sortOrder)
+		if err != nil {
+			return nil, nil, 0, fmt.Errorf("列根目录: %w", err)
+		}
+		return nil, children, total, nil
+	}
+	dir, err := s.meta.GetFile(ctx, parentID)
+	if err != nil {
+		return nil, nil, 0, fmt.Errorf("获取目录: %w", err)
+	}
+	if dir == nil {
+		return nil, nil, 0, ErrNotFound
+	}
+	if dir.Namespace != namespace {
+		return nil, nil, 0, ErrForbidden
+	}
+	children, total, err := s.meta.ListChildrenPage(ctx, parentID, search, page, perPage, sortBy, sortOrder)
+	if err != nil {
+		return nil, nil, 0, fmt.Errorf("列子节点: %w", err)
+	}
+	return dir, children, total, nil
+}
+
 // ListDir 列目录，支持按文件名搜索（search 为空时不搜索）
 func (s *DownloadService) ListDir(ctx context.Context, parentID, namespace, search string) (*FileMetadata, []*FileMetadata, error) {
 	if parentID == "" || parentID == "/" || parentID == "root" {

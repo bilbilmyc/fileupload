@@ -101,6 +101,28 @@ func (m *mockMeta) GetFileTags(_ context.Context, _ string) ([]string, error) { 
 func (m *mockMeta) DeleteFileTags(_ context.Context, _ string) error { return nil }
 func (m *mockMeta) ReparentFile(_ context.Context, _ string, _ *string, _ string) error { return nil }
 func (m *mockMeta) UpdateFileParent(_ context.Context, _ string, _ *string) error { return nil }
+
+func (m *mockMeta) ListChildrenPage(_ context.Context, parentID string, search string, page, perPage int, sortBy, sortOrder string) ([]*domain.FileMetadata, int, error) {
+	all, _ := m.ListChildren(context.Background(), parentID, search)
+	total := len(all)
+	start := (page - 1) * perPage
+	if start < 0 { start = 0 }
+	if start >= total { return nil, total, nil }
+	end := start + perPage
+	if end > total { end = total }
+	return all[start:end], total, nil
+}
+
+func (m *mockMeta) ListRootPage(_ context.Context, namespace string, search string, page, perPage int, sortBy, sortOrder string) ([]*domain.FileMetadata, int, error) {
+	all, _ := m.ListRoot(context.Background(), namespace, search)
+	total := len(all)
+	start := (page - 1) * perPage
+	if start < 0 { start = 0 }
+	if start >= total { return nil, total, nil }
+	end := start + perPage
+	if end > total { end = total }
+	return all[start:end], total, nil
+}
 func (m *mockMeta) RenameFile(_ context.Context, _, _, _ string) error { return nil }
 
 func (m *mockMeta) ListAllBlobs(_ context.Context) ([]*domain.ContentBlob, error) {
@@ -309,6 +331,9 @@ func (e *errorMeta) GetFileTags(_ context.Context, _ string) ([]string, error) {
 func (e *errorMeta) DeleteFileTags(_ context.Context, _ string) error { return nil }
 func (e *errorMeta) ReparentFile(_ context.Context, _ string, _ *string, _ string) error { return nil }
 func (e *errorMeta) UpdateFileParent(_ context.Context, _ string, _ *string) error { return nil }
+
+func (e *errorMeta) ListChildrenPage(_ context.Context, _ string, _ string, _, _ int, _, _ string) ([]*domain.FileMetadata, int, error) { return nil, 0, fmt.Errorf("fail") }
+func (e *errorMeta) ListRootPage(_ context.Context, _ string, _ string, _, _ int, _, _ string) ([]*domain.FileMetadata, int, error) { return nil, 0, fmt.Errorf("fail") }
 func (e *errorMeta) RenameFile(_ context.Context, _, _, _ string) error { return nil }
 
 func (e *errorMeta) ListAllBlobs(_ context.Context) ([]*domain.ContentBlob, error) { return nil, fmt.Errorf("fail") }
