@@ -13,7 +13,7 @@ import (
 	"github.com/bilbilmyc/fileupload/internal/domain"
 )
 
-// mockShareStore implements ShareStore
+// mockShareStore implements domain.ShareStore
 type mockShareStore struct {
 	shares map[string]*domain.ShareEntry
 }
@@ -41,7 +41,8 @@ func (m *mockShareStore) IncrDownloads(_ context.Context, token string) error {
 
 func TestShareHandler_CreateShare(t *testing.T) {
 	store := newMockShareStore()
-	handler := NewShareHandler(store, nil)
+	shareSvc := domain.NewShareService(store)
+	handler := NewShareHandler(shareSvc, nil)
 
 	body, _ := json.Marshal(domain.CreateShareRequest{FileID: "f1"})
 	req := httptest.NewRequest("POST", "/v1/share", bytes.NewReader(body))
@@ -64,7 +65,7 @@ func TestShareHandler_CreateShare(t *testing.T) {
 
 func TestShareHandler_CreateShare_EmptyFileID(t *testing.T) {
 	store := newMockShareStore()
-	handler := NewShareHandler(store, nil)
+	handler := NewShareHandler(domain.NewShareService(store), nil)
 
 	body, _ := json.Marshal(domain.CreateShareRequest{FileID: ""})
 	req := httptest.NewRequest("POST", "/v1/share", bytes.NewReader(body))
@@ -78,7 +79,7 @@ func TestShareHandler_CreateShare_EmptyFileID(t *testing.T) {
 
 func TestShareHandler_CreateShare_WithPassword(t *testing.T) {
 	store := newMockShareStore()
-	handler := NewShareHandler(store, nil)
+	handler := NewShareHandler(domain.NewShareService(store), nil)
 
 	body, _ := json.Marshal(domain.CreateShareRequest{FileID: "f1", Password: "secret123"})
 	req := httptest.NewRequest("POST", "/v1/share", bytes.NewReader(body))
@@ -94,7 +95,7 @@ func TestShareHandler_CreateShare_WithPassword(t *testing.T) {
 
 func TestShareHandler_AccessShare_NotFound(t *testing.T) {
 	store := newMockShareStore()
-	handler := NewShareHandler(store, nil)
+	handler := NewShareHandler(domain.NewShareService(store), nil)
 
 	req := httptest.NewRequest("GET", "/s/no-such-token", nil)
 	w := httptest.NewRecorder()
@@ -107,7 +108,7 @@ func TestShareHandler_AccessShare_NotFound(t *testing.T) {
 
 func TestShareHandler_AccessShare_PasswordRequired(t *testing.T) {
 	store := newMockShareStore()
-	handler := NewShareHandler(store, nil)
+	handler := NewShareHandler(domain.NewShareService(store), nil)
 
 	// Create share with password
 	h := sha256.Sum256([]byte("pw"))
@@ -127,7 +128,7 @@ func TestShareHandler_AccessShare_PasswordRequired(t *testing.T) {
 
 func TestShareHandler_AccessShare_WithPassword(t *testing.T) {
 	store := newMockShareStore()
-	handler := NewShareHandler(store, nil)
+	handler := NewShareHandler(domain.NewShareService(store), nil)
 
 	h := sha256.Sum256([]byte("pw"))
 	store.CreateShare(context.Background(), "s-test", &domain.ShareEntry{
@@ -147,7 +148,7 @@ func TestShareHandler_AccessShare_WithPassword(t *testing.T) {
 
 func TestShareHandler_AccessShare_MaxDownloads(t *testing.T) {
 	store := newMockShareStore()
-	handler := NewShareHandler(store, nil)
+	handler := NewShareHandler(domain.NewShareService(store), nil)
 
 	store.CreateShare(context.Background(), "s-limited", &domain.ShareEntry{
 		Token: "s-limited", FileID: "f1", MaxDownloads: 1, CurDownloads: 1, Namespace: "demo",

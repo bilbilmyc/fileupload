@@ -208,7 +208,8 @@ func main() {
 	downloadHandler := transport.NewDownloadHandler(downloadSvc)
 	batchHandler := transport.NewBatchHandler(batchSvc)
 	adminHandler := transport.NewAdminHandler(metaFacade, workerPool, cfg.Storage.DataDir, cfg.Storage.TempDir, dbDisplayPath, cfg.Database.Type)
-	shareHandler := transport.NewShareHandler(metaFacade, downloadSvc)
+	shareSvc := domain.NewShareService(metaFacade)
+	shareHandler := transport.NewShareHandler(shareSvc, downloadSvc)
 	wsHub := transport.NewWSHub()
 	router := transport.NewRouter(mw, tusHandler, restHandler, downloadHandler, batchHandler, authHandler, adminHandler, shareHandler, wsHub, uploadSvc, scanner, healthChecker)
 

@@ -8,7 +8,6 @@ import (
 	"io"
 	"log"
 	"sort"
-	"strings"
 )
 
 // DownloadService 下载编排核心
@@ -435,7 +434,3 @@ func (s *DownloadService) StreamBatch(ctx context.Context, ids []string, namespa
 	return pr, nil
 }
 
-// Must be implemented in model.go or utils.go
-func init() {
-	_ = strings.Compare // prevent unused import
-}

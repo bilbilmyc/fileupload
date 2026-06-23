@@ -124,4 +124,5 @@ const (
 	ErrNotFound         DomainError = "资源不存在"
 	ErrInvalidArgument  DomainError = "参数不合法"
 	ErrPathTraversal    DomainError = "路径穿越被拒绝"
+	ErrShareExhausted   DomainError = "分享链接已过期或已达下载上限"
 )

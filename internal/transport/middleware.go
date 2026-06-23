@@ -385,6 +385,8 @@ func domainErrorToStatus(err error) int {
 			return http.StatusServiceUnavailable
 		case domain.ErrCorrupted:
 			return http.StatusGone
+		case domain.ErrShareExhausted:
+			return http.StatusGone
 		case domain.ErrNotFound:
 			return http.StatusNotFound
 		case domain.ErrInvalidArgument:

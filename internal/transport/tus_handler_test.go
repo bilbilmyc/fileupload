@@ -108,6 +108,7 @@ func TestCreateUpload_InvalidLength(t *testing.T) {
 func TestGetUploadInfo_NotFound(t *testing.T) {
 	_, _, tusHandler, _, _ := newTestFixtures(t)
 	req := httptest.NewRequest("HEAD", "/uploads/no-such", nil)
+	req.SetPathValue("id", "no-such")
 	w := httptest.NewRecorder()
 	tusHandler.GetUploadInfo(w, req)
 
@@ -123,6 +124,7 @@ func TestGetUploadInfo_Success(t *testing.T) {
 	session, _ := uploadSvc.CreateSession(ctx, "sha", 1000, domain.CompNone, 100, "demo", "f.bin")
 
 	req := httptest.NewRequest("HEAD", "/uploads/"+session.SessionID, nil)
+	req.SetPathValue("id", session.SessionID)
 	w := httptest.NewRecorder()
 	tusHandler.GetUploadInfo(w, req)
 
@@ -137,6 +139,8 @@ func TestGetUploadInfo_Success(t *testing.T) {
 func TestAppendChunk_InvalidSession(t *testing.T) {
 	_, _, tusHandler, _, _ := newTestFixtures(t)
 	req := httptest.NewRequest("PATCH", "/uploads/no-such", strings.NewReader("data"))
+	req.SetPathValue("id", "no-such")
+	req.SetPathValue("id", "no-such")
 	w := httptest.NewRecorder()
 	tusHandler.AppendChunk(w, req)
 	// no-such session should error
@@ -152,6 +156,7 @@ func TestCancelUpload_Success(t *testing.T) {
 	session, _ := uploadSvc.CreateSession(ctx, "sha", 100, domain.CompNone, 10, "demo", "f.txt")
 
 	req := httptest.NewRequest("DELETE", "/uploads/"+session.SessionID, nil)
+	req.SetPathValue("id", session.SessionID)
 	w := httptest.NewRecorder()
 	tusHandler.CancelUpload(w, req)
 
@@ -163,6 +168,8 @@ func TestCancelUpload_Success(t *testing.T) {
 func TestCancelUpload_NotFound(t *testing.T) {
 	_, _, tusHandler, _, _ := newTestFixtures(t)
 	req := httptest.NewRequest("DELETE", "/uploads/no-such", nil)
+	req.SetPathValue("id", "no-such")
+	req.SetPathValue("id", "no-such")
 	w := httptest.NewRecorder()
 	tusHandler.CancelUpload(w, req)
 	if w.Code != http.StatusNotFound {
@@ -204,6 +211,8 @@ func TestREST_UploadChunk(t *testing.T) {
 	session, _ := uploadSvc.CreateSession(ctx, "sha", 100, domain.CompNone, 100, "demo", "f.bin")
 
 	req := httptest.NewRequest("PUT", fmt.Sprintf("/v1/uploads/%s/chunks/0", session.SessionID), strings.NewReader("chunk data"))
+	req.SetPathValue("id", session.SessionID)
+	req.SetPathValue("index", "0")
 	w := httptest.NewRecorder()
 	restHandler.UploadChunk(w, req)
 
@@ -218,6 +227,7 @@ func TestREST_GetUploadStatus(t *testing.T) {
 	session, _ := uploadSvc.CreateSession(ctx, "sha", 100, domain.CompNone, 10, "demo", "f.txt")
 
 	req := httptest.NewRequest("GET", "/v1/uploads/"+session.SessionID+"/status", nil)
+	req.SetPathValue("id", session.SessionID)
 	req = withNamespace(req, "demo")
 	w := httptest.NewRecorder()
 	restHandler.GetUploadStatus(w, req)
@@ -236,6 +246,7 @@ func TestREST_FinalizeUpload(t *testing.T) {
 	uploadSvc.AppendChunk(ctx, session.SessionID, 0, bytes.NewReader(content), "")
 
 	req := httptest.NewRequest("POST", fmt.Sprintf("/v1/uploads/%s/finalize", session.SessionID), nil)
+	req.SetPathValue("id", session.SessionID)
 	req = withNamespace(req, "demo")
 	w := httptest.NewRecorder()
 	restHandler.FinalizeUpload(w, req)
@@ -262,6 +273,7 @@ func TestDownloadHandler_GetFile(t *testing.T) {
 	result, _ := uploadSvc.Finalize(ctx, session.SessionID)
 
 	req := httptest.NewRequest("GET", "/v1/files/"+result.FileID, nil)
+	req.SetPathValue("id", result.FileID)
 	req = withNamespace(req, "demo")
 	w := httptest.NewRecorder()
 	downloadHandler.GetFile(w, req)
@@ -283,6 +295,8 @@ func TestDownloadHandler_GetFile(t *testing.T) {
 func TestDownloadHandler_GetFile_NotFound(t *testing.T) {
 	_, _, _, _, downloadHandler := newTestFixtures(t)
 	req := httptest.NewRequest("GET", "/v1/files/no-such", nil)
+	req.SetPathValue("id", "no-such")
+	req.SetPathValue("id", "no-such")
 	req = withNamespace(req, "demo")
 	w := httptest.NewRecorder()
 	downloadHandler.GetFile(w, req)
@@ -309,6 +323,7 @@ func TestDownloadHandler_GetDir(t *testing.T) {
 	dir, _ := uploadSvc.SubmitDir(ctx, manifest, "demo")
 
 	req := httptest.NewRequest("GET", "/v1/dirs/"+dir.FileID+"?format=tar.gz", nil)
+	req.SetPathValue("id", dir.FileID)
 	req = withNamespace(req, "demo")
 	w := httptest.NewRecorder()
 	downloadHandler.GetDir(w, req)
@@ -386,30 +401,6 @@ func TestRouter_CheckExists_Miss(t *testing.T) {
 	}
 }
 
-// ===== extractPathID test =====
-
-func TestExtractPathID(t *testing.T) {
-	tests := []struct {
-		path   string
-		prefix string
-		want   string
-	}{
-		{"/uploads/abc123", "/uploads/", "abc123"},
-		{"/uploads/abc123/", "/uploads/", "abc123"},
-		{"/v1/files/f-id", "/v1/files/", "f-id"},
-		{"/uploads/", "/uploads/", ""},
-		{"/short", "/longer/", ""},
-	}
-	for _, tt := range tests {
-		t.Run(tt.path, func(t *testing.T) {
-			got := extractPathID(tt.path, tt.prefix)
-			if got != tt.want {
-				t.Errorf("extractPathID = %s, want %s", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestREST_SubmitDir(t *testing.T) {
 	uploadSvc, _, _, restHandler, _ := newTestFixtures(t)
 	ctx := context.Background()
@@ -484,6 +475,7 @@ func TestREST_StatFile(t *testing.T) {
 	result, _ := uploadSvc.Finalize(ctx, s.SessionID)
 
 	req := httptest.NewRequest("GET", "/v1/stat/"+result.FileID, nil)
+	req.SetPathValue("id", result.FileID)
 	req = withNamespace(req, "demo")
 	w := httptest.NewRecorder()
 	restHandler.StatFile(w, req)
@@ -509,6 +501,7 @@ func TestREST_DeleteFile(t *testing.T) {
 	result, _ := uploadSvc.Finalize(ctx, s.SessionID)
 
 	req := httptest.NewRequest("DELETE", "/v1/files/"+result.FileID, nil)
+	req.SetPathValue("id", result.FileID)
 	req = withNamespace(req, "demo")
 	w := httptest.NewRecorder()
 	restHandler.DeleteFile(w, req)
@@ -521,6 +514,7 @@ func TestREST_DeleteFile(t *testing.T) {
 func TestREST_UploadChunk_InvalidPath(t *testing.T) {
 	_, _, _, restHandler, _ := newTestFixtures(t)
 	req := httptest.NewRequest("PUT", "/v1/uploads/short/1", strings.NewReader("x"))
+	req.SetPathValue("id", "short")
 	w := httptest.NewRecorder()
 	restHandler.UploadChunk(w, req)
 	if w.Code != http.StatusBadRequest {
