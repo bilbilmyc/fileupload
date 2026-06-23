@@ -164,8 +164,8 @@ func DefaultConfig() Config {
 		Upload: UploadConfig{
 			SessionTTLMinutes: 60,
 			DefaultChunkSize:  10 * 1024 * 1024,
-			WorkerPoolSize:    4,
-			WorkerQueueSize:   100,
+			WorkerPoolSize:    16, // 多人并发建议 16-32
+			WorkerQueueSize: 400, // 建议 = pool_size * 25
 		},
 		Download: DownloadConfig{
 			MaxArchiveSize: 0,

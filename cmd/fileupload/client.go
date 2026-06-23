@@ -276,7 +276,7 @@ func (c *Client) UploadFile(ctx context.Context, localPath string, opts UploadOp
 	}
 	concurrency := opts.Concurrency
 	if concurrency <= 0 {
-		concurrency = 4
+		concurrency = 16 // 多人并发上传场景建议与 server worker_pool_size 保持一致
 	}
 
 	compress := opts.Compress
@@ -601,7 +601,7 @@ func (c *Client) UploadDir(ctx context.Context, dirPath string, opts UploadOptio
 
 	concurrency := opts.Concurrency
 	if concurrency <= 0 {
-		concurrency = 4
+		concurrency = 16 // 多人并发上传场景建议与 server worker_pool_size 保持一致
 	}
 	opts.NoProgress = true
 	fmt.Fprintf(os.Stderr, "  上传 %d 个文件（并发 %d）\n", len(tasks), concurrency)

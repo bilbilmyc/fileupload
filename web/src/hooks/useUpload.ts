@@ -72,7 +72,7 @@ export function useUpload(onUploadComplete: () => void) {
   const [dirMode, setDirMode] = useState(false)
   const [showUpload, setShowUpload] = useState(false)
   const [chunkSize, setChunkSize] = useState('10m')
-  const [concurrency, setConcurrency] = useState<number | 'auto'>(4)
+  const [concurrency, setConcurrency] = useState<number | 'auto'>(16) // 多人并发上传建议与 server 一致
   const [compression, setCompression] = useState<'none' | 'zstd'>('none')
   const [configOpen, setConfigOpen] = useState(false)
 

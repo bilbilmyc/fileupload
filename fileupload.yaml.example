@@ -47,8 +47,16 @@ database:
 upload:
   session_ttl_minutes: 60     # 上传会话无活动超时（分钟）
   default_chunk_size: 10485760 # 默认分片大小（字节），10MB
-  worker_pool_size: 4         # 并发 worker 池大小
-  worker_queue_size: 100      # worker 排队上限
+  # worker_pool_size: 并发处理上传分片的 worker 数。
+  #   每个 worker 处理一个分片的写入+哈希。I/O 密集型。
+  #   单人上传：4-8。多人并发上传：建议 16-32。
+  #   设为 0 时自动按 CPU 核数 × 8 计算。
+  #   注意：多人高频并发建议使用 PostgreSQL（SQLite 写锁竞争可能导致延迟）。
+  worker_pool_size: 16
+  # worker_queue_size: 排队等待处理的分片数上限。
+  #   填满后新上传等待 5 秒返回 503（客户端自动重试）。
+  #   建议值 = worker_pool_size × 25。
+  worker_queue_size: 400
 
 download:
   max_archive_size: 0         # 目录打包大小上限（字节，0 = 不限）
