@@ -46,7 +46,7 @@ RUN mkdir -p /var/lib/fileupload/data /var/lib/fileupload/tmp && \
     chown -R fileupload:fileupload /var/lib/fileupload
 
 # 默认配置文件
-COPY fileupload.yaml /etc/fileupload/fileupload.yaml
+COPY fileupload.yaml.example /etc/fileupload/fileupload.yaml
 
 USER fileupload
 WORKDIR /var/lib/fileupload

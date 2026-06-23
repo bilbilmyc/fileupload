@@ -21,7 +21,7 @@ RUN if [ "$BINARY" = "server" ]; then \
 COPY fileupload-${BINARY} /usr/local/bin/fileupload-${BINARY}
 
 # 默认配置文件（仅 server 需要）
-COPY fileupload.yaml /etc/fileupload/fileupload.yaml
+COPY fileupload.yaml.example /etc/fileupload/fileupload.yaml
 
 # server 以非 root 运行
 USER fileupload
