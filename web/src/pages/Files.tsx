@@ -29,20 +29,24 @@ export default function Files() {
     loading,
     search,
     page,
+    total,
     parentID,
     selectedRowKeys,
     stats,
     breadcrumbItems,
-    paginatedFiles,
-    filteredFiles,
+    files,
+    typeFilter,
     setSearch,
     setPage,
+    setTypeFilter,
     setSelectedRowKeys,
     loadFiles,
     navigateToDir,
     navigateUp,
     handleDownload,
     handleDelete,
+    handleRename,
+    handleSortChange,
   } = useFileOperations()
 
   // Upload hook
@@ -84,7 +88,7 @@ export default function Files() {
     setPreviewFile({ id: record.file_id, name: record.name, size: record.size })
   }, [])
 
-  const selectedFiles = filteredFiles.filter(f => selectedRowKeys.includes(f.file_id))
+  const selectedFiles = files.filter(f => selectedRowKeys.includes(f.file_id))
 
   // ---- Batch operation handlers ----
 
@@ -195,7 +199,9 @@ export default function Files() {
     <Layout className="min-h-screen bg-gray-50 dark:bg-gray-900">
       <TopBar
         search={search}
+        typeFilter={typeFilter}
         onSearchChange={setSearch}
+        onTypeFilterChange={setTypeFilter}
         onRefresh={loadFiles}
         onOpenSettings={() => setConfigOpen(true)}
       />

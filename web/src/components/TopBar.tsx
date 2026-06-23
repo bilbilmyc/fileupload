@@ -1,4 +1,4 @@
-import { Input, Button, Space, Tooltip, Typography } from 'antd'
+import { Input, Button, Space, Tooltip, Typography, Select } from 'antd'
 import {
   ReloadOutlined,
   SettingOutlined,
@@ -13,14 +13,18 @@ const { Title, Text } = Typography
 
 interface TopBarProps {
   search: string
+  typeFilter: string
   onSearchChange: (value: string) => void
+  onTypeFilterChange: (value: string) => void
   onRefresh: () => void
   onOpenSettings: () => void
 }
 
 export default function TopBar({
   search,
+  typeFilter,
   onSearchChange,
+  onTypeFilterChange,
   onRefresh,
   onOpenSettings,
 }: TopBarProps) {
@@ -49,6 +53,17 @@ export default function TopBar({
           onChange={(e) => onSearchChange(e.target.value)}
           className="!w-[120px] sm:!w-[200px]"
           allowClear
+        />
+        <Select
+          size="small"
+          value={typeFilter}
+          onChange={onTypeFilterChange}
+          className="!w-[80px]"
+          options={[
+            { value: '', label: '全部' },
+            { value: 'dir', label: '目录' },
+            { value: 'file', label: '文件' },
+          ]}
         />
         <Input
           size="small"

@@ -1,11 +1,13 @@
-import { Table, Space, Tag, Button, Tooltip, Typography, Popconfirm, Spin } from 'antd'
+import { Table, Space, Tag, Button, Tooltip, Typography, Popconfirm, Spin, Input } from 'antd'
 import type React from 'react'
+import { useState } from 'react'
 import {
   DownloadOutlined,
   DeleteOutlined,
   FolderOutlined,
   FileOutlined,
   EyeOutlined,
+  EditOutlined,
   FileImageOutlined,
   FilePdfOutlined,
   FileWordOutlined,
@@ -26,32 +28,24 @@ function getFileIcon(name: string, isDir: boolean): { icon: React.ReactNode; col
 
   const ext = name.split('.').pop()?.toLowerCase() || ''
 
-  // 图片
   if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp', 'ico'].includes(ext)) {
     return { icon: <FileImageOutlined />, color: '#52c41a' }
   }
-  // PDF
   if (ext === 'pdf') return { icon: <FilePdfOutlined />, color: '#f5222d' }
-  // 文档
   if (['doc', 'docx'].includes(ext)) return { icon: <FileWordOutlined />, color: '#1677ff' }
   if (['xls', 'xlsx', 'csv'].includes(ext)) return { icon: <FileExcelOutlined />, color: '#52c41a' }
   if (['ppt', 'pptx'].includes(ext)) return { icon: <FileTextOutlined />, color: '#fa8c16' }
-  // Markdown / 文本
   if (['md', 'markdown'].includes(ext)) return { icon: <FileMarkdownOutlined />, color: '#1677ff' }
   if (['txt', 'log'].includes(ext)) return { icon: <FileTextOutlined />, color: '#8c8c8c' }
-  // 压缩包
   if (['zip', 'tar', 'gz', 'bz2', 'xz', '7z', 'rar'].includes(ext)) {
     return { icon: <FileZipOutlined />, color: '#fa8c16' }
   }
-  // 代码
   if (['js', 'jsx', 'ts', 'tsx', 'go', 'py', 'rb', 'rs', 'java', 'c', 'cpp', 'h', 'hpp', 'cs', 'swift', 'kt', 'sh', 'bash', 'css', 'scss', 'less', 'sql', 'html', 'htm', 'json', 'xml', 'yaml', 'yml', 'toml'].includes(ext)) {
     return { icon: <CodeOutlined />, color: '#722ed1' }
   }
-  // 视频
   if (['mp4', 'webm', 'avi', 'mov', 'mkv'].includes(ext)) {
     return { icon: <PlayCircleOutlined />, color: '#eb2f96' }
   }
-  // 音频
   if (['mp3', 'wav', 'ogg', 'flac', 'aac', 'm4a'].includes(ext)) {
     return { icon: <SoundOutlined />, color: '#1677ff' }
   }
@@ -81,6 +75,8 @@ interface FileTableProps {
   onDownload: (record: FileItem) => void
   onDelete: (record: FileItem) => void
   onPreview?: (record: FileItem) => void
+  onRename?: (record: FileItem, newName: string) => void
+  onSortChange?: (field: string, order: string) => void
 }
 
 export default function FileTable({
@@ -98,11 +94,29 @@ export default function FileTable({
   onDownload,
   onDelete,
   onPreview,
+  onRename,
+  onSortChange,
 }: FileTableProps) {
+  const [renamingId, setRenamingId] = useState<string | null>(null)
+  const [renameValue, setRenameValue] = useState('')
+
+  const handleRenameStart = (record: FileItem) => {
+    setRenamingId(record.file_id)
+    setRenameValue(record.name)
+  }
+
+  const handleRenameConfirm = () => {
+    if (renamingId && renameValue.trim() && onRename) {
+      onRename({ file_id: renamingId, name: renameValue } as any, renameValue.trim())
+    }
+    setRenamingId(null)
+  }
+
   const columns = [
     {
       title: '名称',
       dataIndex: 'name',
+      sorter: true,
       ellipsis: true,
       render: (_: any, record: any) => {
         const fi = record.file_id === '__parent__' ? { icon: <FolderOutlined />, color: '#bfbfbf' } : getFileIcon(record.name, record.is_dir)
@@ -131,6 +145,7 @@ export default function FileTable({
     {
       title: '大小',
       dataIndex: 'size',
+      sorter: true,
       width: 100,
       align: 'right' as const,
       render: (size: number) => (
@@ -147,22 +162,36 @@ export default function FileTable({
       ),
     },
     {
-      title: 'SHA256',
-      dataIndex: 'sha256',
-      width: 110,
-      render: (sha: string, record: any) => {
+      title: '修改时间',
+      dataIndex: 'created_at',
+      sorter: true,
+      width: 160,
+      render: (date: string, record: any) => {
         if (record.file_id === '__parent__') return <Text className="text-xs text-gray-300">-</Text>
-        return sha
-          ? <Tooltip title={sha}><Tag className="text-xs font-mono">{sha.slice(0, 8)}</Tag></Tooltip>
-          : <Text className="text-xs text-gray-300">-</Text>
+        return <Text className="text-xs text-gray-500">{date ? new Date(date).toLocaleString() : '-'}</Text>
       },
     },
     {
       title: '操作',
-      width: 120,
+      width: 160,
       render: (_: any, record: any) => {
         if (record.file_id === '__parent__') return null
         const showPreview = onPreview && !record.is_dir
+
+        if (renamingId === record.file_id) {
+          return (
+            <Input
+              size="small"
+              value={renameValue}
+              onChange={e => setRenameValue(e.target.value)}
+              onPressEnter={handleRenameConfirm}
+              onBlur={handleRenameConfirm}
+              autoFocus
+              style={{ width: 140 }}
+            />
+          )
+        }
+
         return <Space size="small">
           {showPreview && (
             <Tooltip title="预览">
@@ -172,6 +201,11 @@ export default function FileTable({
           <Tooltip title="下载">
             <Button type="text" icon={<DownloadOutlined />} size="small" onClick={() => onDownload(record)} />
           </Tooltip>
+          {onRename && (
+            <Tooltip title="重命名">
+              <Button type="text" icon={<EditOutlined />} size="small" onClick={() => handleRenameStart(record)} />
+            </Tooltip>
+          )}
           <Popconfirm title="确认删除？" onConfirm={() => onDelete(record)}>
             <Tooltip title="删除">
               <Button type="text" icon={<DeleteOutlined />} size="small" danger />
@@ -182,7 +216,6 @@ export default function FileTable({
     },
   ]
 
-  // 在非根目录时，添加"返回上级"条目到列表头部
   const parentDirEntry = parentFileId !== null && parentFileId !== undefined ? [{
     file_id: '__parent__',
     name: '..',
@@ -192,12 +225,20 @@ export default function FileTable({
 
   const dataSource = [...parentDirEntry, ...files]
 
+  const handleTableChange = (_pagination: any, _filters: any, sorter: any) => {
+    if (onSortChange && sorter.field) {
+      const order = sorter.order || ''
+      onSortChange(sorter.field, order)
+    }
+  }
+
   return (
     <Spin spinning={loading}>
       <Table
         rowKey="file_id"
         dataSource={dataSource}
         columns={columns}
+        onChange={handleTableChange}
         pagination={{
           current: page,
           pageSize,

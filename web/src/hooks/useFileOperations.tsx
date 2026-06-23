@@ -15,22 +15,40 @@ export function useFileOperations(_namespace?: string) {
   const [files, setFiles] = useState<FileItem[]>([])
   const [loading, setLoading] = useState(false)
   const [currentDir, setCurrentDir] = useState<string>('/')
-  const requestIdRef = useRef(0) // 用于丢弃过期请求的结果
+  const requestIdRef = useRef(0)
   const [parentName, setParentName] = useState<string>('')
   const [parentID, setParentID] = useState<string | null>(null)
-  const [ancestors, setAncestors] = useState<FileItem[]>([]) // 上级目录 ID，用于"上一级"
+  const [ancestors, setAncestors] = useState<FileItem[]>([])
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
+  const [total, setTotal] = useState(0)
+  const [sortBy, setSortBy] = useState('name')
+  const [sortOrder, setSortOrder] = useState('asc')
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([])
+  const [typeFilter, setTypeFilter] = useState<string>('')
 
   const loadFiles = useCallback(async () => {
     const requestId = ++requestIdRef.current
+    const perPage = 50
     setLoading(true)
     try {
-      const res = await api.listFiles(currentDir, search || undefined)
-      // 检查是否是最新的请求——过期请求的结果丢弃，防止竞态覆盖正确状态
+      const res = await api.listFiles({
+        parent: currentDir,
+        search: search || undefined,
+        page,
+        per_page: perPage,
+        sort_by: sortBy,
+        sort_order: sortOrder,
+      })
       if (requestId !== requestIdRef.current) return
-      setFiles(res.children || [])
+
+      let items = res.children || []
+      // 客户端类型筛选（可选）
+      if (typeFilter === 'dir') items = items.filter(f => f.is_dir)
+      else if (typeFilter === 'file') items = items.filter(f => !f.is_dir)
+
+      setFiles(items)
+      setTotal(res.total || items.length)
       if (res.dir && typeof res.dir === 'object' && 'name' in res.dir) {
         const d = res.dir as any
         setParentName(d.name as string)
@@ -45,12 +63,12 @@ export function useFileOperations(_namespace?: string) {
     } finally {
       setLoading(false)
     }
-    setPage(1)
     setSelectedRowKeys([])
-  }, [currentDir, search])
+  }, [currentDir, search, page, sortBy, sortOrder, typeFilter])
 
   const navigateToDir = useCallback((dirId: string) => {
     setCurrentDir(dirId)
+    setPage(1)
   }, [])
 
   const navigateUp = useCallback(() => {
@@ -59,27 +77,18 @@ export function useFileOperations(_namespace?: string) {
     } else {
       setCurrentDir('/')
     }
+    setPage(1)
   }, [parentID])
 
   const navigateToRoot = useCallback(() => {
     setCurrentDir('/')
+    setPage(1)
   }, [])
-
-  const filteredFiles = useMemo(() => {
-    if (!search) return files
-    return files.filter((f) =>
-      f.name.toLowerCase().includes(search.toLowerCase())
-    )
-  }, [files, search])
-
-  const paginatedFiles = useMemo(() => {
-    const start = (page - 1) * PAGE_SIZE
-    return filteredFiles.slice(start, start + PAGE_SIZE)
-  }, [filteredFiles, page])
 
   const stats = useMemo<FileStats>(() => {
     let d = 0, f = 0, totalSize = 0
-    for (const item of files) {
+    const allFiles = files
+    for (const item of allFiles) {
       if (item.is_dir) d++
       else { f++; totalSize += item.size }
     }
@@ -88,7 +97,6 @@ export function useFileOperations(_namespace?: string) {
 
   const breadcrumbItems = useMemo(() => {
     const items: any[] = []
-    // 祖先链：从根到当前目录的完整路径
     if (ancestors && ancestors.length > 0) {
       for (let i = 0; i < ancestors.length; i++) {
         const a = ancestors[i]
@@ -106,7 +114,6 @@ export function useFileOperations(_namespace?: string) {
         })
       }
     } else {
-      // 根目录
       items.push({
         title: (
           <span className="text-gray-700 font-medium">
@@ -163,6 +170,22 @@ export function useFileOperations(_namespace?: string) {
     loadFiles()
   }, [files, selectedRowKeys, loadFiles])
 
+  const handleRename = useCallback(async (record: FileItem, newName: string) => {
+    try {
+      await api.renameFile(record.file_id, newName)
+      message.success('已重命名')
+      loadFiles()
+    } catch (e: any) {
+      message.error(`重命名失败: ${e.message}`)
+    }
+  }, [loadFiles])
+
+  const handleSortChange = useCallback((field: string, order: string) => {
+    setSortBy(field)
+    setSortOrder(order === 'ascend' ? 'asc' : order === 'descend' ? 'desc' : 'asc')
+    setPage(1)
+  }, [])
+
   return {
     files,
     loading,
@@ -171,13 +194,18 @@ export function useFileOperations(_namespace?: string) {
     parentID,
     search,
     page,
+    total,
+    sortBy,
+    sortOrder,
+    typeFilter,
     selectedRowKeys,
     stats,
     breadcrumbItems,
-    filteredFiles,
-    paginatedFiles,
     setSearch,
     setPage,
+    setSortBy,
+    setSortOrder,
+    setTypeFilter,
     setSelectedRowKeys,
     loadFiles,
     navigateToDir,
@@ -186,5 +214,7 @@ export function useFileOperations(_namespace?: string) {
     handleDownload,
     handleDelete,
     handleBatchDelete,
+    handleRename,
+    handleSortChange,
   }
 }

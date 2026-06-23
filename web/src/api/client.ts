@@ -32,6 +32,9 @@ export interface ListResult {
   dir: FileItem | null
   children: FileItem[]
   ancestors?: FileItem[]
+  total?: number
+  page?: number
+  per_page?: number
 }
 
 export interface UploadInitResult {
@@ -60,9 +63,22 @@ export async function checkHealth(): Promise<boolean> {
   }
 }
 
-export async function listFiles(parent: string = '/', search?: string): Promise<ListResult> {
-  const params: Record<string, string> = { parent }
-  if (search) params.search = search
+export interface ListFilesParams {
+  parent?: string
+  search?: string
+  page?: number
+  per_page?: number
+  sort_by?: string
+  sort_order?: string
+}
+
+export async function listFiles(opts: ListFilesParams = {}): Promise<ListResult> {
+  const params: Record<string, string> = { parent: opts.parent || '/' }
+  if (opts.search) params.search = opts.search
+  if (opts.page) params.page = String(opts.page)
+  if (opts.per_page) params.per_page = String(opts.per_page)
+  if (opts.sort_by) params.sort_by = opts.sort_by
+  if (opts.sort_order) params.sort_order = opts.sort_order
   const r = await axiosInstance.get('/v1/ls', { params })
   return r.data
 }
@@ -141,6 +157,10 @@ export function downloadFileUrl(id: string): string {
 
 export function downloadDirUrl(id: string, format: string = 'tar.gz'): string {
   return `/v1/dirs/${id}?format=${format}`
+}
+
+export async function renameFile(id: string, name: string): Promise<void> {
+  await axiosInstance.patch(`/v1/files/${id}`, { name })
 }
 
 export function previewFileUrl(id: string): string {
