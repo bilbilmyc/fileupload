@@ -130,6 +130,7 @@ release: clean web server-linux-amd64 server-linux-arm64 server-darwin-amd64 ser
 	@echo ""
 	@echo "✓ 全平台编译完成"
 	@ls -lh $(OUTPUT_DIR)/
+	@$(MAKE) web-placeholder --no-print-directory 2>/dev/null
 
 # ---- Docker ----
 
