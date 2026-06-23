@@ -411,6 +411,14 @@ func containsIgnoreCase(s, substr string) bool {
 	return false
 }
 
+// ===== Mock AdminStore =====
+
+func (m *mockMetadata) WriteAuditLog(_ context.Context, _ *AuditLogEntry) error { return nil }
+func (m *mockMetadata) ListAuditLogs(_ context.Context, _, _ int) ([]*AuditLogEntry, int, error) { return nil, 0, nil }
+func (m *mockMetadata) AdminCountFiles(_ context.Context) (int, error) { return len(m.files), nil }
+func (m *mockMetadata) AdminCountBlobs(_ context.Context) (int, error) { return len(m.blobs), nil }
+func (m *mockMetadata) AdminTotalBlobSize(_ context.Context) (int64, error) { return 0, nil }
+
 func (m *mockMetadata) hasBlob(sha256 string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()

@@ -102,6 +102,11 @@ func (m *mockMeta) ListAllBlobs(_ context.Context) ([]*domain.ContentBlob, error
 	var b []*domain.ContentBlob; for _, v := range m.blobs { b = append(b, v) }; return b, nil }
 func (m *mockMeta) ListAllFiles(_ context.Context) ([]*domain.FileMetadata, error) {
 	var f []*domain.FileMetadata; for _, v := range m.files { f = append(f, v) }; return f, nil }
+func (m *mockMeta) WriteAuditLog(_ context.Context, _ *domain.AuditLogEntry) error { return nil }
+func (m *mockMeta) ListAuditLogs(_ context.Context, _, _ int) ([]*domain.AuditLogEntry, int, error) { return nil, 0, nil }
+func (m *mockMeta) AdminCountFiles(_ context.Context) (int, error) { return 0, nil }
+func (m *mockMeta) AdminCountBlobs(_ context.Context) (int, error) { return 0, nil }
+func (m *mockMeta) AdminTotalBlobSize(_ context.Context) (int64, error) { return 0, nil }
 
 // mockStore implements domain.Storage (thread-safe via sync.Mutex)
 type mockStore struct {

@@ -115,6 +115,11 @@ func (m *mockMeta) ListAllFiles(_ context.Context) ([]*domain.FileMetadata, erro
 	}
 	return files, nil
 }
+func (m *mockMeta) WriteAuditLog(_ context.Context, _ *domain.AuditLogEntry) error { return nil }
+func (m *mockMeta) ListAuditLogs(_ context.Context, _, _ int) ([]*domain.AuditLogEntry, int, error) { return nil, 0, nil }
+func (m *mockMeta) AdminCountFiles(_ context.Context) (int, error) { return len(m.files), nil }
+func (m *mockMeta) AdminCountBlobs(_ context.Context) (int, error) { return len(m.blobs), nil }
+func (m *mockMeta) AdminTotalBlobSize(_ context.Context) (int64, error) { return 0, nil }
 
 // ===== In-memory mock Storage =====
 
@@ -304,6 +309,11 @@ func (e *errorMeta) ReparentFile(_ context.Context, _ string, _ *string, _ strin
 func (e *errorMeta) UpdateFileParent(_ context.Context, _ string, _ *string) error { return nil }
 func (e *errorMeta) ListAllBlobs(_ context.Context) ([]*domain.ContentBlob, error) { return nil, fmt.Errorf("fail") }
 func (e *errorMeta) ListAllFiles(_ context.Context) ([]*domain.FileMetadata, error) { return nil, nil }
+func (e *errorMeta) WriteAuditLog(_ context.Context, _ *domain.AuditLogEntry) error { return fmt.Errorf("fail") }
+func (e *errorMeta) ListAuditLogs(_ context.Context, _, _ int) ([]*domain.AuditLogEntry, int, error) { return nil, 0, fmt.Errorf("fail") }
+func (e *errorMeta) AdminCountFiles(_ context.Context) (int, error) { return 0, fmt.Errorf("fail") }
+func (e *errorMeta) AdminCountBlobs(_ context.Context) (int, error) { return 0, fmt.Errorf("fail") }
+func (e *errorMeta) AdminTotalBlobSize(_ context.Context) (int64, error) { return 0, fmt.Errorf("fail") }
 
 func TestCleanupOrphanParts_GetSessionError(t *testing.T) {
 	meta := &errorMeta{}

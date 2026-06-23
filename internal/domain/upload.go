@@ -15,7 +15,11 @@ import (
 // 处理上传会话生命周期、秒传预检、分片追加、Finalize 合并+解压+校验、
 // content_blobs 去重写入、目录 manifest 提交、删除去重。
 type UploadService struct {
-	meta        Metadata
+	meta        interface {
+		SessionStore
+		BlobStore
+		FileStore
+	}
 	storage     Storage
 	tempStorage Storage // 临时分片专用存储（根目录 = TempDir）
 	compress    Compressor
@@ -32,7 +36,11 @@ type UploadConfig struct {
 }
 
 // NewUploadService 创建上传服务
-func NewUploadService(meta Metadata, storage Storage, tempStorage Storage, compress Compressor, hasher Hasher, pool WorkerPool, cfg UploadConfig) *UploadService {
+func NewUploadService(meta interface {
+	SessionStore
+	BlobStore
+	FileStore
+}, storage Storage, tempStorage Storage, compress Compressor, hasher Hasher, pool WorkerPool, cfg UploadConfig) *UploadService {
 	return &UploadService{
 		meta:        meta,
 		storage:     storage,

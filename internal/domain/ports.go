@@ -33,50 +33,61 @@ type Storage interface {
 	Walk(ctx context.Context, fn func(path string, info fs.FileInfo) error) error
 }
 
-// ---------- Metadata 端口 ----------
+// ---------- Metadata 端口（拆分后子接口） ----------
 
-// Metadata 元数据存储抽象（Redis 热数据 + DB 冷数据）
-type Metadata interface {
-	// === 热数据：上传会话（Redis） ===
+// SessionStore 上传会话热数据接口（Redis）
+type SessionStore interface {
 	CreateSession(ctx context.Context, s *UploadSession) error
 	GetSession(ctx context.Context, id string) (*UploadSession, error)
 	UpdateOffset(ctx context.Context, id string, sliceIndex int, sliceSha string, addBytes int64) error
 	ListChunks(ctx context.Context, id string) ([]ChunkInfo, error)
 	DeleteSession(ctx context.Context, id string) error
 	TouchSession(ctx context.Context, id string, ttl time.Duration) error
-	ListExpiredSessions(ctx context.Context) ([]string, error) // reaper 用
+	ListExpiredSessions(ctx context.Context) ([]string, error)
+}
 
-	// === 冷数据：已完成文件（DB） ===
-	// 内容寻址去重
+// BlobStore 内容寻址去重数据接口
+type BlobStore interface {
 	GetBlobBySha(ctx context.Context, sha256 string) (*ContentBlob, error)
 	PutBlob(ctx context.Context, b *ContentBlob) error
 	IncrBlobRef(ctx context.Context, sha256 string) error
 	DecrBlobRef(ctx context.Context, sha256 string) (newCount int, err error)
+	UpdateBlobStorage(ctx context.Context, sha256 string, storagePath string) error
+}
 
-	// 文件节点（逻辑文件 + 目录树）
+// FileStore 文件和目录树接口
+type FileStore interface {
 	PutFile(ctx context.Context, f *FileMetadata) error
 	GetFile(ctx context.Context, id string) (*FileMetadata, error)
 	GetFileByPath(ctx context.Context, namespace, path string) (*FileMetadata, error)
 	ListChildren(ctx context.Context, parentID string, search string) ([]*FileMetadata, error)
+	ListRoot(ctx context.Context, namespace string, search string) ([]*FileMetadata, error)
 	DeleteFile(ctx context.Context, id string) error
-	ListFilesByBlob(ctx context.Context, sha256 string) ([]*FileMetadata, error) // 引用统计
-
-	// 标签管理
+	ListFilesByBlob(ctx context.Context, sha256 string) ([]*FileMetadata, error)
+	ReparentFile(ctx context.Context, fileID string, parentID *string, path string) error
+	UpdateFileParent(ctx context.Context, fileID string, parentID *string) error
 	SetFileTags(ctx context.Context, fileID string, tags []string) error
 	GetFileTags(ctx context.Context, fileID string) ([]string, error)
 	DeleteFileTags(ctx context.Context, fileID string) error
+}
 
-	// 批量管理
-	UpdateFileParent(ctx context.Context, fileID string, parentID *string) error // parentID nil → 根目录
-	UpdateBlobStorage(ctx context.Context, sha256 string, storagePath string) error // 更新 blob 物理路径
-	ReparentFile(ctx context.Context, fileID string, parentID *string, path string) error // 更新父目录+路径
-
-	// 列目录（根目录 children 为空）
-	ListRoot(ctx context.Context, namespace string, search string) ([]*FileMetadata, error)
-
-	// 一致性巡检
+// AdminStore 管理后台接口（审计日志 + 计数 + 巡检）
+type AdminStore interface {
+	WriteAuditLog(ctx context.Context, entry *AuditLogEntry) error
+	ListAuditLogs(ctx context.Context, page, perPage int) ([]*AuditLogEntry, int, error)
+	AdminCountFiles(ctx context.Context) (int, error)
+	AdminCountBlobs(ctx context.Context) (int, error)
+	AdminTotalBlobSize(ctx context.Context) (int64, error)
 	ListAllBlobs(ctx context.Context) ([]*ContentBlob, error)
 	ListAllFiles(ctx context.Context) ([]*FileMetadata, error)
+}
+
+// Metadata 完整元数据接口（组合全部子接口，向前兼容）
+type Metadata interface {
+	SessionStore
+	BlobStore
+	FileStore
+	AdminStore
 }
 
 // ---------- Compressor 端口 ----------
