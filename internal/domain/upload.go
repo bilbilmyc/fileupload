@@ -525,6 +525,22 @@ func (s *UploadService) DeleteDir(ctx context.Context, dirID string, recursive b
 
 // MoveFile 将单个文件移动到目标目录
 // 实现 FileMover 接口。
+// Rename 重命名文件/目录
+// 更新 name 和 path，保持 namespace 不变
+func (s *UploadService) Rename(ctx context.Context, fileID, newName, newPath, namespace string) error {
+	file, err := s.meta.GetFile(ctx, fileID)
+	if err != nil {
+		return fmt.Errorf("获取文件: %w", err)
+	}
+	if file == nil {
+		return ErrNotFound
+	}
+	if file.Namespace != namespace {
+		return ErrForbidden
+	}
+	return s.meta.RenameFile(ctx, fileID, newName, newPath)
+}
+
 func (s *UploadService) MoveFile(ctx context.Context, fileID, targetDirID, namespace string) error {
 	file, err := s.meta.GetFile(ctx, fileID)
 	if err != nil {

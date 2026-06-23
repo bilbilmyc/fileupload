@@ -101,6 +101,8 @@ func (m *mockMeta) GetFileTags(_ context.Context, _ string) ([]string, error) { 
 func (m *mockMeta) DeleteFileTags(_ context.Context, _ string) error { return nil }
 func (m *mockMeta) ReparentFile(_ context.Context, _ string, _ *string, _ string) error { return nil }
 func (m *mockMeta) UpdateFileParent(_ context.Context, _ string, _ *string) error { return nil }
+func (m *mockMeta) RenameFile(_ context.Context, _, _, _ string) error { return nil }
+
 func (m *mockMeta) ListAllBlobs(_ context.Context) ([]*domain.ContentBlob, error) {
 	var blobs []*domain.ContentBlob
 	for _, b := range m.blobs {
@@ -307,6 +309,8 @@ func (e *errorMeta) GetFileTags(_ context.Context, _ string) ([]string, error) {
 func (e *errorMeta) DeleteFileTags(_ context.Context, _ string) error { return nil }
 func (e *errorMeta) ReparentFile(_ context.Context, _ string, _ *string, _ string) error { return nil }
 func (e *errorMeta) UpdateFileParent(_ context.Context, _ string, _ *string) error { return nil }
+func (e *errorMeta) RenameFile(_ context.Context, _, _, _ string) error { return nil }
+
 func (e *errorMeta) ListAllBlobs(_ context.Context) ([]*domain.ContentBlob, error) { return nil, fmt.Errorf("fail") }
 func (e *errorMeta) ListAllFiles(_ context.Context) ([]*domain.FileMetadata, error) { return nil, nil }
 func (e *errorMeta) WriteAuditLog(_ context.Context, _ *domain.AuditLogEntry) error { return fmt.Errorf("fail") }

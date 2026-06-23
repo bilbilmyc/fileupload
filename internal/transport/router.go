@@ -101,6 +101,7 @@ func (r *Router) registerRoutes() {
 
 	// === 目录管理 ===
 	r.mux.HandleFunc("POST /v1/dirs", r.rest.SubmitDir)
+	r.mux.HandleFunc("PATCH /v1/files/{id}", r.rest.RenameFile)
 	r.mux.HandleFunc("DELETE /v1/files/{id}", r.rest.DeleteFile)
 	r.mux.HandleFunc("DELETE /v1/dirs/{id}", r.rest.DeleteFile)
 	r.mux.HandleFunc("GET /v1/ls", r.rest.ListDir)

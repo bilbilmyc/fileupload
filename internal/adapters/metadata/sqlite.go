@@ -297,6 +297,11 @@ func (s *SQLiteStore) ListAllFiles(_ context.Context) ([]*domain.FileMetadata, e
 
 // ========== 标签管理 ==========
 
+func (s *SQLiteStore) RenameFile(_ context.Context, fileID, newName, newPath string) error {
+	_, err := s.db.ExecContext(context.Background(), "UPDATE files SET name=?, path=? WHERE file_id=?", newName, newPath, fileID)
+	return err
+}
+
 func (s *SQLiteStore) SetFileTags(_ context.Context, fileID string, tags []string) error {
 	tx, err := s.db.Begin()
 	if err != nil {

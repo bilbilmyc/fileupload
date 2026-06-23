@@ -242,6 +242,11 @@ func (s *PostgresStore) ListExpiredSessions(ctx context.Context) ([]string, erro
 
 // ========== 标签管理 ==========
 
+func (s *PostgresStore) RenameFile(ctx context.Context, fileID, newName, newPath string) error {
+	_, err := s.db.ExecContext(ctx, "UPDATE files SET name=$1, path=$2 WHERE file_id=$3", newName, newPath, fileID)
+	return err
+}
+
 func (s *PostgresStore) SetFileTags(ctx context.Context, fileID string, tags []string) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {

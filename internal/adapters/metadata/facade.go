@@ -53,6 +53,7 @@ type ColdStore interface {
 	AdminCountBlobs(ctx context.Context) (int, error)
 	AdminTotalBlobSize(ctx context.Context) (int64, error)
 
+	RenameFile(ctx context.Context, fileID, newName, newPath string) error
 	Close() error
 }
 
@@ -151,6 +152,10 @@ func (f *Facade) ListRoot(ctx context.Context, namespace string, search string) 
 
 func (f *Facade) UpdateBlobStorage(ctx context.Context, sha256 string, storagePath string) error {
 	return f.cold.UpdateBlobStorage(ctx, sha256, storagePath)
+}
+
+func (f *Facade) RenameFile(ctx context.Context, fileID, newName, newPath string) error {
+	return f.cold.RenameFile(ctx, fileID, newName, newPath)
 }
 
 func (f *Facade) SetFileTags(ctx context.Context, fileID string, tags []string) error {

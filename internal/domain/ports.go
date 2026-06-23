@@ -66,6 +66,7 @@ type FileStore interface {
 	ListFilesByBlob(ctx context.Context, sha256 string) ([]*FileMetadata, error)
 	ReparentFile(ctx context.Context, fileID string, parentID *string, path string) error
 	UpdateFileParent(ctx context.Context, fileID string, parentID *string) error
+	RenameFile(ctx context.Context, fileID, newName, newPath string) error
 	SetFileTags(ctx context.Context, fileID string, tags []string) error
 	GetFileTags(ctx context.Context, fileID string) ([]string, error)
 	DeleteFileTags(ctx context.Context, fileID string) error

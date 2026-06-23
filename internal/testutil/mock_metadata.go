@@ -226,6 +226,16 @@ func (m *MockMetadata) ListFilesByBlob(_ context.Context, sha256 string) ([]*dom
 	return refs, nil
 }
 
+func (m *MockMetadata) RenameFile(_ context.Context, fileID, newName, newPath string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if f, ok := m.Files[fileID]; ok {
+		f.Name = newName
+		f.Path = newPath
+	}
+	return nil
+}
+
 func (m *MockMetadata) SetFileTags(_ context.Context, fileID string, tags []string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

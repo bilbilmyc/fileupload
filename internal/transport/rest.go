@@ -187,6 +187,31 @@ func (h *RESTHandler) ListDir(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// RenameFile PATCH /v1/files/{id} — 重命名文件/目录
+func (h *RESTHandler) RenameFile(w http.ResponseWriter, r *http.Request) {
+	fileID := r.PathValue("id")
+	if fileID == "" {
+		respondError(w, http.StatusBadRequest, domain.ErrInvalidArgument)
+		return
+	}
+
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := decodeJSON(r.Body, &req); err != nil || req.Name == "" {
+		respondError(w, http.StatusBadRequest, domain.ErrInvalidArgument)
+		return
+	}
+
+	namespace := GetNamespace(r.Context())
+	if err := h.uploadSvc.Rename(r.Context(), fileID, req.Name, req.Name, namespace); err != nil {
+		respondError(w, domainErrorToStatus(err), err)
+		return
+	}
+
+	respondJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
 // StatFile GET /v1/stat/{id}
 func (h *RESTHandler) StatFile(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
