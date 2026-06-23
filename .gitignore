@@ -25,6 +25,9 @@ Thumbs.db
 .env.local
 *.exe
 
+# 运行时配置文件（含敏感信息，参见 fileupload.yaml.example）
+fileupload.yaml
+
 # 前端
 web/node_modules/
 # web/dist 为构建产物，仅保留占位 index.html（见 .gitignore 规则）
