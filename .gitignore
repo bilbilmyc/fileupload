@@ -36,3 +36,4 @@ web/dist/*.js
 web/dist/*.css
 web/dist/*.map
 web/dist/vite.svg
+web/dist/index.html

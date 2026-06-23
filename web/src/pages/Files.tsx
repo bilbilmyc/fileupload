@@ -246,11 +246,11 @@ export default function Files() {
             </div>
             <ErrorBoundary title="文件列表异常">
               <FileTable
-                files={paginatedFiles}
+                files={files}
                 loading={loading}
                 page={page}
                 pageSize={50}
-                total={filteredFiles.length}
+                total={total}
                 selectedRowKeys={selectedRowKeys}
                 parentFileId={parentID}
                 onPageChange={setPage}
@@ -260,6 +260,8 @@ export default function Files() {
                 onDownload={handleDownload}
                 onDelete={handleDelete}
                 onPreview={handlePreview}
+                onRename={handleRename}
+                onSortChange={handleSortChange}
               />
             </ErrorBoundary>
             <BatchToolbar

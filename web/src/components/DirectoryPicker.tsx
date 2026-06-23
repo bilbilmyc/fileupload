@@ -14,7 +14,7 @@ interface DirectoryPickerProps {
 
 async function loadChildren(parentId: string): Promise<DataNode[]> {
   try {
-    const res = await api.listFiles(parentId)
+    const res = await api.listFiles({parent: parentId})
     const dirs = (res.children || []).filter((c: FileItem) => c.is_dir)
     return dirs.map((d: FileItem) => ({
       key: d.file_id,

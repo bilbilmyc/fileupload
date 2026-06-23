@@ -3,7 +3,6 @@ import { message } from 'antd'
 import * as api from '../api/client'
 import type { FileItem } from '../api/client'
 
-const PAGE_SIZE = 50
 
 export interface FileStats {
   dirs: number
