@@ -19,7 +19,6 @@ func setupBatchTest(t *testing.T) (*BatchService, *mockMetadata, *mockStorage) {
 	uploadSvc := NewUploadService(meta, storage, storage, compress, hasher, wp, UploadConfig{
 		DataDir: "data", SessionTTL: time.Minute, DefaultChunkSize: 1024,
 	})
-	downloadSvc := NewDownloadService(meta, storage, compress, hasher, DownloadConfig{DataDir: "data"})
 
 	now := time.Now()
 	meta.PutFile(ctx, &FileMetadata{
@@ -36,7 +35,7 @@ func setupBatchTest(t *testing.T) (*BatchService, *mockMetadata, *mockStorage) {
 	storage.Write(ctx, "p1", bytes.NewReader(make([]byte, 100)))
 	storage.Write(ctx, "p2", bytes.NewReader(make([]byte, 200)))
 
-	return NewBatchService(uploadSvc, downloadSvc, meta, storage, compress), meta, storage
+	return NewBatchService(uploadSvc, meta, storage, compress), meta, storage
 }
 
 var ctx = context.Background()

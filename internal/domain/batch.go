@@ -11,21 +11,19 @@ import (
 
 // BatchService 批量操作编排
 type BatchService struct {
-	uploadSvc   *UploadService
-	downloadSvc *DownloadService
-	meta        Metadata
-	storage     Storage
-	compress    Compressor
+	uploadSvc *UploadService
+	meta      Metadata
+	storage   Storage
+	compress  Compressor
 }
 
 // NewBatchService 创建批量操作服务
-func NewBatchService(uploadSvc *UploadService, downloadSvc *DownloadService, meta Metadata, storage Storage, compress Compressor) *BatchService {
+func NewBatchService(uploadSvc *UploadService, meta Metadata, storage Storage, compress Compressor) *BatchService {
 	return &BatchService{
-		uploadSvc:   uploadSvc,
-		downloadSvc: downloadSvc,
-		meta:        meta,
-		storage:     storage,
-		compress:    compress,
+		uploadSvc: uploadSvc,
+		meta:      meta,
+		storage:   storage,
+		compress:  compress,
 	}
 }
 
