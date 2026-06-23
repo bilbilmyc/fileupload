@@ -16,6 +16,7 @@ import DirectoryPicker from '../components/DirectoryPicker'
 import BatchTagEditor from '../components/BatchTagEditor'
 import BatchHistoryPanel, { useBatchHistory } from '../components/BatchHistoryPanel'
 import FilePreview from '../components/FilePreview'
+import PropertiesPanel from '../components/PropertiesPanel'
 
 export default function Files() {
   const { namespace } = useAuth()
@@ -35,6 +36,7 @@ export default function Files() {
   const [tagEditorOpen, setTagEditorOpen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [previewFile, setPreviewFile] = useState<{ id: string; name: string; size: number } | null>(null)
+  const [propertiesFile, setPropertiesFile] = useState<any | null>(null)
 
   useEffect(() => { loadFiles() }, [loadFiles])
   useEffect(() => { loadFiles() }, [namespace]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -259,6 +261,10 @@ export default function Files() {
           onClose={() => setPreviewFile(null)}
         />
       )}
+      <PropertiesPanel
+        file={propertiesFile}
+        onClose={() => setPropertiesFile(null)}
+      />
     </div>
   )
 }

@@ -77,6 +77,7 @@ interface FileTableProps {
   onPreview?: (record: FileItem) => void
   onRename?: (record: FileItem, newName: string) => void
   onSortChange?: (field: string, order: string) => void
+  onShowProperties?: (record: FileItem) => void
 }
 
 export default function FileTable({
@@ -96,6 +97,7 @@ export default function FileTable({
   onPreview,
   onRename,
   onSortChange,
+  onShowProperties,
 }: FileTableProps) {
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
@@ -256,6 +258,8 @@ export default function FileTable({
               onNavigateUp()
             } else if (record.is_dir) {
               onNavigateToDir(record.file_id)
+            } else if (onShowProperties) {
+              onShowProperties(record)
             }
           },
           className: record.file_id === '__parent__' ? 'cursor-pointer hover:bg-gray-50' : 'cursor-pointer hover:bg-gray-50',
