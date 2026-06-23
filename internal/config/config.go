@@ -3,6 +3,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -56,10 +57,47 @@ type RedisConfig struct {
 	Prefix   string `json:"prefix" yaml:"prefix"`
 }
 
+// PGConfig PostgreSQL 连接配置（结构体形式，避免 DSN 转义问题）
+type PGConfig struct {
+	Host     string `json:"host" yaml:"host"`         // 主机地址，默认 localhost
+	Port     int    `json:"port" yaml:"port"`          // 端口，默认 5432
+	User     string `json:"user" yaml:"user"`          // 用户名
+	Password string `json:"password" yaml:"password"`  // 密码（无需 URI 转义）
+	DBName   string `json:"dbname" yaml:"dbname"`      // 数据库名
+	SSLMode  string `json:"sslmode" yaml:"sslmode"`    // sslmode，默认 disable
+}
+
+// BuildDSN 从结构体字段构建 PostgreSQL DSN 字符串
+// 使用 net/url.UserPassword 正确处理密码中的特殊字符（@、#、? 等）
+func (p PGConfig) BuildDSN() string {
+	host := p.Host
+	if host == "" {
+		host = "localhost"
+	}
+	port := p.Port
+	if port == 0 {
+		port = 5432
+	}
+	sslmode := p.SSLMode
+	if sslmode == "" {
+		sslmode = "disable"
+	}
+
+	u := &url.URL{
+		Scheme: "postgres",
+		User:   url.UserPassword(p.User, p.Password),
+		Host:   fmt.Sprintf("%s:%d", host, port),
+		Path:   p.DBName,
+		RawQuery: fmt.Sprintf("sslmode=%s", sslmode),
+	}
+	return u.String()
+}
+
 // DatabaseConfig 冷数据库配置
 type DatabaseConfig struct {
-	Type string `json:"type" yaml:"type"`   // sqlite / postgres
-	Path string `json:"path" yaml:"path"`   // SQLite 文件路径 或 PostgreSQL DSN
+	Type string   `json:"type" yaml:"type"` // sqlite / postgres
+	Path string   `json:"path" yaml:"path"` // SQLite 文件路径（仅 sqlite 模式）
+	PG   PGConfig `json:"pg" yaml:"pg"`     // PostgreSQL 连接配置（仅 postgres 模式）
 }
 
 // UploadConfig 上传服务配置
@@ -107,6 +145,14 @@ func DefaultConfig() Config {
 		Database: DatabaseConfig{
 			Type: "sqlite",
 			Path: "fileupload.db",
+			PG: PGConfig{
+				Host:     "localhost",
+				Port:     5432,
+				User:     "postgres",
+				Password: "",
+				DBName:   "fileupload",
+				SSLMode:  "disable",
+			},
 		},
 		Upload: UploadConfig{
 			SessionTTLMinutes: 60,
@@ -206,8 +252,31 @@ func loadEnv(cfg *Config) {
 	if v := os.Getenv("FILEUPLOAD_REDIS_PASSWORD"); v != "" {
 		cfg.Redis.Password = v
 	}
+	if v := os.Getenv("FILEUPLOAD_DATABASE_TYPE"); v != "" {
+		cfg.Database.Type = v
+	}
 	if v := os.Getenv("FILEUPLOAD_DB_PATH"); v != "" {
 		cfg.Database.Path = v
+	}
+	if v := os.Getenv("FILEUPLOAD_PG_HOST"); v != "" {
+		cfg.Database.PG.Host = v
+	}
+	if v := os.Getenv("FILEUPLOAD_PG_PORT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.Database.PG.Port = n
+		}
+	}
+	if v := os.Getenv("FILEUPLOAD_PG_USER"); v != "" {
+		cfg.Database.PG.User = v
+	}
+	if v := os.Getenv("FILEUPLOAD_PG_PASSWORD"); v != "" {
+		cfg.Database.PG.Password = v
+	}
+	if v := os.Getenv("FILEUPLOAD_PG_DBNAME"); v != "" {
+		cfg.Database.PG.DBName = v
+	}
+	if v := os.Getenv("FILEUPLOAD_PG_SSLMODE"); v != "" {
+		cfg.Database.PG.SSLMode = v
 	}
 	if v := os.Getenv("FILEUPLOAD_SESSION_TTL"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {

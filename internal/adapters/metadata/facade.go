@@ -41,6 +41,11 @@ type ColdStore interface {
 	ListAllBlobs(ctx context.Context) ([]*domain.ContentBlob, error)
 	ListAllFiles(ctx context.Context) ([]*domain.FileMetadata, error)
 
+	// 分享
+	CreateShare(ctx context.Context, token string, entry *domain.ShareEntry) error
+	GetShare(ctx context.Context, token string) (*domain.ShareEntry, error)
+	IncrDownloads(ctx context.Context, token string) error
+
 	// 审计日志
 	WriteAuditLog(ctx context.Context, entry *domain.AuditLogEntry) error
 	ListAuditLogs(ctx context.Context, page, perPage int) ([]*domain.AuditLogEntry, int, error)
@@ -168,6 +173,20 @@ func (f *Facade) ListAllBlobs(ctx context.Context) ([]*domain.ContentBlob, error
 
 func (f *Facade) ListAllFiles(ctx context.Context) ([]*domain.FileMetadata, error) {
 	return f.cold.ListAllFiles(ctx)
+}
+
+// ========== 分享 ==========
+
+func (f *Facade) CreateShare(ctx context.Context, token string, entry *domain.ShareEntry) error {
+	return f.cold.CreateShare(ctx, token, entry)
+}
+
+func (f *Facade) GetShare(ctx context.Context, token string) (*domain.ShareEntry, error) {
+	return f.cold.GetShare(ctx, token)
+}
+
+func (f *Facade) IncrDownloads(ctx context.Context, token string) error {
+	return f.cold.IncrDownloads(ctx, token)
 }
 
 // ========== 管理后台 ==========

@@ -294,16 +294,39 @@ func (s *PostgresStore) ReparentFile(ctx context.Context, fileID string, parentI
 		parentID, path, fileID)
 	return err
 }
-func strPtr(s string) *string {
-	if s == "" {
-		return nil
-	}
-	return &s
-}
 
 func (s *PostgresStore) UpdateFileParent(ctx context.Context, fileID string, parentID *string) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE files SET parent_id = $1 WHERE file_id = $2`,
 		parentID, fileID)
+	return err
+}
+
+// ========== 分享 ==========
+
+func (s *PostgresStore) CreateShare(ctx context.Context, token string, entry *domain.ShareEntry) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO shares (token, file_id, password_hash, expires_at, max_downloads, cur_downloads, namespace, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())`,
+		token, entry.FileID, entry.PasswordHash, entry.ExpiresAt, entry.MaxDownloads, entry.CurDownloads, entry.Namespace)
+	return err
+}
+
+func (s *PostgresStore) GetShare(ctx context.Context, token string) (*domain.ShareEntry, error) {
+	row := s.db.QueryRowContext(ctx, `SELECT token, file_id, password_hash, expires_at, max_downloads, cur_downloads, namespace, created_at FROM shares WHERE token = $1`, token)
+	var e domain.ShareEntry
+	var createdAt time.Time
+	err := row.Scan(&e.Token, &e.FileID, &e.PasswordHash, &e.ExpiresAt, &e.MaxDownloads, &e.CurDownloads, &e.Namespace, &createdAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	e.CreatedAt = createdAt.Format(time.RFC3339)
+	return &e, nil
+}
+
+func (s *PostgresStore) IncrDownloads(ctx context.Context, token string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE shares SET cur_downloads = cur_downloads + 1 WHERE token = $1`, token)
 	return err
 }
 

@@ -119,7 +119,7 @@ func main() {
 	// 3. 冷数据（SQLite / PostgreSQL）
 	var coldStore metadata.ColdStore
 	if cfg.Database.Type == "postgres" {
-		pgStore, err := metadata.NewPostgresStore(cfg.Database.Path)
+		pgStore, err := metadata.NewPostgresStore(cfg.Database.PG.BuildDSN())
 		if err != nil {
 			log.Fatalf("初始化 PostgreSQL: %v", err)
 		}
@@ -172,12 +172,18 @@ func main() {
 
 	scanner := lifecycle.NewConsistencyScanner(metaFacade, localFS, cfg.Storage.DataDir, cfg.Storage.TempDir)
 
+	// 数据库显示路径：SQLite 显示文件路径，PG 显示连接信息
+	dbDisplayPath := cfg.Database.Path
+	if cfg.Database.Type == "postgres" {
+		dbDisplayPath = cfg.Database.PG.BuildDSN()
+	}
+
 	// 健康检查器
 	healthChecker := &serverHealth{
 		redis:   rdb,
 		dataDir: cfg.Storage.DataDir,
 		tempDir: cfg.Storage.TempDir,
-		dbPath:  cfg.Database.Path,
+		dbPath:  dbDisplayPath,
 	}
 
 	// === 传输层 ===
@@ -201,9 +207,10 @@ func main() {
 	restHandler := transport.NewRESTHandler(uploadSvc, downloadSvc)
 	downloadHandler := transport.NewDownloadHandler(downloadSvc)
 	batchHandler := transport.NewBatchHandler(batchSvc)
-	adminHandler := transport.NewAdminHandler(metaFacade, workerPool, cfg.Storage.DataDir, cfg.Storage.TempDir, cfg.Database.Path, cfg.Database.Type)
-wsHub := transport.NewWSHub()
-router := transport.NewRouter(mw, tusHandler, restHandler, downloadHandler, batchHandler, authHandler, adminHandler, nil, wsHub, uploadSvc, scanner, healthChecker)
+	adminHandler := transport.NewAdminHandler(metaFacade, workerPool, cfg.Storage.DataDir, cfg.Storage.TempDir, dbDisplayPath, cfg.Database.Type)
+	shareHandler := transport.NewShareHandler(metaFacade, downloadSvc)
+	wsHub := transport.NewWSHub()
+	router := transport.NewRouter(mw, tusHandler, restHandler, downloadHandler, batchHandler, authHandler, adminHandler, shareHandler, wsHub, uploadSvc, scanner, healthChecker)
 
 	// 首次启动时执行一次快速巡检
 	go func() {
@@ -231,7 +238,7 @@ router := transport.NewRouter(mw, tusHandler, restHandler, downloadHandler, batc
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 
 	go func() {
-		log.Printf("服务启动于 %s (data=%s, db=%s)", addr, cfg.Storage.DataDir, cfg.Database.Path)
+		log.Printf("服务启动于 %s (data=%s, db=%s)", addr, cfg.Storage.DataDir, dbDisplayPath)
 		log.Printf("上传配置: chunk_size=%d, workers=%d, ttl=%s",
 			cfg.Upload.DefaultChunkSize, cfg.Upload.WorkerPoolSize, cfg.Upload.SessionTTL())
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {

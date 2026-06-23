@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -20,18 +21,18 @@ type mockShareStore struct {
 func newMockShareStore() *mockShareStore {
 	return &mockShareStore{shares: make(map[string]*domain.ShareEntry)}
 }
-func (m *mockShareStore) CreateShare(token string, entry *domain.ShareEntry) error {
+func (m *mockShareStore) CreateShare(_ context.Context, token string, entry *domain.ShareEntry) error {
 	m.shares[token] = entry
 	return nil
 }
-func (m *mockShareStore) GetShare(token string) (*domain.ShareEntry, error) {
+func (m *mockShareStore) GetShare(_ context.Context, token string) (*domain.ShareEntry, error) {
 	e, ok := m.shares[token]
 	if !ok {
 		return nil, nil
 	}
 	return e, nil
 }
-func (m *mockShareStore) IncrDownloads(token string) error {
+func (m *mockShareStore) IncrDownloads(_ context.Context, token string) error {
 	if e, ok := m.shares[token]; ok {
 		e.CurDownloads++
 	}
@@ -110,7 +111,7 @@ func TestShareHandler_AccessShare_PasswordRequired(t *testing.T) {
 
 	// Create share with password
 	h := sha256.Sum256([]byte("pw"))
-	store.CreateShare("s-test", &domain.ShareEntry{
+	store.CreateShare(context.Background(), "s-test", &domain.ShareEntry{
 		Token: "s-test", FileID: "f1", PasswordHash: hex.EncodeToString(h[:]), Namespace: "demo",
 	})
 
@@ -129,7 +130,7 @@ func TestShareHandler_AccessShare_WithPassword(t *testing.T) {
 	handler := NewShareHandler(store, nil)
 
 	h := sha256.Sum256([]byte("pw"))
-	store.CreateShare("s-test", &domain.ShareEntry{
+	store.CreateShare(context.Background(), "s-test", &domain.ShareEntry{
 		Token: "s-test", FileID: "f1", PasswordHash: hex.EncodeToString(h[:]), Namespace: "demo",
 	})
 
@@ -148,7 +149,7 @@ func TestShareHandler_AccessShare_MaxDownloads(t *testing.T) {
 	store := newMockShareStore()
 	handler := NewShareHandler(store, nil)
 
-	store.CreateShare("s-limited", &domain.ShareEntry{
+	store.CreateShare(context.Background(), "s-limited", &domain.ShareEntry{
 		Token: "s-limited", FileID: "f1", MaxDownloads: 1, CurDownloads: 1, Namespace: "demo",
 	})
 

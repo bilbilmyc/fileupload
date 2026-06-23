@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -14,9 +15,9 @@ import (
 
 // ShareStore 分享存储接口
 type ShareStore interface {
-	CreateShare(token string, entry *domain.ShareEntry) error
-	GetShare(token string) (*domain.ShareEntry, error)
-	IncrDownloads(token string) error
+	CreateShare(ctx context.Context, token string, entry *domain.ShareEntry) error
+	GetShare(ctx context.Context, token string) (*domain.ShareEntry, error)
+	IncrDownloads(ctx context.Context, token string) error
 }
 
 // ShareHandler 分享链接 HTTP 处理器
@@ -56,7 +57,7 @@ func (h *ShareHandler) CreateShare(w http.ResponseWriter, r *http.Request) {
 		entry.MaxDownloads = req.MaxDownloads
 	}
 
-	if err := h.store.CreateShare(token, entry); err != nil {
+	if err := h.store.CreateShare(r.Context(), token, entry); err != nil {
 		respondError(w, http.StatusInternalServerError, err)
 		return
 	}
@@ -72,7 +73,7 @@ func (h *ShareHandler) AccessShare(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	entry, err := h.store.GetShare(token)
+	entry, err := h.store.GetShare(r.Context(), token)
 	if err != nil || entry == nil {
 		respondError(w, http.StatusNotFound, domain.ErrNotFound)
 		return
@@ -104,7 +105,7 @@ func (h *ShareHandler) AccessShare(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 增加下载计数
-	h.store.IncrDownloads(token)
+	h.store.IncrDownloads(r.Context(), token)
 
 	// 重定向到文件下载
 	http.Redirect(w, r, "/v1/files/"+entry.FileID+"?namespace="+entry.Namespace, http.StatusFound)

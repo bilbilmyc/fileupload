@@ -36,7 +36,15 @@ services:
       - "8080:8080"
     environment:
       - FILEUPLOAD_REDIS_ADDR=redis:6379
-      - FILEUPLOAD_DATABASE_PATH=/var/lib/fileupload/fileupload.db
+      - FILEUPLOAD_DB_PATH=/var/lib/fileupload/fileupload.db
+      # PostgreSQL 模式时改用以下配置（注释掉上面的 SQLite 配置）
+      # - FILEUPLOAD_DATABASE_TYPE=postgres
+      # - FILEUPLOAD_PG_HOST=postgres
+      # - FILEUPLOAD_PG_PORT=5432
+      # - FILEUPLOAD_PG_USER=postgres
+      # - FILEUPLOAD_PG_PASSWORD=Postgres@2026
+      # - FILEUPLOAD_PG_DBNAME=fileupload
+      # - FILEUPLOAD_PG_SSLMODE=disable
       - FILEUPLOAD_CONFIG=/etc/fileupload/fileupload.yaml
       - TZ=Asia/Shanghai
     volumes:

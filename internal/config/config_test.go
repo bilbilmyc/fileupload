@@ -1,8 +1,10 @@
 package config
 
 import (
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -201,5 +203,89 @@ func TestResolveConfigPath(t *testing.T) {
 	path = resolveConfigPath(f)
 	if path != f {
 		t.Errorf("yaml 文件应返回路径: got %s, want %s", path, f)
+	}
+}
+
+func TestDefaultPGConfig(t *testing.T) {
+	cfg := DefaultConfig()
+	if cfg.Database.PG.Host != "localhost" {
+		t.Errorf("default pg host = %s", cfg.Database.PG.Host)
+	}
+	if cfg.Database.PG.Port != 5432 {
+		t.Errorf("default pg port = %d", cfg.Database.PG.Port)
+	}
+	if cfg.Database.PG.SSLMode != "disable" {
+		t.Errorf("default pg sslmode = %s", cfg.Database.PG.SSLMode)
+	}
+}
+
+func TestPGConfig_BuildDSN(t *testing.T) {
+	pg := PGConfig{
+		Host:     "10.0.0.1",
+		Port:     35432,
+		User:     "admin",
+		Password: "Pass@2026#secure",
+		DBName:   "mydb",
+		SSLMode:  "require",
+	}
+	dsn := pg.BuildDSN()
+	// url.URL.String 会在路径前加 /
+	expected := "postgres://admin:Pass%402026%23secure@10.0.0.1:35432/mydb?sslmode=require"
+	if dsn != expected {
+		t.Errorf("BuildDSN = %s, want %s", dsn, expected)
+	}
+}
+
+func TestPGConfig_BuildDSN_DefaultPort(t *testing.T) {
+	pg := PGConfig{
+		Host:   "localhost",
+		User:   "postgres",
+		DBName: "fileupload",
+	}
+	dsn := pg.BuildDSN()
+	if !strings.Contains(dsn, ":5432/") {
+		t.Errorf("DSN should use default port 5432: %s", dsn)
+	}
+	if !strings.Contains(dsn, "sslmode=disable") {
+		t.Errorf("DSN should default sslmode=disable: %s", dsn)
+	}
+}
+
+func TestPGConfig_BuildDSN_EmptyPassword(t *testing.T) {
+	pg := PGConfig{
+		Host:   "localhost",
+		User:   "postgres",
+		DBName: "test",
+	}
+	dsn := pg.BuildDSN()
+	if strings.Contains(dsn, "%") {
+		t.Errorf("Empty password should not produce URL-encoded chars: %s", dsn)
+	}
+}
+
+func TestPGConfig_BuildDSN_SpecialChars(t *testing.T) {
+	// 密码含 @、#、?、&、空格 等特殊字符
+	pg := PGConfig{
+		Host:     "db.example.com",
+		Port:     5432,
+		User:     "user",
+		Password: "@#?& =",
+		DBName:   "app",
+	}
+	dsn := pg.BuildDSN()
+	// 密码应被 URL 编码，不出现裸特殊字符
+	if strings.Contains(dsn, "@#?") {
+		t.Errorf("DSN should encode special chars in password: %s", dsn)
+	}
+	// 验证可以解析
+	parsed, err := url.Parse(dsn)
+	if err != nil {
+		t.Fatalf("url.Parse error = %v", err)
+	}
+	pw, _ := parsed.User.Password()
+	// url.PathEscape 将空格编为 %20
+	expectedPW := "@#?& ="
+	if pw != expectedPW {
+		t.Errorf("password roundtrip = %s, want %s", pw, expectedPW)
 	}
 }
