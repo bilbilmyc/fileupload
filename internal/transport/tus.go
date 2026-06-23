@@ -88,6 +88,8 @@ func (h *TusHandler) AppendChunk(w http.ResponseWriter, r *http.Request) {
 	offset, _ := strconv.ParseInt(offsetStr, 10, 64)
 	_ = offset
 
+	r.Body = http.MaxBytesReader(w, r.Body, 50<<20)
+
 	sliceSha256 := r.Header.Get("X-Slice-SHA256")
 	sliceIndexStr := r.Header.Get("X-Slice-Index")
 	sliceIndex := 0

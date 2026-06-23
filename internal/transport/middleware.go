@@ -32,11 +32,13 @@ type Middleware struct {
 	rateLimiter *RateLimiterGroup
 	authCfg     AuthConfig
 	authSvc     domain.AuthService // JWT 鉴权服务
+	corsOrigins []string           // CORS 允许的源
 }
 
 // AuthConfig 认证中间件配置
 type AuthConfig struct {
 	Enabled bool
+	Enforce bool   // JWT 强制认证（无 token 返回 401）
 	Token   string
 	Header  string
 }
@@ -58,6 +60,51 @@ func (m *Middleware) WithAuth(cfg AuthConfig) *Middleware {
 func (m *Middleware) WithJWT(authSvc domain.AuthService) *Middleware {
 	m.authSvc = authSvc
 	return m
+}
+
+// WithCORS 设置 CORS 允许的源（链式调用）
+func (m *Middleware) WithCORS(origins []string) *Middleware {
+	m.corsOrigins = origins
+	return m
+}
+
+// CORS CORS 跨域中间件
+func (m *Middleware) CORS(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := r.Header.Get("Origin")
+		if len(m.corsOrigins) > 0 && origin != "" {
+			allowed := false
+			for _, o := range m.corsOrigins {
+				if o == "*" || o == origin {
+					allowed = true
+					break
+				}
+			}
+			if allowed {
+				header := "*"
+				if origin != "" {
+					header = origin
+				}
+				w.Header().Set("Access-Control-Allow-Origin", header)
+				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS")
+				w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Auth-Token, X-Namespace, X-Request-ID, Range")
+				w.Header().Set("Access-Control-Expose-Headers", "Upload-Offset, Location, X-SHA256, X-Tree-SHA256, Content-Range")
+				w.Header().Set("Access-Control-Max-Age", "86400")
+			}
+		}
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+
+
+// RateLimiterCleanup 启动限流器条目定期清理（应作为 goroutine 启动）
+func (m *Middleware) RateLimiterCleanup(maxAge, interval time.Duration) {
+	m.rateLimiter.Cleanup(maxAge, interval)
 }
 
 // Recover panic 恢复中间件
@@ -176,6 +223,29 @@ func (g *RateLimiterGroup) Allow(key string) bool {
 	}
 	g.mu.Unlock()
 	return l.Allow()
+}
+
+
+// Cleanup 定期清理过期限流器条目，防止 map 无限增长。
+// maxAge 为条目空闲超时；interval 为清理间隔。
+// 应作为 goroutine 启动：
+//
+//	go limiterGroup.Cleanup(10*time.Minute, 5*time.Minute)
+func (g *RateLimiterGroup) Cleanup(maxAge, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for range ticker.C {
+		g.mu.Lock()
+		for key, l := range g.limiters {
+			l.mu.Lock()
+			age := time.Since(l.lastTime)
+			l.mu.Unlock()
+			if age > maxAge {
+				delete(g.limiters, key)
+			}
+		}
+		g.mu.Unlock()
+	}
 }
 
 // RateLimiter 简单令牌桶

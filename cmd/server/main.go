@@ -188,7 +188,7 @@ func main() {
 
 	// === 传输层 ===
 
-	mw := transport.NewMiddleware().WithAuth(transport.AuthConfig{
+	mw := transport.NewMiddleware().WithCORS(cfg.CORS.AllowedOrigins).WithAuth(transport.AuthConfig{
 		Enabled: cfg.Auth.Enabled,
 		Token:   cfg.Auth.Token,
 		Header:  cfg.Auth.Header,
@@ -202,6 +202,9 @@ func main() {
 		mw.WithJWT(jwtSvc)
 		authHandler = transport.NewAuthHandler(jwtSvc)
 	}
+
+	// 启动限流器条目清理
+	go mw.RateLimiterCleanup(10*time.Minute, 5*time.Minute)
 
 	tusHandler := transport.NewTusHandler(uploadSvc)
 	restHandler := transport.NewRESTHandler(uploadSvc, downloadSvc)

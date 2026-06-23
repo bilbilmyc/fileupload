@@ -60,6 +60,7 @@ func (r *Router) Handler() http.Handler {
 	h = r.middleware.Logging(h)       // 请求日志
 	h = r.middleware.RequestID(h)
 	h = r.middleware.Recover(h)
+	h = r.middleware.CORS(h)
 	return h
 }
 // registerRoutes 注册所有路由

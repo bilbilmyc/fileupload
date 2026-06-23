@@ -22,6 +22,7 @@ type Config struct {
 	Upload   UploadConfig   `json:"upload" yaml:"upload"`
 	Download DownloadConfig `json:"download" yaml:"download"`
 	Auth     AuthConfig     `json:"auth" yaml:"auth"`
+	CORS     CORSConfig    `json:"cors" yaml:"cors"`
 }
 
 // ServerConfig HTTP 服务配置
@@ -113,9 +114,15 @@ type DownloadConfig struct {
 	MaxArchiveSize int64 `json:"max_archive_size" yaml:"max_archive_size"`
 }
 
+// CORSConfig 跨域配置
+type CORSConfig struct {
+	AllowedOrigins []string `json:"allowed_origins" yaml:"allowed_origins"` // 允许的源，* 表示全部
+}
+
 // AuthConfig 认证配置
 type AuthConfig struct {
 	Enabled   bool   `json:"enabled" yaml:"enabled"`
+	Enforce   bool   `json:"enforce" yaml:"enforce"` // JWT 强制认证（true=未认证请求返回 401）
 	Token     string `json:"token" yaml:"token"`
 	Header    string `json:"header" yaml:"header"`
 	JWTSecret string `json:"jwt_secret" yaml:"jwt_secret"`
@@ -169,6 +176,9 @@ func DefaultConfig() Config {
 			Header:    "X-Auth-Token",
 			JWTSecret: "fileupload-dev-secret-change-in-production",
 			JWTExpiry: 72,
+		},
+		CORS: CORSConfig{
+			AllowedOrigins: []string{"*"},
 		},
 	}
 }
@@ -294,6 +304,30 @@ func loadEnv(cfg *Config) {
 		}
 	}
 	if v := os.Getenv("FILEUPLOAD_AUTH_TOKEN"); v != "" {
+	if v := os.Getenv("FILEUPLOAD_JWT_SECRET"); v != "" {
+		cfg.Auth.JWTSecret = v
+	}
+	if v := os.Getenv("FILEUPLOAD_JWT_EXPIRY"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.Auth.JWTExpiry = n
+		}
+	}
+	if v := os.Getenv("FILEUPLOAD_STORAGE_TYPE"); v != "" {
+		cfg.Storage.Type = v
+	}
+	if v := os.Getenv("FILEUPLOAD_REDIS_DB"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.Redis.DB = n
+		}
+	}
+	if v := os.Getenv("FILEUPLOAD_REDIS_PREFIX"); v != "" {
+		cfg.Redis.Prefix = v
+	}
+	if v := os.Getenv("FILEUPLOAD_AUTH_ENFORCE"); v != "" {
+		if v == "true" || v == "1" {
+			cfg.Auth.Enforce = true
+		}
+	}
 		cfg.Auth.Token = v
 		cfg.Auth.Enabled = true
 	}
