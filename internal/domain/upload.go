@@ -72,8 +72,9 @@ func (s *UploadService) CheckExists(ctx context.Context, sha256, namespace, name
 	}
 
 	log.Printf("[upload] 秒传命中 sha256=%s (%s)", shaPrefix(sha256), name)
-	// 命中：增加引用计数
-	if err := s.meta.IncrBlobRef(ctx, sha256); err != nil {
+	// 命中：增加引用计数（带回滚）
+	rollback, err := IncrWithRollback(ctx, s.meta, sha256)
+	if err != nil {
 		return nil, fmt.Errorf("增加引用计数: %w", err)
 	}
 
@@ -91,8 +92,10 @@ func (s *UploadService) CheckExists(ctx context.Context, sha256, namespace, name
 		CreatedAt: now,
 	}
 	if err := s.meta.PutFile(ctx, f); err != nil {
-		// 回滚引用计数
-		_, _ = s.meta.DecrBlobRef(ctx, sha256)
+		// 回滚引用计数（幂等）
+		if rbErr := rollback(); rbErr != nil {
+			log.Printf("[upload] 回滚引用计数失败 sha=%s: %v", sha256, rbErr)
+		}
 		return nil, fmt.Errorf("写入文件记录: %w", err)
 	}
 	return f, nil
