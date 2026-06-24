@@ -1,4 +1,5 @@
 import axios, { AxiosProgressEvent } from 'axios'
+import { sdkClient } from './sdk'
 
 const axiosInstance = axios.create({
   timeout: 60000,
@@ -84,16 +85,18 @@ export async function listFiles(opts: ListFilesParams = {}): Promise<ListResult>
 }
 
 export async function statFile(id: string): Promise<{ file: FileItem; blob?: any }> {
-  const r = await axiosInstance.get(`/v1/stat/${id}`)
-  return r.data
+  // v0.7.0：迁到 SDK
+  return sdkClient.stat(id) as any
 }
 
 export async function deleteFile(id: string): Promise<void> {
-  await axiosInstance.delete(`/v1/files/${id}`)
+  // v0.7.0：迁到 SDK
+  await sdkClient.delete(id)
 }
 
 export async function deleteDir(id: string): Promise<void> {
-  await axiosInstance.delete(`/v1/dirs/${id}`)
+  // v0.7.0：迁到 SDK
+  await sdkClient.deleteDir(id)
 }
 
 export async function checkExists(sha256: string, name?: string): Promise<FileItem | null> {
@@ -160,7 +163,8 @@ export function downloadDirUrl(id: string, format: string = 'tar.gz'): string {
 }
 
 export async function renameFile(id: string, name: string): Promise<void> {
-  await axiosInstance.patch(`/v1/files/${id}`, { name })
+  // v0.7.0：迁到 SDK
+  await sdkClient.rename(id, name)
 }
 
 export function previewFileUrl(id: string): string {
@@ -180,8 +184,8 @@ export interface BatchDeleteResult {
 }
 
 export async function batchDelete(ids: string[]): Promise<BatchDeleteResult> {
-  const r = await axiosInstance.post('/v1/batch/delete', { ids })
-  return r.data
+  // v0.7.0：迁到 SDK
+  return sdkClient.batchDelete(ids) as any
 }
 
 export async function batchDownload(ids: string[], format: string = 'zip'): Promise<Blob> {
@@ -196,13 +200,16 @@ export function batchDownloadUrl(): string {
 }
 
 export async function batchMove(ids: string[], targetDirId: string): Promise<void> {
-  await axiosInstance.post('/v1/batch/move', { ids, target_dir_id: targetDirId })
+  // v0.7.0：迁到 SDK
+  await sdkClient.batchMove(ids, targetDirId)
 }
 
 export async function batchCopy(ids: string[], targetDirId: string): Promise<void> {
-  await axiosInstance.post('/v1/batch/copy', { ids, target_dir_id: targetDirId })
+  // v0.7.0：迁到 SDK（v0.1.0+ 已支持返回 success/failed 计数）
+  await sdkClient.batchCopy(ids, targetDirId)
 }
 
 export async function batchSetTags(ids: string[], tags: string[]): Promise<void> {
-  await axiosInstance.post('/v1/batch/tags', { ids, tags })
+  // v0.7.0：迁到 SDK
+  await sdkClient.batchSetTags(ids, tags)
 }
