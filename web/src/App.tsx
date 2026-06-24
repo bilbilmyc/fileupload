@@ -1,16 +1,27 @@
+import { lazy, Suspense } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
-import { Layout } from 'antd'
+import { Layout, Spin } from 'antd'
 import Login from './pages/Login'
 import Files from './pages/Files'
-import Admin from './pages/Admin'
-import Logs from './pages/Logs'
-import Settings from './pages/Settings'
 import Sidebar from './components/Sidebar'
 import UploadProgressBar from './components/UploadProgressBar'
 import { UploadProvider } from './context/UploadContext'
 import ErrorBoundary from './components/ErrorBoundary'
 
+// v0.6.0：路由级代码分割 — 非首屏页面按需加载
+const Admin = lazy(() => import('./pages/Admin'))
+const Logs = lazy(() => import('./pages/Logs'))
+const Settings = lazy(() => import('./pages/Settings'))
+
 const { Content } = Layout
+
+function LoadingFallback() {
+  return (
+    <div className="flex items-center justify-center h-64">
+      <Spin size="large" tip="加载中..." />
+    </div>
+  )
+}
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   return <>{children}</>
@@ -47,9 +58,15 @@ export default function App() {
                         <Files />
                       </ErrorBoundary>
                     } />
-                    <Route path="/admin" element={<Admin />} />
-                    <Route path="/logs" element={<Logs />} />
-                    <Route path="/settings" element={<Settings />} />
+                    <Route path="/admin" element={
+                      <Suspense fallback={<LoadingFallback />}><Admin /></Suspense>
+                    } />
+                    <Route path="/logs" element={
+                      <Suspense fallback={<LoadingFallback />}><Logs /></Suspense>
+                    } />
+                    <Route path="/settings" element={
+                      <Suspense fallback={<LoadingFallback />}><Settings /></Suspense>
+                    } />
                     <Route path="*" element={<Navigate to="/" />} />
                   </Routes>
                 </AppLayout>
