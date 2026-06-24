@@ -86,7 +86,7 @@ func Build(d Deps) (*Server, error) {
 	wsHub := transport.NewWSHub()
 
 	// 后台任务
-	reaper := lifecycle.NewSessionReaper(d.Metadata, d.Storage, d.UploadCfg.DataDir, d.ReaperInterval)
+	reaper := lifecycle.NewSessionReaperWithStorage(d.Metadata, d.TempFS, d.ReaperInterval)
 	scanner := lifecycle.NewConsistencyScanner(d.Metadata, d.Storage, d.UploadCfg.DataDir, d.UploadCfg.DataDir)
 
 	// 健康检查器（不依赖 redis/os，直接走 Storage + Metadata 端口）
