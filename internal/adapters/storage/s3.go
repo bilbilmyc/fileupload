@@ -242,3 +242,12 @@ func (s *S3Storage) EnsureBucket(ctx context.Context) error {
 
 // compile check
 var _ domain.Storage = (*S3Storage)(nil)
+
+// HealthCheck 检查 S3 bucket 是否可达。
+func (s *S3Storage) HealthCheck(ctx context.Context) error {
+	_, err := s.client.HeadBucket(ctx, &s3.HeadBucketInput{Bucket: aws.String(s.cfg.Bucket)})
+	if err != nil {
+		return fmt.Errorf("S3 bucket 不可达: %w", err)
+	}
+	return nil
+}

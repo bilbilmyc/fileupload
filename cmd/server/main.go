@@ -6,20 +6,22 @@
 //	FILEUPLOAD_DB_PATH=/tmp/fileupload.db go run ./cmd/server
 //
 // 默认配置：
+//
 //	- 监听 :8080
 //	- 本地文件系统存储（data/）
 //	- SQLite 数据库（fileupload.db）
 //	- Redis（localhost:6379）
+//
+// main() 只负责：加载配置 → 装配依赖 → Build → 启动后台任务 →
+// ListenAndServe + 优雅关闭。所有依赖装配逻辑在 builder.go 的 Build() 中。
 package main
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 	"time"
 
@@ -32,233 +34,129 @@ import (
 	"github.com/bilbilmyc/fileupload/internal/adapters/storage"
 	"github.com/bilbilmyc/fileupload/internal/config"
 	"github.com/bilbilmyc/fileupload/internal/domain"
-	"github.com/bilbilmyc/fileupload/internal/lifecycle"
 	"github.com/bilbilmyc/fileupload/internal/transport"
 )
 
-// serverHealth 实现 transport.HealthChecker
-type serverHealth struct {
-	redis   *redis.Client
-	dataDir string
-	tempDir string
-	dbPath  string
-}
-
-func (h *serverHealth) Check(ctx context.Context) map[string]any {
-	result := make(map[string]any)
-
-	// Redis 检查
-	redisHealth := map[string]any{"status": "ok"}
-	if err := h.redis.Ping(ctx).Err(); err != nil {
-		redisHealth["status"] = "error"
-		redisHealth["error"] = err.Error()
-	}
-	result["redis"] = redisHealth
-
-	// SQLite 检查（通过检查 db 文件是否存在）
-	dbHealth := map[string]any{"status": "ok"}
-	if h.dbPath != "" && h.dbPath != ":memory:" {
-		if _, err := os.Stat(h.dbPath); os.IsNotExist(err) {
-			dbHealth["status"] = "error"
-			dbHealth["error"] = "数据库文件不存在"
-		}
-	}
-	result["database"] = dbHealth
-
-	// 磁盘检查（data dir 和 temp dir 可写性）
-	diskHealth := map[string]any{"status": "ok"}
-	for name, dir := range map[string]string{"data_dir": h.dataDir, "temp_dir": h.tempDir} {
-		testFile := filepath.Join(dir, ".healthcheck")
-		if err := os.WriteFile(testFile, []byte("ok"), 0644); err != nil {
-			diskHealth["status"] = "error"
-			diskHealth[name] = "不可写: " + err.Error()
-		} else {
-			os.Remove(testFile)
-			diskHealth[name] = "可写"
-		}
-	}
-	result["disk"] = diskHealth
-
-	return result
-}
-
 func main() {
-	// 加载配置
-	configPath := os.Getenv("FILEUPLOAD_CONFIG")
-	cfg, err := config.Load(configPath)
+	cfg, err := config.Load(os.Getenv("FILEUPLOAD_CONFIG"))
 	if err != nil {
 		log.Fatalf("加载配置失败: %v", err)
 	}
 
-	// === 基础设施 ===
-
-	// 1. 本地存储
-	localFS, err := storage.NewLocalFS(cfg.Storage.DataDir)
+	deps, err := buildDeps(&cfg)
 	if err != nil {
-		log.Fatalf("初始化本地存储: %v", err)
+		log.Fatalf("装配依赖: %v", err)
 	}
 
-	// 1b. 临时分片存储
-	tempFS, err := storage.NewLocalFS(cfg.Storage.TempDir)
+	srv, err := Build(deps)
 	if err != nil {
-		log.Fatalf("初始化临时存储: %v", err)
+		log.Fatalf("Build 服务: %v", err)
 	}
 
-	// 2. Redis 热数据
-	rdb := redis.NewClient(&redis.Options{
-		Addr:     cfg.Redis.Addr,
-		Password: cfg.Redis.Password,
-		DB:       cfg.Redis.DB,
-	})
-	// 测试连接
-	if err := rdb.Ping(context.Background()).Err(); err != nil {
-		log.Printf("警告: Redis 连接失败 (%v)，热数据功能受限", err)
-	}
-	redisStore := metadata.NewRedisStore(rdb, cfg.Redis.Prefix)
+	srv.Reaper().Start()
+	defer srv.Reaper().Stop()
 
-	// 3. 冷数据（SQLite / PostgreSQL）
-	var coldStore metadata.ColdStore
-	if cfg.Database.Type == "postgres" {
-		pgStore, err := metadata.NewPostgresStore(cfg.Database.PG.BuildDSN())
-		if err != nil {
-			log.Fatalf("初始化 PostgreSQL: %v", err)
-		}
-		coldStore = pgStore
-		log.Printf("使用 PostgreSQL 数据库")
-	} else {
-		sqliteStore, err := metadata.NewSQLiteStore(cfg.Database.Path)
-		if err != nil {
-			log.Fatalf("初始化 SQLite: %v", err)
-		}
-		coldStore = sqliteStore
-	}
-
-	// 4. Metadata 门面
-	metaFacade := metadata.NewFacade(redisStore, coldStore)
-
-	// 5. 压缩器
-	compress, err := compressor.NewCompressor()
-	if err != nil {
-		log.Fatalf("初始化压缩器: %v", err)
-	}
-
-	// 6. 哈希器
-	hasher := hasher.NewSHA256Hasher()
-
-	// === 领域核心 ===
-
-	workerPool := domain.NewSimpleWorkerPool(cfg.Upload.WorkerPoolSize, cfg.Upload.WorkerQueueSize)
-	defer workerPool.Stop()
-
-	uploadCfg := domain.UploadConfig{
-		SessionTTL:      cfg.Upload.SessionTTL(),
-		DataDir:         cfg.Storage.DataDir,
-		DefaultChunkSize: cfg.Upload.DefaultChunkSize,
-	}
-	uploadSvc := domain.NewUploadService(metaFacade, localFS, tempFS, compress, hasher, workerPool, uploadCfg)
-
-	downloadCfg := domain.DownloadConfig{
-		DataDir: cfg.Storage.DataDir,
-	}
-	downloadSvc := domain.NewDownloadService(metaFacade, localFS, compress, hasher, downloadCfg)
-
-	batchSvc := domain.NewBatchService(uploadSvc, uploadSvc, downloadSvc, metaFacade)
-
-	// === 后台任务 ===
-
-	reaper := lifecycle.NewSessionReaper(metaFacade, localFS, cfg.Storage.TempDir, time.Minute)
-	reaper.Start()
-	defer reaper.Stop()
-
-	scanner := lifecycle.NewConsistencyScanner(metaFacade, localFS, cfg.Storage.DataDir, cfg.Storage.TempDir)
-
-	// 数据库显示路径：SQLite 显示文件路径，PG 显示连接信息
-	dbDisplayPath := cfg.Database.Path
-	if cfg.Database.Type == "postgres" {
-		dbDisplayPath = cfg.Database.PG.BuildDSN()
-	}
-
-	// 健康检查器
-	healthChecker := &serverHealth{
-		redis:   rdb,
-		dataDir: cfg.Storage.DataDir,
-		tempDir: cfg.Storage.TempDir,
-		dbPath:  dbDisplayPath,
-	}
-
-	// === 传输层 ===
-
-	mw := transport.NewMiddleware().WithCORS(cfg.CORS.AllowedOrigins).WithAuth(transport.AuthConfig{
-		Enabled: cfg.Auth.Enabled,
-		Token:   cfg.Auth.Token,
-		Header:  cfg.Auth.Header,
-	})
-
-	// JWT 鉴权（仅在配置了密钥时启用）
-	var authHandler *transport.AuthHandler
-	if cfg.Auth.JWTSecret != "" {
-		jwtExpiry := time.Duration(cfg.Auth.JWTExpiry) * time.Hour
-		jwtSvc := auth.NewJWTService(cfg.Auth.JWTSecret, jwtExpiry, nil)
-		mw.WithJWT(jwtSvc)
-		authHandler = transport.NewAuthHandler(jwtSvc)
-	}
-
-	// 启动限流器条目清理
-	go mw.RateLimiterCleanup(10*time.Minute, 5*time.Minute)
-
-	tusHandler := transport.NewTusHandler(uploadSvc)
-	restHandler := transport.NewRESTHandler(uploadSvc, downloadSvc)
-	downloadHandler := transport.NewDownloadHandler(downloadSvc)
-	batchHandler := transport.NewBatchHandler(batchSvc)
-	adminHandler := transport.NewAdminHandler(metaFacade, workerPool, cfg.Storage.DataDir, cfg.Storage.TempDir, dbDisplayPath, cfg.Database.Type)
-	shareSvc := domain.NewShareService(metaFacade)
-	shareHandler := transport.NewShareHandler(shareSvc, downloadSvc)
-	wsHub := transport.NewWSHub()
-	router := transport.NewRouter(mw, tusHandler, restHandler, downloadHandler, batchHandler, authHandler, adminHandler, shareHandler, wsHub, uploadSvc, scanner, healthChecker)
-
-	// 首次启动时执行一次快速巡检
+	// 首次启动后做一次快速巡检
 	go func() {
 		time.Sleep(10 * time.Second)
-		if _, err := scanner.Scan(context.Background()); err != nil {
+		if _, err := srv.Scanner().Scan(context.Background()); err != nil {
 			log.Printf("首次巡检失败: %v", err)
 		} else {
 			log.Printf("首次巡检完成")
 		}
 	}()
 
-	// === HTTP 服务 ===
-
-	addr := cfg.Server.Addr
-	srv := &http.Server{
-		Addr:         addr,
-		Handler:      router.Handler(),
-		ReadTimeout:  time.Duration(cfg.Server.ReadTimeout) * time.Second,
-		WriteTimeout: time.Duration(cfg.Server.WriteTimeout) * time.Second,
-		IdleTimeout:  time.Duration(cfg.Server.IdleTimeout) * time.Second,
-	}
-
 	// 优雅关闭
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 
 	go func() {
-		log.Printf("服务启动于 %s (data=%s, db=%s)", addr, cfg.Storage.DataDir, dbDisplayPath)
-		log.Printf("上传配置: chunk_size=%d, workers=%d, ttl=%s",
-			cfg.Upload.DefaultChunkSize, cfg.Upload.WorkerPoolSize, cfg.Upload.SessionTTL())
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		log.Printf("服务启动于 %s (data=%s)", deps.ServerCfg.Addr, deps.UploadCfg.DataDir)
+		if err := srv.HTTP().ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("服务异常退出: %v", err)
 		}
 	}()
 
 	<-quit
 	log.Println("收到关闭信号，正在优雅关闭...")
-
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-
-	if err := srv.Shutdown(ctx); err != nil {
+	if err := srv.HTTP().Shutdown(ctx); err != nil {
 		log.Printf("服务关闭超时: %v", err)
 	}
+	log.Println("服务已关闭")
+}
 
-	fmt.Println("服务已关闭")
+// buildDeps 从配置构造 Deps。所有 log.Fatalf 上提为 error 返回，
+// 让 Build 与 main 都可测试。
+func buildDeps(cfg *config.Config) (Deps, error) {
+	// 存储
+	localFS, err := storage.NewLocalFS(cfg.Storage.DataDir)
+	if err != nil {
+		return Deps{}, must(err, "初始化本地存储")
+	}
+	tempFS, err := storage.NewLocalFS(cfg.Storage.TempDir)
+	if err != nil {
+		return Deps{}, must(err, "初始化临时存储")
+	}
+
+	// 元数据
+	rdb := redis.NewClient(&redis.Options{
+		Addr:     cfg.Redis.Addr,
+		Password: cfg.Redis.Password,
+		DB:       cfg.Redis.DB,
+	})
+	if err := rdb.Ping(context.Background()).Err(); err != nil {
+		log.Printf("警告: Redis 连接失败 (%v)，热数据功能受限", err)
+	}
+	redisStore := metadata.NewRedisStore(rdb, cfg.Redis.Prefix)
+
+	var coldStore metadata.ColdStore
+	if cfg.Database.Type == "postgres" {
+		pgStore, err := metadata.NewPostgresStore(cfg.Database.PG.BuildDSN())
+		if err != nil {
+			return Deps{}, must(err, "初始化 PostgreSQL")
+		}
+		coldStore = pgStore
+		log.Printf("使用 PostgreSQL 数据库")
+	} else {
+		sqliteStore, err := metadata.NewSQLiteStore(cfg.Database.Path)
+		if err != nil {
+			return Deps{}, must(err, "初始化 SQLite")
+		}
+		coldStore = sqliteStore
+	}
+	metaFacade := metadata.NewFacade(redisStore, coldStore)
+
+	// 压缩与哈希
+	compress, err := compressor.NewCompressor()
+	if err != nil {
+		return Deps{}, must(err, "初始化压缩器")
+	}
+	hash := hasher.NewSHA256Hasher()
+
+	// JWT（可选）
+	var authSvc domain.AuthService
+	if cfg.Auth.JWTSecret != "" {
+		jwtExpiry := time.Duration(cfg.Auth.JWTExpiry) * time.Hour
+		authSvc = auth.NewJWTService(cfg.Auth.JWTSecret, jwtExpiry, nil)
+	}
+
+	workerPool := domain.NewSimpleWorkerPool(cfg.Upload.WorkerPoolSize, cfg.Upload.WorkerQueueSize)
+
+	return Deps{
+		Storage:      localFS,
+		TempFS:       tempFS,
+		Metadata:     metaFacade,
+		Compressor:   compress,
+		Hasher:       hash,
+		WorkerPool:   workerPool,
+		Auth:         authSvc,
+		UploadCfg:    domain.UploadConfig{SessionTTL: cfg.Upload.SessionTTL(), DataDir: cfg.Storage.DataDir, DefaultChunkSize: cfg.Upload.DefaultChunkSize},
+		DownloadCfg:  domain.DownloadConfig{DataDir: cfg.Storage.DataDir},
+		AuthCfg:      transport.AuthConfig{Enabled: cfg.Auth.Enabled, Token: cfg.Auth.Token, Header: cfg.Auth.Header},
+		CORSOrigins:  cfg.CORS.AllowedOrigins,
+		ServerCfg:    ServerConfig{Addr: cfg.Server.Addr, ReadTimeout: time.Duration(cfg.Server.ReadTimeout) * time.Second, WriteTimeout: time.Duration(cfg.Server.WriteTimeout) * time.Second, IdleTimeout: time.Duration(cfg.Server.IdleTimeout) * time.Second},
+		ReaperInterval: time.Minute,
+	}, nil
 }

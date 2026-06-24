@@ -572,3 +572,10 @@ func containsIgnoreCase(s, substr string) bool {
 	}
 	return false
 }
+
+func (m *mockStorage) HealthCheck(_ context.Context) error { return nil }
+func (m *mockMetadata) HealthCheck(_ context.Context) error { return nil }
+
+func (m *mockMetadata) CreateShare(_ context.Context, _ string, _ *ShareEntry) error { return nil }
+func (m *mockMetadata) GetShare(_ context.Context, _ string) (*ShareEntry, error)    { return nil, nil }
+func (m *mockMetadata) IncrDownloads(_ context.Context, _ string) error              { return nil }

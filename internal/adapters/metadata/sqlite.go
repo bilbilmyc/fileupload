@@ -565,3 +565,8 @@ func boolToInt(b bool) int {
 
 // compile-time assertion
 var _ domain.Metadata = (*Facade)(nil)
+
+// HealthCheck 检查 SQLite 连接。
+func (s *SQLiteStore) HealthCheck(ctx context.Context) error {
+	return s.db.PingContext(ctx)
+}

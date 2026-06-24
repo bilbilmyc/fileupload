@@ -164,3 +164,8 @@ func (r *RedisStore) ListExpiredSessions(ctx context.Context) ([]string, error) 
 func (r *RedisStore) Close() error {
 	return r.client.Close()
 }
+
+// HealthCheck 检查 Redis 连接。
+func (r *RedisStore) HealthCheck(ctx context.Context) error {
+	return r.client.Ping(ctx).Err()
+}

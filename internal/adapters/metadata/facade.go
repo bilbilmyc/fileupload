@@ -57,12 +57,14 @@ type ColdStore interface {
 
 	RenameFile(ctx context.Context, fileID, newName, newPath string) error
 	Close() error
+	HealthCheck(ctx context.Context) error
 }
 
 // HotStore 热数据存储接口（Redis）。扩展 domain.SessionStore 加上 Close()。
 type HotStore interface {
 	domain.SessionStore
 	Close() error
+	HealthCheck(ctx context.Context) error
 }
 
 // Facade Metadata 门面，路由请求到 HotStore（热）或 ColdStore（冷）
@@ -240,4 +242,15 @@ func (f *Facade) Close() error {
 		return fmt.Errorf("关闭热存储: %w", hotErr)
 	}
 	return coldErr
+}
+
+// HealthCheck 组合检查：先热后冷，任一失败立即返回。
+func (f *Facade) HealthCheck(ctx context.Context) error {
+	if err := f.hot.HealthCheck(ctx); err != nil {
+		return fmt.Errorf("热存储: %w", err)
+	}
+	if err := f.cold.HealthCheck(ctx); err != nil {
+		return fmt.Errorf("冷存储: %w", err)
+	}
+	return nil
 }

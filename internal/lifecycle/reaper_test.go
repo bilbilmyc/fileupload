@@ -704,3 +704,15 @@ func TestScanner_ScanFull(t *testing.T) {
 		t.Errorf("RefCountFixes = %d, want 1", report.RefCountFixes)
 	}
 }
+
+func (m *mockMeta) HealthCheck(_ context.Context) error    { return nil }
+func (m *mockStorage) HealthCheck(_ context.Context) error { return nil }
+
+func (m *errorMeta) HealthCheck(_ context.Context) error { return nil }
+
+func (m *mockMeta) CreateShare(_ context.Context, _ string, _ *domain.ShareEntry) error { return nil }
+func (m *mockMeta) GetShare(_ context.Context, _ string) (*domain.ShareEntry, error)    { return nil, nil }
+func (m *mockMeta) IncrDownloads(_ context.Context, _ string) error                      { return nil }
+func (m *errorMeta) CreateShare(_ context.Context, _ string, _ *domain.ShareEntry) error { return nil }
+func (m *errorMeta) GetShare(_ context.Context, _ string) (*domain.ShareEntry, error)    { return nil, nil }
+func (m *errorMeta) IncrDownloads(_ context.Context, _ string) error                      { return nil }

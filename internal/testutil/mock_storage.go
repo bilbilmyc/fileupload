@@ -95,3 +95,6 @@ func (m mockFileInfo) Mode() fs.FileMode  { return 0 }
 func (m mockFileInfo) ModTime() time.Time { return time.Time{} }
 func (m mockFileInfo) IsDir() bool        { return false }
 func (m mockFileInfo) Sys() any           { return nil }
+
+// HealthCheck mock 始终返回 nil。
+func (m *MockStorage) HealthCheck(_ context.Context) error { return nil }

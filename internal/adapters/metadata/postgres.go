@@ -573,3 +573,8 @@ func scanFilesPG(rows *sql.Rows) ([]*domain.FileMetadata, error) {
 
 // compile-time assertion
 var _ domain.Metadata = (*PostgresStore)(nil)
+
+// HealthCheck 检查 Postgres 连接。
+func (p *PostgresStore) HealthCheck(ctx context.Context) error {
+	return p.db.PingContext(ctx)
+}

@@ -351,3 +351,14 @@ func (m *MockMetadata) ListAllFiles(_ context.Context) ([]*domain.FileMetadata, 
 	}
 	return files, nil
 }
+
+// HealthCheck mock 始终返回 nil。
+func (m *MockMetadata) HealthCheck(_ context.Context) error { return nil }
+
+func (m *MockMetadata) CreateShare(_ context.Context, _ string, _ *domain.ShareEntry) error {
+	return nil
+}
+func (m *MockMetadata) GetShare(_ context.Context, _ string) (*domain.ShareEntry, error) {
+	return nil, nil
+}
+func (m *MockMetadata) IncrDownloads(_ context.Context, _ string) error { return nil }

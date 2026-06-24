@@ -201,3 +201,15 @@ func containsPathTraversal(path string) bool {
 	}
 	return false
 }
+
+// HealthCheck 检查本地存储根目录是否可访问。
+func (s *LocalFS) HealthCheck(_ context.Context) error {
+	info, err := os.Stat(s.root)
+	if err != nil {
+		return fmt.Errorf("本地存储根目录不可访问: %w", err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("本地存储根 %s 不是目录", s.root)
+	}
+	return nil
+}
