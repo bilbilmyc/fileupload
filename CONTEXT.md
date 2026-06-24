@@ -47,3 +47,32 @@
 
 ### 文件重组 (File Restructuring)
 SubmitDir 的最后阶段：将物理文件从扁平路径搬移到层级路径，同时更新 ContentBlob 的存储路径记录。
+
+## 路径布局（v0.1.0+）
+
+### 路径布局值类型 (HierarchicalLayout)
+集中管理物理文件路径约定的值类型。两种路径格式：
+- **FlatPath**：Finalize 阶段写入的扁平路径，格式 `"{namespace}/{filename}"`
+- **HierarchicalPath**：SubmitDir 阶段搬移后的层级路径，格式 `"{namespace}/{dirName}/{entryPath}"`
+- **Move**：把文件从源路径搬到目标路径（Open + Write + Delete 三步，不静默吞错）
+
+ADR-0001 承诺的"扁平 → 层级"语义在此类型中首次有 single source of truth。
+
+## 引用计数纪律（v0.1.0+）
+
+### 带回滚的引用计数 (IncrWithRollback)
+`internal/domain/refcount.go` 的 helper：`IncrWithRollback(ctx, blobs, sha) (rollback, err)`。适用于"先 incr 后 put"模式（如 CheckExists 秒传预检）。回滚闭包多次调用幂等。
+
+## 批量操作结果（v0.1.0+）
+
+### 批量复制结果 (BatchCopyResult)
+BatchCopy 返回结构化结果 `*BatchCopyResult{Success, Failed int}`，让调用方区分"全部成功"与"部分失败"。配合 transport handler 把 success/failed 写入 JSON 响应。
+
+## 目录删除（v0.1.0+）
+
+### 原子性目录删除 (Atomic deleteDir)
+deleteDir 用 `undoOp` 栈（`undoDeleteFile` / `undoDecrRef`）实现事务式回滚：
+- 失败时倒序调用 `meta.PutFile` / `meta.IncrBlobRef` 撤销
+- 物理文件删除不回滚（已知弱保证：ref_count 恢复后下次 DecrBlobRef≤0 会再次触发）
+
+5 个 TDD 回归测试覆盖：空目录 / 2 文件 / 嵌套 / 中途失败回滚 / ref_count=0 物理清理。

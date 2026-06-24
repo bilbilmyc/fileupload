@@ -19,33 +19,16 @@ func NewTusHandler(uploadSvc *domain.UploadService) *TusHandler {
 
 // POST /uploads — 创建上传会话
 func (h *TusHandler) CreateUpload(w http.ResponseWriter, r *http.Request) {
-	uploadLengthStr := r.Header.Get("Upload-Length")
-	if uploadLengthStr == "" {
-		respondError(w, http.StatusBadRequest, domain.ErrInvalidArgument)
+	in, err := parseTusInit(r)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, err)
 		return
 	}
-	uploadLength, err := strconv.ParseInt(uploadLengthStr, 10, 64)
-	if err != nil || uploadLength < 0 {
-		respondError(w, http.StatusBadRequest, domain.ErrInvalidArgument)
-		return
-	}
-
-	sha256 := r.Header.Get("X-SHA256")
-	compression := r.Header.Get("X-Compression")
-	if compression == "" {
-		compression = "none"
-	}
-	chunkSizeStr := r.Header.Get("X-Chunk-Size")
-	var chunkSize int64
-	if chunkSizeStr != "" {
-		chunkSize, _ = strconv.ParseInt(chunkSizeStr, 10, 64)
-	}
-	fileName := decodeFileName(r.Header.Get("X-File-Name"))
 	namespace := GetNamespace(r.Context())
 
 	session, err := h.uploadSvc.CreateSession(r.Context(),
-		sha256, uploadLength, domain.CompressionFormat(compression),
-		chunkSize, namespace, fileName)
+		in.sha256, in.uploadLength, in.compression,
+		in.chunkSize, namespace, in.fileName)
 	if err != nil {
 		respondError(w, domainErrorToStatus(err), err)
 		return

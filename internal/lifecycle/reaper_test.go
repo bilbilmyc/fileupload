@@ -258,6 +258,60 @@ func TestReap_CleansExpiredSessions(t *testing.T) {
 	}
 }
 
+// TestReap_CleansExpiredSessions_ViaStorage — 用 mockStorage（无真实 FS）验证 cleanupSession
+//
+// 场景：expired session 在 Redis 中存在，tempStorage 中有对应分片文件
+// 期望：reap 后 Redis 会话被删 + tempStorage 中所有以 sessionID/ 开头的文件被删
+func TestReap_CleansExpiredSessions_ViaStorage(t *testing.T) {
+	meta := newMockMeta()
+	store := newMockStorage()
+
+	sessionID := "expired-via-storage"
+	meta.CreateSession(context.Background(), &domain.UploadSession{
+		SessionID: sessionID,
+		ExpireAt:  time.Now().Add(-1 * time.Hour),
+		Status:    "active",
+	})
+
+	// 写入 2 个分片文件
+	store.Write(context.Background(), sessionID+"/0.part", bytes.NewReader([]byte("a")))
+	store.Write(context.Background(), sessionID+"/1.part", bytes.NewReader([]byte("bb")))
+
+	r := NewSessionReaperWithStorage(meta, store, time.Minute)
+	r.reap(context.Background())
+
+	// 会话应被删
+	if s, _ := meta.GetSession(context.Background(), sessionID); s != nil {
+		t.Error("expired session 仍存在")
+	}
+	// 临时文件应被删
+	if _, exists, _ := store.Stat(context.Background(), sessionID+"/0.part"); exists {
+		t.Error("0.part 应被删")
+	}
+	if _, exists, _ := store.Stat(context.Background(), sessionID+"/1.part"); exists {
+		t.Error("1.part 应被删")
+	}
+}
+
+// TestReap_CleansOrphanParts_ViaStorage — 孤儿 sessionID 的临时文件应被清
+//
+// 场景：tempStorage 有 session-orphan/0.part，但 Redis 中无 session-orphan
+// 期望：reap 后该文件被删
+func TestReap_CleansOrphanParts_ViaStorage(t *testing.T) {
+	meta := newMockMeta()
+	store := newMockStorage()
+
+	// 不创建 session，但写入"孤儿"分片
+	store.Write(context.Background(), "session-orphan/0.part", bytes.NewReader([]byte("z")))
+
+	r := NewSessionReaperWithStorage(meta, store, time.Minute)
+	r.reap(context.Background())
+
+	if _, exists, _ := store.Stat(context.Background(), "session-orphan/0.part"); exists {
+		t.Error("孤儿分片应被删")
+	}
+}
+
 func TestReap_KeepsActiveSessions(t *testing.T) {
 	meta := newMockMeta()
 	dir := t.TempDir()

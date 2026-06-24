@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -20,13 +21,32 @@ import (
 type SessionReaper struct {
 	meta    domain.Metadata
 	storage domain.Storage
+
+	// 新版：直接持有 tempStorage 端口，cleanup 用 Walk/Delete 替代 os.*
+	tempStorage domain.Storage
+	// 旧版：保留 tempDir 用于向后兼容（cleanupOrphanParts 兼容路径）
 	tempDir string
 	interval time.Duration
-	stopCh  chan struct{}
-	wg      sync.WaitGroup
+	stopCh   chan struct{}
+	wg       sync.WaitGroup
 }
 
-// NewSessionReaper 创建会话清理器
+// NewSessionReaperWithStorage 创建会话清理器（新版本，tempStorage 走 Storage 端口）。
+// 推荐使用此构造函数 — cleanup 用 storage.Walk + storage.Delete，不再依赖 os.* 直接文件系统。
+func NewSessionReaperWithStorage(meta domain.Metadata, tempStorage domain.Storage, interval time.Duration) *SessionReaper {
+	if interval <= 0 {
+		interval = time.Minute
+	}
+	return &SessionReaper{
+		meta:        meta,
+		tempStorage: tempStorage,
+		interval:    interval,
+		stopCh:      make(chan struct{}),
+	}
+}
+
+// NewSessionReaper 创建会话清理器（旧版本，向后兼容，使用 tempDir 字符串 + os.*）。
+// 推荐改用 NewSessionReaperWithStorage。
 func NewSessionReaper(meta domain.Metadata, storage domain.Storage, tempDir string, interval time.Duration) *SessionReaper {
 	if interval <= 0 {
 		interval = time.Minute
@@ -87,16 +107,31 @@ func (r *SessionReaper) reap(ctx context.Context) {
 }
 
 // cleanupSession 清理单个过期会话
+//
+// 优先走 tempStorage 端口（推荐路径）。若 reaper 用旧构造函数（tempDir 字符串），
+// 回退到 os.* 实现（向后兼容）。
 func (r *SessionReaper) cleanupSession(ctx context.Context, sessionID string) {
-	// 清理临时分片目录
-	sessionDir := filepath.Join(r.tempDir, sessionID)
-	entries, err := os.ReadDir(sessionDir)
-	if err == nil {
-		for _, entry := range entries {
-			partPath := filepath.Join(sessionDir, entry.Name())
-			os.Remove(partPath)
+	if r.tempStorage != nil {
+		// 新路径：Walk tempStorage，删除所有以 "<sessionID>/" 开头的文件
+		prefix := sessionID + "/"
+		r.tempStorage.Walk(ctx, func(path string, _ fs.FileInfo) error {
+			if strings.HasPrefix(path, prefix) {
+				if err := r.tempStorage.Delete(ctx, path); err != nil {
+					log.Printf("[reaper] 删除临时文件失败 %s: %v", path, err)
+				}
+			}
+			return nil
+		})
+	} else {
+		// 旧路径：os.* 直接文件系统
+		sessionDir := filepath.Join(r.tempDir, sessionID)
+		entries, err := os.ReadDir(sessionDir)
+		if err == nil {
+			for _, entry := range entries {
+				os.Remove(filepath.Join(sessionDir, entry.Name()))
+			}
+			os.Remove(sessionDir)
 		}
-		os.Remove(sessionDir)
 	}
 
 	// 删除 Redis 中的会话数据
@@ -107,26 +142,53 @@ func (r *SessionReaper) cleanupSession(ctx context.Context, sessionID string) {
 
 // cleanupOrphanParts 清理临时目录中无对应 Redis 会话的孤儿分片
 func (r *SessionReaper) cleanupOrphanParts(ctx context.Context) {
+	if r.tempStorage != nil {
+		// 新路径：Walk tempStorage，按文件路径第一段分组（= sessionID 候选），
+		// 检查 Redis 是否还有该会话，无则视为孤儿删除该组所有文件。
+		groups := make(map[string][]string) // sessionID → []path
+		r.tempStorage.Walk(ctx, func(path string, _ fs.FileInfo) error {
+			idx := strings.Index(path, "/")
+			if idx < 0 {
+				return nil // 无前缀，不是 session 路径
+			}
+			sessionID := path[:idx]
+			groups[sessionID] = append(groups[sessionID], path)
+			return nil
+		})
+
+		for sessionID, paths := range groups {
+			if sessionID == "" {
+				continue
+			}
+			session, err := r.meta.GetSession(ctx, sessionID)
+			if err != nil || session != nil {
+				continue
+			}
+			for _, p := range paths {
+				if delErr := r.tempStorage.Delete(ctx, p); delErr != nil {
+					log.Printf("[reaper] 删除孤儿文件失败 %s: %v", p, delErr)
+				}
+			}
+			log.Printf("[reaper] 清理孤儿临时目录: %s", sessionID)
+		}
+		return
+	}
+
+	// 旧路径：os.* 直接文件系统
 	entries, err := os.ReadDir(r.tempDir)
 	if err != nil {
 		return
 	}
-
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
 		}
 		sessionID := entry.Name()
-
-		// 检查 Redis 中是否还有该会话
 		session, err := r.meta.GetSession(ctx, sessionID)
 		if err != nil || session != nil {
 			continue
 		}
-
-		// 孤儿目录，清理
-		sessionDir := filepath.Join(r.tempDir, sessionID)
-		os.RemoveAll(sessionDir)
+		os.RemoveAll(filepath.Join(r.tempDir, sessionID))
 		log.Printf("[reaper] 清理孤儿临时目录: %s", sessionID)
 	}
 }
