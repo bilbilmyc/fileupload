@@ -1,170 +1,70 @@
-// Package compressor 实现 domain.Compressor 端口的压缩/解压/归档适配器
+// Package compressor 实现 domain.Compressor 端口的压缩/解压/归档适配器。
+//
+// 采用 codec 注册表模式：每种格式（zstd / gzip / tar.gz / tar.zst / zip / none）
+// 在独立文件中以 Decompressor / Archiver 接口实现，并在 init() 注册到包级注册表。
+// 加新格式 = 新增一个 codec_xxx.go 文件 + init() 注册一行，不再修改调度文件。
 package compressor
 
 import (
-	"archive/tar"
-	"archive/zip"
-	"compress/gzip"
 	"context"
 	"fmt"
 	"io"
-	"time"
 
-	"github.com/klauspost/compress/zstd"
 	"github.com/bilbilmyc/fileupload/internal/domain"
 )
 
-// Compressor 压缩/解压/归档实现
-// 支持格式：zstd、gzip、tar.gz、tar.zst、zip
-type Compressor struct {
-	zstdDec *zstd.Decoder
-	zstdEnc *zstd.Encoder
+// Decompressor 单流解压：把压缩流还原为原始字节流。
+// 例如 gzip / zstd / tar.gz / tar.zst 都属于此类（gzip/tar.* 仅剥离外层压缩，不解 tar）。
+type Decompressor interface {
+	Format() domain.CompressionFormat
+	Decompress(ctx context.Context, r io.Reader) (io.ReadCloser, error)
 }
 
-// NewCompressor 创建压缩器（带 zstd 编解码器池化）
+// Archiver 归档写入：把多个文件打包成单一归档流（tar.gz / tar.zst / zip）。
+type Archiver interface {
+	Format() domain.CompressionFormat
+	NewArchiveWriter(ctx context.Context, w io.Writer) (domain.ArchiveWriter, error)
+}
+
+// 注册表：Decompressor 与 Archiver 分别注册，允许同格式仅支持一种操作。
+var (
+	decompressors = map[domain.CompressionFormat]Decompressor{}
+	archivers     = map[domain.CompressionFormat]Archiver{}
+)
+
+// RegisterDecompressor 注册单流解压 codec。
+func RegisterDecompressor(d Decompressor) { decompressors[d.Format()] = d }
+
+// RegisterArchiver 注册归档写入 codec。
+func RegisterArchiver(a Archiver) { archivers[a.Format()] = a }
+
+// Compressor 压缩/解压/归档调度器。
+// 自身不持有 codec 状态 — 调度完全走包级注册表。
+// 这种结构消除了之前 Compressor 上的 zstdDec/zstdEnc 字段（init 后从未使用）。
+type Compressor struct{}
+
+// NewCompressor 创建 Compressor。注册表中的 codec 在其各自的 init() 中已注册。
 func NewCompressor() (*Compressor, error) {
-	dec, err := zstd.NewReader(nil)
-	if err != nil {
-		return nil, fmt.Errorf("初始化 zstd decoder: %w", err)
+	if len(decompressors) == 0 && len(archivers) == 0 {
+		return nil, fmt.Errorf("compressor: 没有任何 codec 注册")
 	}
-	enc, err := zstd.NewWriter(nil)
-	if err != nil {
-		dec.Close()
-		return nil, fmt.Errorf("初始化 zstd encoder: %w", err)
-	}
-	return &Compressor{
-		zstdDec: dec,
-		zstdEnc: enc,
-	}, nil
+	return &Compressor{}, nil
 }
 
-// Decompress 解压：输入压缩流，输出原始数据流
-func (c *Compressor) Decompress(_ context.Context, r io.Reader, format domain.CompressionFormat) (io.ReadCloser, error) {
-	switch format {
-	case domain.CompZstd:
-		// zstd 流式解压
-		pr, pw := io.Pipe()
-		go func() {
-			dec, err := zstd.NewReader(r)
-			if err != nil {
-				pw.CloseWithError(fmt.Errorf("创建 zstd reader: %w", err))
-				return
-			}
-			defer dec.Close()
-			_, err = io.Copy(pw, dec)
-			pw.CloseWithError(err)
-		}()
-		return pr, nil
-
-	case domain.CompGzip, domain.CompTarGz:
-		return gzip.NewReader(r)
-
-	case domain.CompTarZst:
-		// tar.zst = zstd 流解压
-		dec, err := zstd.NewReader(r)
-		if err != nil {
-			return nil, fmt.Errorf("创建 zstd reader: %w", err)
-		}
-		return dec.IOReadCloser(), nil
-
-	case domain.CompNone:
-		return io.NopCloser(r), nil
-
-	default:
+// Decompress 解压：输入压缩流，输出原始数据流。
+func (c *Compressor) Decompress(ctx context.Context, r io.Reader, format domain.CompressionFormat) (io.ReadCloser, error) {
+	d, ok := decompressors[format]
+	if !ok {
 		return nil, fmt.Errorf("不支持的压缩格式: %s", format)
 	}
+	return d.Decompress(ctx, r)
 }
 
-// NewArchiveWriter 创建流式归档写入器
-func (c *Compressor) NewArchiveWriter(_ context.Context, w io.Writer, format domain.CompressionFormat) (domain.ArchiveWriter, error) {
-	switch format {
-	case domain.CompTarGz:
-		gw := gzip.NewWriter(w)
-		tw := tar.NewWriter(gw)
-		return &tarArchiveWriter{
-			tw:  tw,
-			cw:  gw,
-			fmt: format,
-		}, nil
-
-	case domain.CompTarZst:
-		zw, err := zstd.NewWriter(w)
-		if err != nil {
-			return nil, fmt.Errorf("创建 zstd writer: %w", err)
-		}
-		tw := tar.NewWriter(zw)
-		return &tarArchiveWriter{
-			tw:  tw,
-			cw:  zw,
-			fmt: format,
-		}, nil
-
-	case domain.CompZip:
-		return &zipArchiveWriter{zw: zip.NewWriter(w)}, nil
-
-	default:
+// NewArchiveWriter 创建流式归档写入器。
+func (c *Compressor) NewArchiveWriter(ctx context.Context, w io.Writer, format domain.CompressionFormat) (domain.ArchiveWriter, error) {
+	a, ok := archivers[format]
+	if !ok {
 		return nil, fmt.Errorf("不支持的归档格式: %s", format)
 	}
-}
-
-// tarArchiveWriter tar 归档写入器（支持 tar.gz / tar.zst）
-type tarArchiveWriter struct {
-	tw  *tar.Writer
-	cw  io.Closer
-	fmt domain.CompressionFormat
-}
-
-// zipArchiveWriter zip 归档写入器
-type zipArchiveWriter struct {
-	zw *zip.Writer
-}
-
-func (w *zipArchiveWriter) AddFile(_ context.Context, name string, size int64, content io.Reader) error {
-	hdr := &zip.FileHeader{
-		Name:   name,
-		Method: zip.Deflate,
-	}
-	hdr.SetMode(0644)
-	hdr.Modified = time.Now()
-
-	fw, err := w.zw.CreateHeader(hdr)
-	if err != nil {
-		return fmt.Errorf("创建 zip 条目 %s: %w", name, err)
-	}
-	if _, err := io.Copy(fw, content); err != nil {
-		return fmt.Errorf("写入 zip 条目 %s: %w", name, err)
-	}
-	return nil
-}
-
-func (w *zipArchiveWriter) Close() error {
-	return w.zw.Close()
-}
-
-// AddFile 写入一个文件条目
-func (w *tarArchiveWriter) AddFile(_ context.Context, name string, size int64, content io.Reader) error {
-	hdr := &tar.Header{
-		Name:     name,
-		Size:     size,
-		Typeflag: tar.TypeReg,
-		Mode:     0644,
-	}
-	if err := w.tw.WriteHeader(hdr); err != nil {
-		return fmt.Errorf("写入 tar header: %w", err)
-	}
-	if _, err := io.Copy(w.tw, content); err != nil {
-		return fmt.Errorf("写入 tar body: %w", err)
-	}
-	return nil
-}
-
-// Close 收尾，关闭 tar + 压缩 writer
-func (w *tarArchiveWriter) Close() error {
-	if err := w.tw.Close(); err != nil {
-		return fmt.Errorf("关闭 tar writer: %w", err)
-	}
-	if err := w.cw.Close(); err != nil {
-		return fmt.Errorf("关闭压缩 writer: %w", err)
-	}
-	return nil
+	return a.NewArchiveWriter(ctx, w)
 }
