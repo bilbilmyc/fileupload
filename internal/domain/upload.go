@@ -26,6 +26,7 @@ type UploadService struct {
 	hasher      Hasher
 	pool        WorkerPool
 	cfg         UploadConfig
+	layout      *HierarchicalLayout // 路径布局（ADR-0001 扁平/层级搬移）
 }
 
 // UploadConfig 上传服务配置
@@ -49,6 +50,7 @@ func NewUploadService(meta interface {
 		hasher:      hasher,
 		pool:        pool,
 		cfg:         cfg,
+		layout:      NewHierarchicalLayout(),
 	}
 }
 
@@ -347,7 +349,7 @@ func (s *UploadService) Finalize(ctx context.Context, sessionID string) (*FileMe
 	if fileName == "" {
 		fileName = NewID()
 	}
-	storagePath := fmt.Sprintf("%s/%s", session.Namespace, fileName)
+	storagePath := s.layout.FlatPath(session.Namespace, fileName)
 
 	// Phase 3: 写入存储 + 创建去重和文件记录
 	fileMeta, err := commitStream(ctx, verifiedReader, storagePath, session, s.storage, s.meta, s.meta, hashRes)
@@ -467,16 +469,16 @@ func (s *UploadService) SubmitDir(ctx context.Context, manifest DirManifest, nam
 		if parentFile.SHA256 != "" {
 			blob, err := s.meta.GetBlobBySha(ctx, parentFile.SHA256)
 			if err == nil && blob != nil {
-				hierPath := fmt.Sprintf("%s/%s/%s", namespace, dirName, entry.Path)
+				hierPath := s.layout.HierarchicalPath(namespace, dirName, entry.Path)
 				if blob.StoragePath != hierPath {
-					reader, rErr := s.storage.Open(ctx, blob.StoragePath, 0, 0)
-					if rErr == nil {
-						_, wErr := s.storage.Write(ctx, hierPath, reader)
-						reader.Close()
-						if wErr == nil {
-							_ = s.storage.Delete(ctx, blob.StoragePath)
-							_ = s.meta.UpdateBlobStorage(ctx, parentFile.SHA256, hierPath)
-						}
+					// layout.Move 不再静默吞错（与之前 upload.go:472-479 不同）：
+					// 失败会让调用方知晓，留下脏文件供 reaper 处理。
+					if moveErr := s.layout.Move(ctx, s.storage, blob.StoragePath, hierPath); moveErr != nil {
+						log.Printf("[upload] 层级搬移失败 sha=%s: %v", parentFile.SHA256, moveErr)
+						continue
+					}
+					if err := s.meta.UpdateBlobStorage(ctx, parentFile.SHA256, hierPath); err != nil {
+						log.Printf("[upload] 更新 blob storage_path 失败 sha=%s: %v", parentFile.SHA256, err)
 					}
 				}
 			}
