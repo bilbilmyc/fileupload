@@ -77,6 +77,53 @@ export interface DirManifest {
   entries: Array<{ path: string; file_id: string; size?: number; sha256?: string }>
 }
 
+/** 分享链接 */
+export interface ShareEntry {
+  token: string
+  file_id: string
+  expires_at?: string
+  max_downloads: number
+  cur_downloads: number
+  namespace: string
+}
+
+/** 创建分享请求 */
+export interface CreateShareRequest {
+  file_id: string
+  password?: string
+  expires_in: number
+  max_downloads: number
+}
+
+/** 系统状态 */
+export interface SystemStatus {
+  version: string
+  start_time: string
+  uptime: string
+  storage?: Record<string, any>
+  metadata?: Record<string, any>
+  counts?: Record<string, number>
+}
+
+/** 审计日志条目 */
+export interface AuditLogEntry {
+  id: string
+  target_type: string
+  target_id: string
+  namespace: string
+  detail: string
+  created_at: string
+}
+
+/** 一致性巡检报告 */
+export interface ScanReport {
+  orphan_parts: number
+  orphan_files: string[]
+  metadata_orphans: number
+  ref_count_fixes: number
+  corrupted_files: string[]
+}
+
 /** 文件信息 */
 export interface FileInfo {
   file_id: string
