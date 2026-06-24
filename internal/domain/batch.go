@@ -6,6 +6,8 @@ import (
 	"io"
 	"log"
 	"time"
+
+	"github.com/bilbilmyc/fileupload/internal/metrics"
 )
 
 // ============================================================
@@ -105,12 +107,17 @@ func (s *BatchService) BatchDelete(ctx context.Context, ids []string, namespace 
 			result.Success++
 		}
 	}
+	metrics.BatchOpsTotal.WithLabelValues("delete", metrics.ResultSuccess).Inc()
+	metrics.BatchOpItems.WithLabelValues("delete", metrics.ResultSuccess).Add(float64(result.Success))
+	metrics.BatchOpItems.WithLabelValues("delete", metrics.ResultFailed).Add(float64(result.Failed))
 	return &result, nil
 }
 
 // BatchDownload 批量打包下载（流式）
 // 返回 io.ReadCloser，读取它即获得打包数据流。
 func (s *BatchService) BatchDownload(ctx context.Context, ids []string, namespace string, format CompressionFormat) (io.ReadCloser, error) {
+	metrics.BatchOpsTotal.WithLabelValues("download", metrics.ResultSuccess).Inc()
+	metrics.BatchOpItems.WithLabelValues("download", metrics.ResultSuccess).Add(float64(len(ids)))
 	return s.packer.StreamBatch(ctx, ids, namespace, format)
 }
 
@@ -140,6 +147,8 @@ func (s *BatchService) BatchMove(ctx context.Context, ids []string, targetDirID 
 	}
 
 	log.Printf("[batch] 移动 %d 个文件到 %s", len(ids), targetDirID)
+	metrics.BatchOpsTotal.WithLabelValues("move", metrics.ResultSuccess).Inc()
+	metrics.BatchOpItems.WithLabelValues("move", metrics.ResultSuccess).Add(float64(len(ids)))
 	return nil
 }
 
@@ -235,6 +244,9 @@ func (s *BatchService) BatchCopy(ctx context.Context, ids []string, targetDirID 
 	}
 
 	log.Printf("[batch] 复制 %d 个文件到 %s", copied, targetDirID)
+	metrics.BatchOpsTotal.WithLabelValues("copy", metrics.ResultSuccess).Inc()
+	metrics.BatchOpItems.WithLabelValues("copy", metrics.ResultSuccess).Add(float64(copied))
+	metrics.BatchOpItems.WithLabelValues("copy", metrics.ResultFailed).Add(float64(len(ids) - copied))
 	return &BatchCopyResult{Success: copied, Failed: len(ids) - copied}, nil
 }
 
@@ -309,5 +321,7 @@ func (s *BatchService) BatchTag(ctx context.Context, ids []string, tags []string
 		_ = s.meta.SetFileTags(ctx, id, tags)
 	}
 	log.Printf("[batch] 标记 %d 个文件: %v", len(ids), tags)
+	metrics.BatchOpsTotal.WithLabelValues("tag", metrics.ResultSuccess).Inc()
+	metrics.BatchOpItems.WithLabelValues("tag", metrics.ResultSuccess).Add(float64(len(ids)))
 	return nil
 }

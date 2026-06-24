@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/bilbilmyc/fileupload/internal/domain"
+	"github.com/bilbilmyc/fileupload/internal/metrics"
 )
 
 // SessionReaper 上传会话超时清理器
@@ -137,6 +138,8 @@ func (r *SessionReaper) cleanupSession(ctx context.Context, sessionID string) {
 	// 删除 Redis 中的会话数据
 	_ = r.meta.DeleteSession(ctx, sessionID)
 
+	metrics.ReaperCleanupsTotal.WithLabelValues("expired_session").Inc()
+
 	log.Printf("[reaper] 清理过期会话: %s", sessionID)
 }
 
@@ -169,6 +172,7 @@ func (r *SessionReaper) cleanupOrphanParts(ctx context.Context) {
 					log.Printf("[reaper] 删除孤儿文件失败 %s: %v", p, delErr)
 				}
 			}
+			metrics.ReaperCleanupsTotal.WithLabelValues("orphan_part").Inc()
 			log.Printf("[reaper] 清理孤儿临时目录: %s", sessionID)
 		}
 		return

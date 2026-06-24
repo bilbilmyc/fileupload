@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"net/http/pprof"
 
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+
 	"github.com/bilbilmyc/fileupload/internal/domain"
 	"github.com/bilbilmyc/fileupload/web"
 )
@@ -169,6 +171,9 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("GET /debug/pprof/block", pprof.Handler("block"))
 	r.mux.Handle("GET /debug/pprof/mutex", pprof.Handler("mutex"))
 	r.mux.Handle("GET /debug/vars", expvar.Handler())
+
+	// === Prometheus 指标（v0.2.0+） ===
+	r.mux.Handle("GET /metrics", promhttp.Handler())
 }
 
 // handleCheckExists 秒传预检
