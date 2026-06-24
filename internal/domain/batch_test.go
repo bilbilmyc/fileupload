@@ -97,6 +97,55 @@ func TestBatchService_BatchCopy(t *testing.T) {
 	}
 }
 
+// TestBatchService_BatchCopy_IncrementsRefCount 回归测试：BatchCopy 应增加 blob 引用计数。
+// 修复前此测试会失败（候选 #1 bug：引用计数被静默吞掉）。
+// setupBatchTest 把 blob1/2 的 RefCount 都设成 1；复制一次后应变成 2。
+func TestBatchService_BatchCopy_IncrementsRefCount(t *testing.T) {
+	svc, meta := setupBatchTest(t)
+	now := time.Now()
+	meta.PutFile(ctx, &FileMetadata{
+		FileID: "target-dir", Name: "target", Namespace: "demo", IsDir: true, CreatedAt: now,
+	})
+
+	if err := svc.BatchCopy(ctx, []string{"f1", "f2"}, "target-dir", "demo"); err != nil {
+		t.Fatalf("BatchCopy error = %v", err)
+	}
+
+	for _, sha := range []string{"blob1", "blob2"} {
+		b, _ := meta.GetBlobBySha(ctx, sha)
+		if b == nil {
+			t.Fatalf("blob %s not found", sha)
+		}
+		if b.RefCount != 2 {
+			t.Errorf("blob %s RefCount = %d, want 2 (原始 1 + 复制 1)", sha, b.RefCount)
+		}
+	}
+}
+
+// TestBatchService_BatchCopyDir_IncrementsRefCount 回归测试：递归目录复制也应增加引用计数。
+// setupBatchTest 中 dir-1 包含 f1/blob1 和 f2/blob2；复制整个目录后引用计数应各 +1。
+func TestBatchService_BatchCopyDir_IncrementsRefCount(t *testing.T) {
+	svc, meta := setupBatchTest(t)
+	now := time.Now()
+	meta.PutFile(ctx, &FileMetadata{
+		FileID: "target-dir", Name: "target", Namespace: "demo", IsDir: true, CreatedAt: now,
+	})
+
+	if err := svc.BatchCopy(ctx, []string{"dir-1"}, "target-dir", "demo"); err != nil {
+		t.Fatalf("BatchCopy(dir) error = %v", err)
+	}
+
+	for _, sha := range []string{"blob1", "blob2"} {
+		b, _ := meta.GetBlobBySha(ctx, sha)
+		if b == nil {
+			t.Fatalf("blob %s not found", sha)
+		}
+		if b.RefCount != 2 {
+			t.Errorf("blob %s RefCount = %d, want 2 (目录递归复制后)", sha, b.RefCount)
+		}
+	}
+}
+
 func TestBatchService_BatchTag(t *testing.T) {
 	svc, _ := setupBatchTest(t)
 	err := svc.BatchTag(ctx, []string{"f1", "f2"}, []string{"important"}, "demo")
