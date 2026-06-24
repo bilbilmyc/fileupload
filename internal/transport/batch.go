@@ -95,10 +95,15 @@ var batchActions = map[string]batchAction{
 		},
 		execute: func(h *BatchHandler, w http.ResponseWriter, r *http.Request, req batchRequest) error {
 			namespace := GetNamespace(r.Context())
-			if err := h.batchSvc.BatchCopy(r.Context(), req.IDs, req.TargetDirID, namespace); err != nil {
+			result, err := h.batchSvc.BatchCopy(r.Context(), req.IDs, req.TargetDirID, namespace)
+			if err != nil {
 				return err
 			}
-			respondJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+			respondJSON(w, http.StatusOK, map[string]any{
+				"status":  "ok",
+				"success": result.Success,
+				"failed":  result.Failed,
+			})
 			return nil
 		},
 	},

@@ -197,6 +197,12 @@ jobs:
 
   # ========================================
   # Release: tag 推送时创建正式版本 Release + 版本镜像
+  #
+  # 触发: `git push origin vX.Y.Z`
+  # 产物:
+  #   - GitHub Release（自动生成 release notes）
+  #   - 8 个二进制（linux/darwin × amd64/arm64 × server/cli）+ checksums.txt
+  #   - Docker 镜像（由 docker job 推送，含 semver tag）
   # ========================================
   release:
     name: Release

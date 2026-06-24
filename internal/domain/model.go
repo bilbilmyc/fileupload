@@ -77,6 +77,15 @@ type FileMetadata struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+// Clone 深拷贝（用于 deleteDir 事务回滚保存原记录）。
+func (f *FileMetadata) Clone() *FileMetadata {
+	c := *f
+	if f.Tags != nil {
+		c.Tags = append([]string{}, f.Tags...)
+	}
+	return &c
+}
+
 // --- 目录 Manifest ---
 
 // DirManifest 目录上传时客户端提交的清单

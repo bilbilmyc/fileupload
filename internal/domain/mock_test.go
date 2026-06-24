@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"io"
 	"io/fs"
 	"sync"
@@ -106,6 +107,10 @@ type mockMetadata struct {
 	chunks     map[string][]ChunkInfo
 	blobs      map[string]*ContentBlob
 	files      map[string]*FileMetadata
+
+	// 失败注入：deleteFileCount > failAfterDeleteFile 时 DeleteFile 返回错误（0 = 不注入）
+	deleteFileCount     int
+	failAfterDeleteFile int
 }
 
 func newMockMetadata() *mockMetadata {
@@ -302,8 +307,21 @@ func (m *mockMetadata) ListChildren(_ context.Context, parentID string, search s
 func (m *mockMetadata) DeleteFile(_ context.Context, id string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.deleteFileCount++
+	if m.failAfterDeleteFile > 0 && m.deleteFileCount > m.failAfterDeleteFile {
+		return fmt.Errorf("mock 失败注入：第 %d 次 DeleteFile 超过 failAfter=%d", m.deleteFileCount, m.failAfterDeleteFile)
+	}
 	delete(m.files, id)
 	return nil
+}
+
+// SetFailAfterDeleteFile 配置 mock：第 N 次 DeleteFile 调用后返回错误。
+// 0 = 不注入失败。
+func (m *mockMetadata) SetFailAfterDeleteFile(n int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.failAfterDeleteFile = n
+	m.deleteFileCount = 0
 }
 
 func (m *mockMetadata) ListFilesByBlob(_ context.Context, sha256 string) ([]*FileMetadata, error) {

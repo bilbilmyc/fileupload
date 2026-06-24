@@ -614,19 +614,91 @@ func (s *UploadService) deleteDir(ctx context.Context, dir *FileMetadata, namesp
 	if err != nil {
 		return fmt.Errorf("列举子节点: %w", err)
 	}
-	for _, child := range children {
-		if child.IsDir {
-			if err := s.deleteDir(ctx, child, namespace); err != nil {
-				return err
-			}
-		} else {
-			if err := s.deleteFile(ctx, child); err != nil {
-				return err
+
+	// undo 操作栈：失败时回滚
+	// op.kind=deleteFile 时，op.file 保存原始记录用于 PutFile 恢复
+	// op.kind=decrRef 时，op.sha 用于 IncrBlobRef 撤销引用计数递减
+	var undo []undoOp
+	doUndo := func() {
+		for i := len(undo) - 1; i >= 0; i-- {
+			op := undo[i]
+			switch op.kind {
+			case undoDeleteFile:
+				if op.file != nil {
+					if rbErr := s.meta.PutFile(ctx, op.file); rbErr != nil {
+						log.Printf("[upload] 回滚 PutFile 失败 id=%s: %v", op.file.FileID, rbErr)
+					}
+				}
+			case undoDecrRef:
+				if rbErr := s.meta.IncrBlobRef(ctx, op.sha); rbErr != nil {
+					log.Printf("[upload] 回滚 IncrBlobRef 失败 sha=%s: %v", op.sha, rbErr)
+				}
 			}
 		}
 	}
+
+	for _, child := range children {
+		var childErr error
+		if child.IsDir {
+			childErr = s.deleteDir(ctx, child, namespace)
+		} else {
+			childErr = s.deleteFileWithUndo(ctx, child, &undo)
+		}
+		if childErr != nil {
+			doUndo()
+			return childErr
+		}
+	}
+
 	// 删除目录自身
-	return s.meta.DeleteFile(ctx, dir.FileID)
+	if err := s.meta.DeleteFile(ctx, dir.FileID); err != nil {
+		doUndo()
+		return err
+	}
+	return nil
+}
+
+type undoKind int
+
+const (
+	undoDeleteFile undoKind = iota
+	undoDecrRef
+)
+
+type undoOp struct {
+	kind undoKind
+	file *FileMetadata // for undoDeleteFile
+	sha  string        // for undoDecrRef
+}
+
+// deleteFileWithUndo 与 deleteFile 行为一致，但把每一步登记到 undo 栈
+// 用于 deleteDir 的事务式回滚。
+func (s *UploadService) deleteFileWithUndo(ctx context.Context, file *FileMetadata, undo *[]undoOp) error {
+	// 删文件记录
+	if err := s.meta.DeleteFile(ctx, file.FileID); err != nil {
+		return fmt.Errorf("删除文件记录: %w", err)
+	}
+	*undo = append(*undo, undoOp{kind: undoDeleteFile, file: file.Clone()})
+
+	// 减少引用计数
+	if file.SHA256 != "" {
+		newCount, err := s.meta.DecrBlobRef(ctx, file.SHA256)
+		if err != nil {
+			return fmt.Errorf("减少引用: %w", err)
+		}
+		*undo = append(*undo, undoOp{kind: undoDecrRef, sha: file.SHA256})
+
+		if newCount <= 0 {
+			blob, err := s.meta.GetBlobBySha(ctx, file.SHA256)
+			if err == nil && blob != nil {
+				_ = s.storage.Delete(ctx, blob.StoragePath)
+				// 物理文件删除不回滚 — ref_count 恢复后，下次 DecrBlobRef <=0 时会再次触发
+				// 这是已知的弱保证：物理文件可能被"提前"删除，rollback 只能恢复 DB 状态
+			}
+		}
+	}
+	log.Printf("[upload] 删除文件 %s (%s)", file.FileID, file.Name)
+	return nil
 }
 
 // Abort 取消上传会话

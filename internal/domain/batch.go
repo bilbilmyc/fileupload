@@ -149,22 +149,29 @@ type BatchCopyRequest struct {
 	TargetDirID string   `json:"target_dir_id"`
 }
 
-// BatchCopy 批量复制到目标目录
-func (s *BatchService) BatchCopy(ctx context.Context, ids []string, targetDirID string, namespace string) error {
+// BatchCopyResult 批量复制结果（含成功/失败计数）
+type BatchCopyResult struct {
+	Success int `json:"success"` // 成功复制的文件数
+	Failed  int `json:"failed"`  // 失败的文件数（找不到/namespace 不匹配等）
+}
+
+// BatchCopy 批量复制到目标目录。返回 BatchCopyResult 含成功/失败计数，
+// 让调用方区分"全部成功"和"部分失败"。
+func (s *BatchService) BatchCopy(ctx context.Context, ids []string, targetDirID string, namespace string) (*BatchCopyResult, error) {
 	// 验证目标目录
 	if targetDirID != "" {
 		targetDir, err := s.meta.GetFile(ctx, targetDirID)
 		if err != nil {
-			return fmt.Errorf("获取目标目录: %w", err)
+			return nil, fmt.Errorf("获取目标目录: %w", err)
 		}
 		if targetDir == nil {
-			return ErrNotFound
+			return nil, ErrNotFound
 		}
 		if targetDir.Namespace != namespace {
-			return ErrForbidden
+			return nil, ErrForbidden
 		}
 		if !targetDir.IsDir {
-			return ErrInvalidArgument
+			return nil, ErrInvalidArgument
 		}
 	}
 
@@ -228,7 +235,7 @@ func (s *BatchService) BatchCopy(ctx context.Context, ids []string, targetDirID 
 	}
 
 	log.Printf("[batch] 复制 %d 个文件到 %s", copied, targetDirID)
-	return nil
+	return &BatchCopyResult{Success: copied, Failed: len(ids) - copied}, nil
 }
 
 // copyDirChildren 递归复制目录子节点

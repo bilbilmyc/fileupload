@@ -91,7 +91,7 @@ func TestBatchService_BatchCopy(t *testing.T) {
 		FileID: "target-dir", Name: "target", Namespace: "demo", IsDir: true, CreatedAt: now,
 	})
 
-	err := svc.BatchCopy(ctx, []string{"f1"}, "target-dir", "demo")
+	_, err := svc.BatchCopy(ctx, []string{"f1"}, "target-dir", "demo")
 	if err != nil {
 		t.Fatalf("BatchCopy error = %v", err)
 	}
@@ -107,7 +107,7 @@ func TestBatchService_BatchCopy_IncrementsRefCount(t *testing.T) {
 		FileID: "target-dir", Name: "target", Namespace: "demo", IsDir: true, CreatedAt: now,
 	})
 
-	if err := svc.BatchCopy(ctx, []string{"f1", "f2"}, "target-dir", "demo"); err != nil {
+	if _, err := svc.BatchCopy(ctx, []string{"f1", "f2"}, "target-dir", "demo"); err != nil {
 		t.Fatalf("BatchCopy error = %v", err)
 	}
 
@@ -122,6 +122,30 @@ func TestBatchService_BatchCopy_IncrementsRefCount(t *testing.T) {
 	}
 }
 
+// Item 2 — 可观测性：BatchCopy 返回结构化结果，含 Success/Failed 计数
+func TestBatchService_BatchCopy_ReturnsResultCounts(t *testing.T) {
+	svc, meta := setupBatchTest(t)
+	now := time.Now()
+	meta.PutFile(ctx, &FileMetadata{
+		FileID: "target-dir", Name: "target", Namespace: "demo", IsDir: true, CreatedAt: now,
+	})
+	// "no-such" 是真实不存在的 ID，BatchCopy 应跳过它并计入 Failed
+
+	res, err := svc.BatchCopy(ctx, []string{"f1", "f2", "no-such"}, "target-dir", "demo")
+	if err != nil {
+		t.Fatalf("BatchCopy error = %v", err)
+	}
+	if res == nil {
+		t.Fatal("BatchCopy 返回 nil result")
+	}
+	if res.Success != 2 {
+		t.Errorf("Success = %d, want 2 (f1 + f2)", res.Success)
+	}
+	if res.Failed != 1 {
+		t.Errorf("Failed = %d, want 1 (no-such)", res.Failed)
+	}
+}
+
 // TestBatchService_BatchCopyDir_IncrementsRefCount 回归测试：递归目录复制也应增加引用计数。
 // setupBatchTest 中 dir-1 包含 f1/blob1 和 f2/blob2；复制整个目录后引用计数应各 +1。
 func TestBatchService_BatchCopyDir_IncrementsRefCount(t *testing.T) {
@@ -131,7 +155,7 @@ func TestBatchService_BatchCopyDir_IncrementsRefCount(t *testing.T) {
 		FileID: "target-dir", Name: "target", Namespace: "demo", IsDir: true, CreatedAt: now,
 	})
 
-	if err := svc.BatchCopy(ctx, []string{"dir-1"}, "target-dir", "demo"); err != nil {
+	if _, err := svc.BatchCopy(ctx, []string{"dir-1"}, "target-dir", "demo"); err != nil {
 		t.Fatalf("BatchCopy(dir) error = %v", err)
 	}
 
@@ -197,7 +221,7 @@ func TestBatchService_BatchMove_EmptyIDs(t *testing.T) {
 
 func TestBatchService_BatchCopy_EmptyIDs(t *testing.T) {
 	svc, _ := setupBatchTest(t)
-	err := svc.BatchCopy(ctx, []string{}, "target", "demo")
+	_, err := svc.BatchCopy(ctx, []string{}, "target", "demo")
 	if err == nil {
 		t.Fatal("expected error for empty IDs")
 	}
