@@ -406,6 +406,46 @@ X-Namespace: my-ns
 
 ---
 
+## 批量管理 API（v0.1.0+）
+
+### POST /v1/batch/copy — 批量复制
+
+**请求：**
+```json
+{
+  "ids": ["f1e2d3c40000000000000001", "f1e2d3c40000000000000002"],
+  "target_dir_id": "f1e2d3c400000000000000a1"
+}
+```
+
+**响应 `200 OK`（v0.1.0+）：**
+```json
+{
+  "status": "ok",
+  "success": 2,
+  "failed": 0
+}
+```
+
+`success` / `failed` 区分成功复制与跳过（找不到 / namespace 不匹配）的文件数。
+v0.1.0 之前版本只返回 `{"status": "ok"}`。
+
+**SDK 调用：**
+```typescript
+// JS SDK（v0.1.0+）
+const result = await client.batchCopy(["id1", "id2"], "target-dir")
+console.log(`复制成功 ${result.success} 个，失败 ${result.failed} 个`)
+```
+```go
+// Go SDK（v0.1.0+）
+res, err := client.BatchCopy(ctx, []string{"id1", "id2"}, "target-dir")
+if err == nil {
+    fmt.Printf("复制成功 %d 个，失败 %d 个\n", res.Success, res.Failed)
+}
+```
+
+---
+
 ### DELETE /v1/dirs/{dir_id} — 删除目录
 
 **请求：**
@@ -459,12 +499,21 @@ ws://host:8080/ws
 GET /health
 ```
 
-**响应 `200 OK`：**
+**响应 `200 OK`（v0.1.0+）：**
 ```json
 {
-  "status": "ok"
+  "status": "ok",
+  "storage": {
+    "status": "ok"
+  },
+  "metadata": {
+    "status": "ok"
+  }
 }
 ```
+
+`storage` / `metadata` 任一 `status: "error"` 表示对应后端不可达（PingContext / Stat 失败）。
+v0.1.0 之前版本只返回 `{"status": "ok"}`。
 
 ---
 

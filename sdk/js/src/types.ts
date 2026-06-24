@@ -44,6 +44,12 @@ export interface BatchDeleteResult {
   failed: number
 }
 
+/** 批量复制结果（v0.1.0+） */
+export interface BatchCopyResult {
+  success: number
+  failed: number
+}
+
 /** 文件信息 */
 export interface FileInfo {
   file_id: string

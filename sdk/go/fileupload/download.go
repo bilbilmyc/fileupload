@@ -169,6 +169,38 @@ func (c *Client) BatchDelete(ctx context.Context, ids []string) (map[string]any,
 	return result, nil
 }
 
+// BatchCopyResult 批量复制结果（v0.1.0+）
+type BatchCopyResult struct {
+	Success int `json:"success"`
+	Failed  int `json:"failed"`
+}
+
+// BatchCopy 批量复制到目标目录。返回成功/失败计数。
+func (c *Client) BatchCopy(ctx context.Context, ids []string, targetDirID string) (*BatchCopyResult, error) {
+	body, _ := json.Marshal(map[string]any{
+		"ids":           ids,
+		"target_dir_id": targetDirID,
+	})
+	req, err := http.NewRequestWithContext(ctx, "POST", c.url("/v1/batch/copy"), strings.NewReader(string(body)))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("batch copy failed (%d): %s", resp.StatusCode, readBody(resp))
+	}
+	var result BatchCopyResult
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode batch copy result: %w", err)
+	}
+	return &result, nil
+}
+
 // Scan 触发服务端一致性巡检。
 func (c *Client) Scan(ctx context.Context) (map[string]any, error) {
 	resp, err := c.do(postRequest(ctx, "POST", c.url("/v1/admin/scan")))

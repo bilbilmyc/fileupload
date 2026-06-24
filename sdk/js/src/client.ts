@@ -7,6 +7,7 @@ import type {
   UploadInitResult,
   UploadStatusResult,
   FinalizeResult,
+  BatchCopyResult,
   BatchDeleteResult,
   UploadOptions,
 } from './types'
@@ -191,9 +192,10 @@ export class FileuploadClient {
     await this.http.post('/v1/batch/move', { ids, target_dir_id: targetDirId })
   }
 
-  /** 批量复制 */
-  async batchCopy(ids: string[], targetDirId: string): Promise<void> {
-    await this.http.post('/v1/batch/copy', { ids, target_dir_id: targetDirId })
+  /** 批量复制（v0.1.0+：返回 success/failed 计数） */
+  async batchCopy(ids: string[], targetDirId: string): Promise<BatchCopyResult> {
+    const response = await this.http.post('/v1/batch/copy', { ids, target_dir_id: targetDirId })
+    return response.data as BatchCopyResult
   }
 
   /** 批量标记 */
