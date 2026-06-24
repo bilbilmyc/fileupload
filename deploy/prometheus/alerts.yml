@@ -1,0 +1,89 @@
+# Prometheus 告警规则 — fileupload
+#
+# 文件被 prometheus.yml 通过 rule_files 引用：
+#   rule_files:
+#     - "deploy/prometheus/alerts.yml"
+#
+# 每条规则的 expr 引用 internal/metrics/metrics.go 注册的真实指标。
+# 改指标名时必须同步改这里（CI 通过 deploy/prometheus/alerts_test.go 验证）。
+
+groups:
+  - name: fileupload_availability
+    interval: 30s
+    rules:
+      - alert: FileUploadDown
+        expr: up{job="fileupload"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: availability
+        annotations:
+          summary: "fileupload 实例宕机"
+          description: "Job {{ $labels.job }} on {{ $labels.instance }} 已 2 分钟不可达。"
+
+      - alert: FileUploadHealthDegraded
+        expr: fileupload_health_status{component="storage"} == 0 or fileupload_health_status{component="metadata"} == 0
+        for: 5m
+        labels:
+          severity: critical
+          component: backend
+        annotations:
+          summary: "fileupload 后端组件不健康"
+          description: "{{ $labels.component }} 状态异常已 5 分钟（status==0）。"
+
+  - name: fileupload_upload
+    interval: 30s
+    rules:
+      - alert: FileUploadErrorRateHigh
+        expr: |
+          (
+            sum(rate(fileupload_uploads_total{result="failed"}[5m]))
+            /
+            sum(rate(fileupload_uploads_total[5m]))
+          ) > 0.05
+        for: 10m
+        labels:
+          severity: warning
+          component: upload
+        annotations:
+          summary: "上传失败率超过 5%"
+          description: "近 5 分钟失败率 {{ $value | humanizePercentage }}，阈值 5%。"
+
+      - alert: FileUploadStalled
+        expr: sum(rate(fileupload_uploads_total[10m])) == 0
+        for: 30m
+        labels:
+          severity: warning
+          component: upload
+        annotations:
+          summary: "fileupload 30 分钟无上传"
+          description: "可能客户端问题或后端 hang。"
+
+  - name: fileupload_batch
+    interval: 1m
+    rules:
+      - alert: FileUploadBatchErrorRateHigh
+        expr: |
+          (
+            sum(rate(fileupload_batch_operation_items_total{item_result="failed"}[10m]))
+            /
+            sum(rate(fileupload_batch_operation_items_total[10m]))
+          ) > 0.10
+        for: 15m
+        labels:
+          severity: warning
+          component: batch
+        annotations:
+          summary: "批量操作失败率超过 10%"
+          description: "近 10 分钟失败率 {{ $value | humanizePercentage }}，阈值 10%。"
+
+      - alert: FileUploadReaperStalled
+        expr: |
+          (sum(rate(fileupload_reaper_cleanups_total[1h])) == 0) and (sum(fileupload_uploads_total) > 0)
+        for: 2h
+        labels:
+          severity: warning
+          component: lifecycle
+        annotations:
+          summary: "Reaper 2 小时未清理任何会话"
+          description: "Reaper 可能 hang，或 Redis/Storage 后端不可达。"

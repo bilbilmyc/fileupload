@@ -50,6 +50,33 @@ export interface BatchCopyResult {
   failed: number
 }
 
+/** 登录/刷新令牌对 */
+export interface TokenPair {
+  access_token: string
+  refresh_token: string
+  expires_in: number
+}
+
+/** 当前登录用户信息 */
+export interface UserInfo {
+  user_id: string
+  namespace: string
+  roles: string[]
+}
+
+/** 上传分片状态 */
+export interface UploadStatusResult {
+  session_id: string
+  chunks: Array<{ index: number; sha256: string; size: number }>
+  total: number
+}
+
+/** 目录 Manifest */
+export interface DirManifest {
+  name?: string
+  entries: Array<{ path: string; file_id: string; size?: number; sha256?: string }>
+}
+
 /** 文件信息 */
 export interface FileInfo {
   file_id: string

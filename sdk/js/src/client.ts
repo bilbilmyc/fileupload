@@ -10,6 +10,9 @@ import type {
   BatchCopyResult,
   BatchDeleteResult,
   UploadOptions,
+  TokenPair,
+  UserInfo,
+  DirManifest,
 } from './types'
 
 /**
@@ -34,6 +37,7 @@ export class FileuploadClient {
   private http: AxiosInstance
   private endpoint: string
   private namespace: string
+  private token?: string
 
   constructor(config: ClientConfig = {}) {
     this.endpoint = (config.endpoint || 'http://localhost:8080').replace(/\/+$/, '')
@@ -62,8 +66,81 @@ export class FileuploadClient {
 
   /** 设置认证令牌 */
   setToken(token: string): void {
+    this.token = token
     this.http.defaults.headers['Authorization'] = `Bearer ${token}`
     this.http.defaults.headers['X-Auth-Token'] = token
+  }
+
+  /** 获取当前 token */
+  getToken(): string | undefined {
+    return this.token
+  }
+
+  /** 清除认证令牌 */
+  clearToken(): void {
+    this.token = undefined
+    delete this.http.defaults.headers['Authorization']
+    delete this.http.defaults.headers['X-Auth-Token']
+  }
+
+  // ===== 鉴权 =====
+
+  /** 用户名密码登录，登录成功后自动 setToken */
+  async login(username: string, password: string): Promise<TokenPair> {
+    const response = await this.http.post('/v1/auth/login', { username, password })
+    const pair = response.data as TokenPair
+    this.setToken(pair.access_token)
+    return pair
+  }
+
+  /** 用 refresh token 刷新 access token */
+  async refreshToken(refreshToken: string): Promise<TokenPair> {
+    const response = await this.http.post('/v1/auth/refresh', { refresh_token: refreshToken })
+    const pair = response.data as TokenPair
+    this.setToken(pair.access_token)
+    return pair
+  }
+
+  /** 获取当前登录用户信息 */
+  async me(): Promise<UserInfo> {
+    const response = await this.http.get('/v1/auth/me')
+    return response.data as UserInfo
+  }
+
+  // ===== 上传生命周期 =====
+
+  /** 取消 tus 上传（DELETE /uploads/{sessionID}） */
+  async cancelUpload(sessionID: string): Promise<void> {
+    await this.http.delete(`/uploads/${encodeURIComponent(sessionID)}`)
+  }
+
+  /** 查询上传分片状态（GET /v1/uploads/{sessionID}/status） */
+  async getUploadStatus(sessionID: string): Promise<UploadStatusResult> {
+    const response = await this.http.get(`/v1/uploads/${encodeURIComponent(sessionID)}/status`)
+    return response.data as UploadStatusResult
+  }
+
+  // ===== 目录 =====
+
+  /** 提交目录 Manifest（POST /v1/dirs） */
+  async submitDir(manifest: DirManifest): Promise<{ file_id: string }> {
+    const response = await this.http.post('/v1/dirs', manifest)
+    return response.data
+  }
+
+  // ===== 预览 =====
+
+  /** 获取文件预览 URL（GET /v1/preview/{id}） */
+  previewUrl(id: string): string {
+    return `${this.endpoint}/v1/preview/${encodeURIComponent(id)}?namespace=${encodeURIComponent(this.namespace)}`
+  }
+
+  /** 下载预览（返回 Blob） */
+  async preview(id: string): Promise<Blob> {
+    const response = await this.http.get(`/v1/preview/${encodeURIComponent(id)}`, {
+      responseType: 'blob',
+    })
+    return response.data as Blob
   }
 
   /** 设置命名空间 */

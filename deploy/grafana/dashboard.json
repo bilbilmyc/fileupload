@@ -1,0 +1,141 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": "-- Grafana --",
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "fileupload 服务核心指标仪表盘（v0.3.0+）",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "id": 1,
+      "title": "服务可用性",
+      "type": "stat",
+      "gridPos": {"x": 0, "y": 0, "w": 6, "h": 4},
+      "targets": [
+        {"expr": "up{job=\"fileupload\"}", "refId": "A"}
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [{"options": {"0": {"text": "DOWN", "color": "red"}, "1": {"text": "UP", "color": "green"}}, "type": "value"}],
+          "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "后端组件健康",
+      "type": "stat",
+      "gridPos": {"x": 6, "y": 0, "w": 6, "h": 4},
+      "targets": [
+        {"expr": "fileupload_health_status", "refId": "A", "legendFormat": "{{component}}"}
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [{"options": {"0": {"text": "ERROR", "color": "red"}, "1": {"text": "OK", "color": "green"}}, "type": "value"}],
+          "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "上传速率（每秒）",
+      "type": "timeseries",
+      "gridPos": {"x": 12, "y": 0, "w": 12, "h": 8},
+      "targets": [
+        {"expr": "sum(rate(fileupload_uploads_total[5m])) by (result)", "refId": "A", "legendFormat": "{{result}}"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "ops"}}
+    },
+    {
+      "id": 4,
+      "title": "上传字节吞吐量",
+      "type": "timeseries",
+      "gridPos": {"x": 0, "y": 8, "w": 12, "h": 8},
+      "targets": [
+        {"expr": "sum(rate(fileupload_upload_bytes_total[5m]))", "refId": "A", "legendFormat": "bytes/s"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "Bps"}}
+    },
+    {
+      "id": 5,
+      "title": "下载速率",
+      "type": "timeseries",
+      "gridPos": {"x": 12, "y": 8, "w": 12, "h": 8},
+      "targets": [
+        {"expr": "sum(rate(fileupload_downloads_total[5m])) by (kind, result)", "refId": "A", "legendFormat": "{{kind}}/{{result}}"}
+      ]
+    },
+    {
+      "id": 6,
+      "title": "批量操作调用次数（5m rate）",
+      "type": "timeseries",
+      "gridPos": {"x": 0, "y": 16, "w": 12, "h": 8},
+      "targets": [
+        {"expr": "sum(rate(fileupload_batch_operations_total[5m])) by (operation, result)", "refId": "A", "legendFormat": "{{operation}}/{{result}}"}
+      ]
+    },
+    {
+      "id": 7,
+      "title": "批量操作条目成功率",
+      "type": "timeseries",
+      "gridPos": {"x": 12, "y": 16, "w": 12, "h": 8},
+      "targets": [
+        {"expr": "sum(rate(fileupload_batch_operation_items_total{item_result=\"success\"}[5m])) by (operation) / sum(rate(fileupload_batch_operation_items_total[5m])) by (operation)", "refId": "A", "legendFormat": "{{operation}}"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "percentunit", "max": 1, "min": 0}}
+    },
+    {
+      "id": 8,
+      "title": "Reaper 清理速率",
+      "type": "timeseries",
+      "gridPos": {"x": 0, "y": 24, "w": 12, "h": 8},
+      "targets": [
+        {"expr": "sum(rate(fileupload_reaper_cleanups_total[5m])) by (kind)", "refId": "A", "legendFormat": "{{kind}}"}
+      ]
+    },
+    {
+      "id": 9,
+      "title": "Go runtime — 内存",
+      "type": "timeseries",
+      "gridPos": {"x": 12, "y": 24, "w": 12, "h": 8},
+      "targets": [
+        {"expr": "go_memstats_heap_inuse_bytes{job=\"fileupload\"}", "refId": "A", "legendFormat": "heap in-use"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "bytes"}}
+    },
+    {
+      "id": 10,
+      "title": "Go runtime — Goroutines",
+      "type": "timeseries",
+      "gridPos": {"x": 0, "y": 32, "w": 12, "h": 8},
+      "targets": [
+        {"expr": "go_goroutines{job=\"fileupload\"}", "refId": "A", "legendFormat": "goroutines"}
+      ]
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 38,
+  "tags": ["fileupload", "v0.3.0"],
+  "templating": {"list": []},
+  "time": {"from": "now-1h", "to": "now"},
+  "timepicker": {},
+  "timezone": "",
+  "title": "fileupload 监控",
+  "uid": "fileupload-main",
+  "version": 1,
+  "weekStart": ""
+}
