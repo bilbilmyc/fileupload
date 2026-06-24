@@ -34,15 +34,26 @@ type DownloadPacker interface {
 
 // BatchService 批量操作编排
 // 依赖接口而非具体服务类型，便于单元测试。
+//
+// meta 字段是 FileStore + BlobStore 的复合接口（ADR-0006）：
+// BatchCopy 复制文件后需要 IncrBlobRef 增加引用计数，因此必须同时持有
+// FileStore（GetFile/PutFile/ListChildren/SetFileTags）与 BlobStore（IncrBlobRef）。
+// 不使用更宽的 domain.Metadata，因为 BatchService 不会用到 SessionStore/AdminStore。
 type BatchService struct {
-	deleter  FileDeleter
-	mover    FileMover
-	packer   DownloadPacker
-	meta     FileStore
+	deleter FileDeleter
+	mover   FileMover
+	packer  DownloadPacker
+	meta    interface {
+		FileStore
+		BlobStore
+	}
 }
 
 // NewBatchService 创建批量操作服务
-func NewBatchService(deleter FileDeleter, mover FileMover, packer DownloadPacker, meta FileStore) *BatchService {
+func NewBatchService(deleter FileDeleter, mover FileMover, packer DownloadPacker, meta interface {
+	FileStore
+	BlobStore
+}) *BatchService {
 	return &BatchService{
 		deleter: deleter,
 		mover:   mover,
@@ -207,23 +218,16 @@ func (s *BatchService) BatchCopy(ctx context.Context, ids []string, targetDirID 
 				continue
 			}
 			if file.SHA256 != "" {
-				_ = s.IncrBlobRefIfAvailable(ctx, file.SHA256)
+				if err := s.meta.IncrBlobRef(ctx, file.SHA256); err != nil {
+					// 引用计数失败不回滚 PutFile — 属于 refCounter 端口的范畴（ADR-0006）
+					log.Printf("[batch] 复制后引用计数失败 sha=%s: %v", file.SHA256, err)
+				}
 			}
 			copied++
 		}
 	}
 
 	log.Printf("[batch] 复制 %d 个文件到 %s", copied, targetDirID)
-	return nil
-}
-
-// IncrBlobRefIfAvailable 安全增加 blob 引用计数。
-// FileStore 接口不包含 IncrBlobRef，但 BlobStore 包含。
-// 这里通过 type assertion 尝试，如果 meta 恰好也实现了 BlobStore 则执行。
-func (s *BatchService) IncrBlobRefIfAvailable(ctx context.Context, sha256 string) error {
-	if bs, ok := s.meta.(interface{ IncrBlobRef(context.Context, string) error }); ok {
-		return bs.IncrBlobRef(ctx, sha256)
-	}
 	return nil
 }
 
@@ -269,7 +273,10 @@ func (s *BatchService) copyDirChildren(ctx context.Context, sourceDirID, targetD
 				continue
 			}
 			if child.SHA256 != "" {
-				_ = s.IncrBlobRefIfAvailable(ctx, child.SHA256)
+				if err := s.meta.IncrBlobRef(ctx, child.SHA256); err != nil {
+					// 引用计数失败不回滚 PutFile — 属于 refCounter 端口的范畴（ADR-0006）
+					log.Printf("[batch] 复制后引用计数失败 sha=%s: %v", child.SHA256, err)
+				}
 			}
 		}
 	}
