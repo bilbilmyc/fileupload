@@ -12,6 +12,12 @@ import (
 
 func newTestUploadService(t *testing.T) (*UploadService, *mockMetadata, *mockStorage) {
 	t.Helper()
+	return newBenchUploadService(t)
+}
+
+// newBenchUploadService 通用 setup，同时支持 *testing.T 和 *testing.B。
+func newBenchUploadService(tb testing.TB) (*UploadService, *mockMetadata, *mockStorage) {
+	tb.Helper()
 	meta := newMockMetadata()
 	storage := newMockStorage()
 	compress := newMockCompressor()

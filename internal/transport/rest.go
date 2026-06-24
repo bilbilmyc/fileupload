@@ -20,27 +20,15 @@ func NewRESTHandler(uploadSvc *domain.UploadService, downloadSvc *domain.Downloa
 
 // InitUpload POST /v1/uploads/init
 func (h *RESTHandler) InitUpload(w http.ResponseWriter, r *http.Request) {
-	lengthStr := r.URL.Query().Get("size")
-	if lengthStr == "" {
-		respondError(w, http.StatusBadRequest, domain.ErrInvalidArgument)
+	in, err := parseRestInit(r)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, err)
 		return
-	}
-	uploadLength, _ := strconv.ParseInt(lengthStr, 10, 64)
-	if uploadLength < 0 {
-		respondError(w, http.StatusBadRequest, domain.ErrInvalidArgument)
-		return
-	}
-
-	sha256 := r.Header.Get("X-SHA256")
-	compression := r.Header.Get("X-Compression")
-	fileName := decodeFileName(r.Header.Get("X-File-Name"))
-	if compression == "" {
-		compression = "none"
 	}
 	namespace := GetNamespace(r.Context())
 
-	session, err := h.uploadSvc.CreateSession(r.Context(), sha256, uploadLength,
-		domain.CompressionFormat(compression), 0, namespace, fileName)
+	session, err := h.uploadSvc.CreateSession(r.Context(), in.sha256, in.uploadLength,
+		in.compression, in.chunkSize, namespace, in.fileName)
 	if err != nil {
 		respondError(w, domainErrorToStatus(err), err)
 		return
