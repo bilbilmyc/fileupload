@@ -13,6 +13,11 @@ import type {
   TokenPair,
   UserInfo,
   DirManifest,
+  ShareEntry,
+  CreateShareRequest,
+  SystemStatus,
+  AuditLogEntry,
+  ScanReport,
 } from './types'
 
 /**
@@ -141,6 +146,54 @@ export class FileuploadClient {
       responseType: 'blob',
     })
     return response.data as Blob
+  }
+
+  // ===== 文件管理 =====
+
+  /** 重命名文件或目录（PATCH /v1/files/{id}） */
+  async rename(id: string, newName: string): Promise<void> {
+    await this.http.patch(`/v1/files/${encodeURIComponent(id)}`, { name: newName })
+  }
+
+  // ===== 分享 =====
+
+  /** 创建分享链接（POST /v1/share） */
+  async createShare(req: CreateShareRequest): Promise<ShareEntry> {
+    const response = await this.http.post('/v1/share', req)
+    return response.data as ShareEntry
+  }
+
+  /** 通过 token 访问分享（GET /s/{token}） */
+  async accessShare(token: string): Promise<ShareEntry> {
+    const response = await this.http.get(`/s/${encodeURIComponent(token)}`)
+    return response.data as ShareEntry
+  }
+
+  /** 构造分享访问 URL */
+  shareUrl(token: string): string {
+    return `${this.endpoint}/s/${encodeURIComponent(token)}?namespace=${encodeURIComponent(this.namespace)}`
+  }
+
+  // ===== 后台管理 =====
+
+  /** 系统状态（GET /v1/admin/status） */
+  async systemStatus(): Promise<SystemStatus> {
+    const response = await this.http.get('/v1/admin/status')
+    return response.data as SystemStatus
+  }
+
+  /** 审计日志（GET /v1/admin/audit） */
+  async listAuditLogs(page: number = 1, perPage: number = 50): Promise<{ entries: AuditLogEntry[]; total: number }> {
+    const response = await this.http.get('/v1/admin/audit', {
+      params: { page, per_page: perPage },
+    })
+    return response.data
+  }
+
+  /** 触发一致性巡检（POST /v1/admin/scan） */
+  async triggerScan(): Promise<ScanReport> {
+    const response = await this.http.post('/v1/admin/scan')
+    return response.data as ScanReport
   }
 
   /** 设置命名空间 */

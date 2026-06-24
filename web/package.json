@@ -12,6 +12,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@fileupload/sdk": "file:../sdk/js",
     "antd": "^5.24.0",
     "axios": "^1.8.0",
     "react": "^18.3.1",

@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useCallback, useMemo } from 'react'
 import axios from 'axios'
+import { refreshSDKClient } from '../api/sdk'
 
 interface AuthContextValue {
   token: string | null
@@ -26,6 +27,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const login = useCallback((newToken: string) => {
     localStorage.setItem(TOKEN_KEY, newToken)
     setToken(newToken)
+    refreshSDKClient()  // v0.5.0：通知 SDK 重建 client（带新 token）
   }, [])
 
   const loginWithCredentials = useCallback(async (username: string, password: string) => {
@@ -37,6 +39,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setToken(data.access_token)
     setNamespaceState(data.namespace || 'default')
     setUserId(data.user_id || null)
+    refreshSDKClient()
   }, [])
 
   const logout = useCallback(() => {
@@ -44,6 +47,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     localStorage.removeItem(USER_KEY)
     setToken(null)
     setUserId(null)
+    refreshSDKClient()
   }, [])
 
   const setNamespace = useCallback((ns: string) => {

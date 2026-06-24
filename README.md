@@ -5,6 +5,8 @@
 
 高性能、可自托管的文件上传下载服务。支持动态分片、客户端压缩、流式打包下载、SHA-256 全链路校验、断点续传、秒传（内容寻址去重）、文件分享。单二进制部署，内置 React 管理面板。
 
+**版本**：v0.4.0+（含 Prometheus 指标、Grafana 仪表盘、Alertmanager 告警、Go/JS 双 SDK）
+
 ---
 
 ## 快速开始
@@ -13,6 +15,13 @@
 
 - Go 1.25+
 - Node.js 20+（构建前端）
+
+### CI/CD 概览
+
+- 触发：push 到 main / PR / tag `v*`
+- 产物：4 平台 × server + CLI = 8 个二进制 + 2 架构 Docker 镜像
+- Tag push 自动创建 GitHub Release（含 release notes）
+- 详细文档：[docs/ci.md](docs/ci.md)
 - Redis（上传会话热数据）
 - SQLite（内置，零配置）或 PostgreSQL（生产推荐）
 
