@@ -37,3 +37,7 @@ web/dist/*.js
 web/dist/*.css
 web/dist/*.map
 web/dist/vite.svg
+
+# JS SDK（v0.5.0+）
+sdk/js/node_modules/
+sdk/js/dist/
