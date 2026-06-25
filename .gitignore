@@ -30,17 +30,10 @@ fileupload.yaml
 
 # 前端
 web/node_modules/
-# web/dist: 全部为构建产物（CI / 本地 make web 都重新生成）
-web/dist/assets/*.css
-web/dist/assets/*.js
-web/dist/*.js
-web/dist/*.css
-web/dist/*.map
-web/dist/*.html
-web/dist/vite.svg
-# 例外：占位文件（assets/placeholder + index.html 入口）跟踪以保留 embed 兼容
-!web/dist/index.html
-!web/dist/assets/placeholder
+# web/dist: 全部为构建产物（CI / 本地 make web 都重新生成）。
+# 无 Go embed 依赖（embed 检查无果），所以 index.html / placeholder
+# 占位文件不需要跟踪 — 全部由 Makefile 的 web target 生成。
+web/dist/
 
 # 测试覆盖率报告（生成产物，可由 scripts/coverage.sh 重新生成）
 web/coverage/
