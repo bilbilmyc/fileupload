@@ -42,12 +42,14 @@ describe('TopBar', () => {
     expect(refreshBtn).toBeInTheDocument()
   })
 
-  // v0.11.1：namespace 显示从 Sidebar 移到这里（更显眼）
-  it('renders namespace selector with current value', () => {
-    localStorage.setItem('fileupload_namespace', 'my-team')
+  // v0.11.2：namespace 选择器是 combobox（antd Select 用 combobox role）
+  it('renders namespace selector (antd Select = combobox)', () => {
+    localStorage.setItem('fileupload_namespace', 'myteam')
     renderTopBar()
-    // antd Select 组件（用类名验证存在性，值由 antd 内部状态管理）
-    expect(document.querySelector('.ant-select')).toBeInTheDocument()
+    // namespace Select 用 antd 渲染为 combobox role
+    const comboboxes = screen.getAllByRole('combobox')
+    // 至少 1 个 combobox（type filter）+ 1 个（namespace）
+    expect(comboboxes.length).toBeGreaterThanOrEqual(1)
   })
 
   // v0.11.1：用户菜单 — 验证 Dropdown 组件挂载（具体内容由 antd 管理）

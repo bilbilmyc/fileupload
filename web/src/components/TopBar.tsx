@@ -44,17 +44,20 @@ export default function TopBar({
         />
       </Space>
 
-      {/* 右：namespace 选择 + 刷新 + 用户菜单（v0.11.1+） */}
+      {/* 右：namespace 选择 + 刷新 + 用户菜单（v0.11.2+） */}
       <Space size="middle">
-        <Tooltip title="命名空间">
+        <Tooltip title="命名空间（不同用户/空间数据隔离）">
           <Select
             size="small"
             value={namespace}
             onChange={setNamespace}
             suffixIcon={<GlobalOutlined />}
             className="!w-[100px] sm:!w-[140px]"
+            showSearch
             options={[
-              { value: namespace, label: namespace },
+              { value: 'default', label: '默认 (default)' },
+              { value: 'demo', label: '演示 (demo)' },
+              { value: namespace, label: `当前 (${namespace})` },
             ]}
           />
         </Tooltip>
@@ -68,8 +71,8 @@ export default function TopBar({
                 key: 'user',
                 label: (
                   <div className="px-2 py-1">
-                    <div className="text-xs text-gray-400">登录身份</div>
-                    <div className="font-medium">{userId || 'anonymous'}</div>
+                    <div className="text-xs text-gray-400">当前 namespace</div>
+                    <div className="font-medium">{namespace}</div>
                   </div>
                 ),
                 disabled: true,
@@ -87,7 +90,7 @@ export default function TopBar({
         >
           <Tooltip title="账号">
             <Button type="text" size="small" icon={<UserOutlined />}>
-              <span className="ml-1 hidden sm:inline">{userId || 'user'}</span>
+              <span className="ml-1 hidden sm:inline">{namespace}</span>
             </Button>
           </Tooltip>
         </Dropdown>
