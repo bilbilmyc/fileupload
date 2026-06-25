@@ -100,15 +100,13 @@ export async function deleteDir(id: string): Promise<void> {
 }
 
 export async function checkExists(sha256: string, name?: string): Promise<FileItem | null> {
+  // v0.10.0：迁到 SDK
   try {
-    const r = await axiosInstance.head('/v1/files', {
-      params: { sha256, name },
-    })
-    if (r.status === 200) return r.data as FileItem
+    return (await sdkClient.checkExists(sha256, name)) as any
   } catch {
-    // 404 means not found
+    // 404 等错误 → null（web 语义）
+    return null
   }
-  return null
 }
 
 export async function initUpload(
@@ -150,8 +148,8 @@ export async function finalizeUpload(sessionId: string): Promise<FinalizeResult>
 }
 
 export async function uploadStatus(sessionId: string): Promise<UploadStatusResult> {
-  const r = await axiosInstance.get(`/v1/uploads/${sessionId}/status`)
-  return r.data
+  // v0.10.0：迁到 SDK
+  return sdkClient.getUploadStatus(sessionId) as any
 }
 
 export function downloadFileUrl(id: string): string {
@@ -172,8 +170,8 @@ export function previewFileUrl(id: string): string {
 }
 
 export async function submitDir(name: string, entries: { path: string; file_id: string }[]): Promise<{ file_id: string }> {
-  const r = await axiosInstance.post('/v1/dirs', { name, entries })
-  return r.data
+  // v0.10.0：迁到 SDK
+  return sdkClient.submitDir({ name, entries }) as any
 }
 
 // ========== 批量操作 ==========

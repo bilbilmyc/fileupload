@@ -408,7 +408,55 @@ X-Namespace: my-ns
 
 ## 批量管理 API（v0.1.0+）
 
-### POST /v1/batch/copy — 批量复制
+### POST /v1/batch/{action} — 通用批量操作端点
+
+> **v0.1.0+**：单个路径参数 `action` 区分批量操作类型，
+> 替代 v0.0.x 的多端点设计。
+
+支持的 `action` 值：
+
+| action | 请求体 | 响应 |
+|---|---|---|
+| `delete` | `{"ids": [...]}` | `{"success": N, "failed": M}` |
+| `move` | `{"ids": [...], "target_dir_id": "..."}` | `{"status": "ok"}` |
+| `copy` | `{"ids": [...], "target_dir_id": "..."}` | `{"success": N, "failed": M}` |
+| `tags` | `{"ids": [...], "tags": [...]}` | `{"status": "ok"}` |
+
+**示例（批量复制）：**
+
+```bash
+curl -X POST http://localhost:8080/v1/batch/copy \
+  -H "Content-Type: application/json" \
+  -H "X-Namespace: default" \
+  -d '{"ids":["f1","f2"],"target_dir_id":"d_target"}'
+```
+
+**响应 `200 OK`：**
+```json
+{
+  "status": "ok",
+  "success": 2,
+  "failed": 0
+}
+```
+
+**SDK 调用：**
+```typescript
+// JS SDK（v0.1.0+）
+const result = await client.batchCopy(["id1", "id2"], "target-dir")
+console.log(`复制 ${result.success} 成功，${result.failed} 失败`)
+```
+```go
+// Go SDK（v0.1.0+）
+res, err := client.BatchCopy(ctx, []string{"id1", "id2"}, "target-dir")
+if err == nil {
+    fmt.Printf("复制 %d 成功，%d 失败\n", res.Success, res.Failed)
+}
+```
+
+---
+
+### POST /v1/batch/copy — 批量复制（详细）
 
 **请求：**
 ```json
@@ -687,16 +735,38 @@ GET /v1/admin/status
 {
   "version": "dev",
   "storage": {
-    "data_dir": "storage/data",
-    "temp_dir": "storage/tmp",
-    "total_files": 42,
-    "total_blobs": 38,
-    "total_size": 1048576000
+    "data_dir": "/data",
+    "temp_dir": "/tmp",
+    "total_files": 100,
+    "total_blobs": 50,
+    "total_size": 104857600
   },
-  "database": { "type": "postgres", "path": "..." },
-  "worker_pool": { "capacity": 128, "available": 126 }
+  "database": {
+    "type": "sqlite",
+    "path": "/data/fileupload.db"
+  },
+  "worker_pool": {
+    "capacity": 8,
+    "available": 6
+  }
 }
 ```
+
+**SDK 调用：**
+```typescript
+// JS SDK
+const status = await client.systemStatus()
+console.log(status.storage.total_files, status.worker_pool.capacity)
+```
+```go
+// Go SDK
+status, err := client.GetSystemStatus(ctx)
+if err == nil {
+    fmt.Println(status.Counts["files"], status.Storage)
+}
+```
+
+---
 
 ### GET /v1/admin/audit — 审计日志
 
