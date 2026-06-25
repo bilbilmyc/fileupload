@@ -1,12 +1,20 @@
 import { createContext, useContext, useState, useCallback, useRef } from 'react'
 import * as api from '../api/client'
+import {
+  createTask,
+  patchTask,
+  filterActiveTasks,
+  progressStage,
+} from '../lib/upload-task'
+
+export type UploadStatus = 'pending' | 'hashing' | 'uploading' | 'retrying' | 'finalizing' | 'done' | 'error'
 
 export interface UploadTask {
   id: string
   name: string
   progress: number
   speed: string
-  status: 'pending' | 'hashing' | 'uploading' | 'retrying' | 'finalizing' | 'done' | 'error'
+  status: UploadStatus
   error?: string
 }
 
@@ -34,38 +42,38 @@ export function UploadProvider({ children, onComplete }: { children: React.React
     setUploadTasks_(tasks)
   }, [])
 
+  // v0.11.0：用 isDoneStatus 过滤（替换内联 lambda）
   const clearDoneTasks = useCallback(() => {
     setUploadTasks_(prev => prev.filter(t => t.status !== 'done' && t.status !== 'error'))
   }, [])
 
   const customRequest = useCallback(async (file: File) => {
     const taskId = `task-${++taskIdRef.current}`
-    setUploadTasks_(prev => [...prev, {
-      id: taskId, name: file.name, progress: 0, speed: '',
-      status: 'hashing',
-    }])
+    let task = createTask(taskId, file.name, file.size)
+
+    const commit = (patch: Partial<UploadTask>) => {
+      task = patchTask(task, patch)
+      setUploadTasks_(prev => {
+        const idx = prev.findIndex(t => t.id === taskId)
+        if (idx < 0) return [...prev, task]
+        return prev.map(t => (t.id === taskId ? task : t))
+      })
+    }
 
     try {
-      setUploadTasks_(prev => prev.map(t =>
-        t.id === taskId ? { ...t, status: 'uploading' as const } : t
-      ))
+      commit({ status: 'uploading' })
 
       const chunkSize = 10 * 1024 * 1024
       const totalChunks = Math.ceil(file.size / chunkSize)
 
       // SHA-256
       const sha256 = await computeSHA256(file)
+      commit({ progress: progressStage('hashing', 100) })
 
       // Check exists
-      setUploadTasks_(prev => prev.map(t =>
-        t.id === taskId ? { ...t, status: 'uploading' as const, progress: 5 } : t
-      ))
-
       const existing = await api.checkExists(sha256, file.name)
       if (existing) {
-        setUploadTasks_(prev => prev.map(t =>
-          t.id === taskId ? { ...t, status: 'done' as const, progress: 100 } : t
-        ))
+        commit({ status: 'done', progress: 100 })
         doneRef.current?.()
         return
       }
@@ -86,37 +94,28 @@ export function UploadProvider({ children, onComplete }: { children: React.React
         await api.uploadChunk(init.session_id, i, chunk, chunkSha, (e) => {
           if (e.total) {
             const loaded = start + (e.loaded || 0)
-            const pct = Math.round((loaded / file.size) * 90)
+            const innerPct = (loaded / file.size) * 100
             const elapsed = (Date.now() - started) / 1000
             const speed = elapsed > 0 ? formatSpeed((e.loaded || 0) - lastLoaded, elapsed) : ''
             lastLoaded = e.loaded || 0
-            setUploadTasks_(prev => prev.map(t =>
-              t.id === taskId ? { ...t, progress: pct, speed } : t
-            ))
+            commit({ progress: progressStage('uploading', innerPct), speed })
           }
         })
       }
 
       // Finalize
-      setUploadTasks_(prev => prev.map(t =>
-        t.id === taskId ? { ...t, status: 'finalizing' as const, progress: 95 } : t
-      ))
+      commit({ status: 'finalizing', progress: progressStage('finalizing', 100) })
       await api.finalizeUpload(init.session_id)
 
-      setUploadTasks_(prev => prev.map(t =>
-        t.id === taskId ? { ...t, status: 'done' as const, progress: 100 } : t
-      ))
+      commit({ status: 'done', progress: 100 })
       doneRef.current?.()
     } catch (e: any) {
-      setUploadTasks_(prev => prev.map(t =>
-        t.id === taskId ? { ...t, status: 'error' as const, error: e.message } : t
-      ))
+      commit({ status: 'error', error: e.message })
     }
   }, [])
 
-  const hasActiveUploads = uploadTasks.some(t =>
-    ['hashing', 'uploading', 'retrying', 'finalizing'].includes(t.status)
-  )
+  // v0.11.0：filterActiveTasks 替换内联 .some(...)
+  const hasActiveUploads = filterActiveTasks(uploadTasks).length > 0
 
   return (
     <UploadContext.Provider value={{ uploadTasks, hasActiveUploads, customRequest, clearDoneTasks, setUploadTasks }}>

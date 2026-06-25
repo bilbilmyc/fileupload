@@ -1,3 +1,17 @@
+// web/src/api/client.ts — v0.1.0+ API 兼容层
+//
+// 历史背景：v0.1.0-v0.7.0 期间 web/ 直接用 axios 调用后端。
+// v0.7.0+ 起逐步迁移到 @fileupload/sdk（见 sdkAdapter.ts）。
+//
+// v0.11.0 状态：
+//   - 已迁 SDK：statFile / deleteFile / deleteDir / renameFile / batchDelete /
+//               batchMove / batchCopy / batchSetTags / checkExists /
+//               uploadStatus / submitDir（实现为 sdkClient 薄包装）
+//   - 仍用 axios：checkHealth / listFiles / initUpload / uploadChunk /
+//               finalizeUpload（SDK 暂不支持对应签名或 web 需要 chunk 粒度）
+//
+// 计划 v0.12.0+：完全迁移后，本文件可折叠到 sdkAdapter.ts 单文件。
+
 import axios, { AxiosProgressEvent } from 'axios'
 import { sdkClient } from './sdk'
 
@@ -55,6 +69,10 @@ export interface FinalizeResult {
   name: string
 }
 
+/**
+ * @deprecated v0.11.0+：SDK 暂未提供 health check。
+ * 计划：sdkClient.health() 后删除此函数。
+ */
 export async function checkHealth(): Promise<boolean> {
   try {
     const r = await axiosInstance.get('/health')
@@ -73,6 +91,10 @@ export interface ListFilesParams {
   sort_order?: string
 }
 
+/**
+ * @deprecated v0.11.0+：sdkClient.list(parent) 不支持 search/page/per_page/sort_by。
+ * 计划：扩展 SDK 签名后改用 listFilesWithQuerySDK()（sdkAdapter.ts）。
+ */
 export async function listFiles(opts: ListFilesParams = {}): Promise<ListResult> {
   const params: Record<string, string> = { parent: opts.parent || '/' }
   if (opts.search) params.search = opts.search
@@ -109,6 +131,11 @@ export async function checkExists(sha256: string, name?: string): Promise<FileIt
   }
 }
 
+/**
+ * @deprecated v0.11.0+：SDK 的 Upload() 内部封装了 init+chunk+finalize，
+ * 但 useUpload.ts 需要 chunk 级别回调（onProgress），暂时保留。
+ * 计划：useUpload 重构后删除此函数。
+ */
 export async function initUpload(
   size: number,
   sha256: string,
@@ -126,6 +153,9 @@ export async function initUpload(
   return r.data
 }
 
+/**
+ * @deprecated v0.11.0+：同 initUpload，useUpload 暂需 chunk 粒度。
+ */
 export async function uploadChunk(
   sessionId: string,
   index: number,
@@ -142,6 +172,9 @@ export async function uploadChunk(
   })
 }
 
+/**
+ * @deprecated v0.11.0+：同 initUpload，useUpload 暂需。
+ */
 export async function finalizeUpload(sessionId: string): Promise<FinalizeResult> {
   const r = await axiosInstance.post(`/v1/uploads/${sessionId}/finalize`)
   return r.data
