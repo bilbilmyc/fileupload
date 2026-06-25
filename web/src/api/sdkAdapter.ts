@@ -16,6 +16,10 @@ export async function listFilesSDK(parent: string = '/'): Promise<{
   return sdkClient.list(parent) as any
 }
 
+// 注：完整 listFiles(opts) 含 search/page/per_page/sort_by/sort_order，
+// SDK 的 list(parent) 不支持这些参数，因此保留 axios 实现。
+// 增强 SDK 签名后可迁移。
+
 /** 系统状态 */
 export async function systemStatusSDK() {
   return sdkClient.systemStatus()
