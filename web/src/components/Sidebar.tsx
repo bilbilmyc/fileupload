@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { Layout, Menu, Input, Button, Tooltip } from 'antd'
+import { Layout, Menu, Button, Tooltip } from 'antd'
 import {
   FolderOutlined,
   DashboardOutlined,
@@ -9,7 +9,6 @@ import {
   SunOutlined,
   MoonOutlined,
 } from '@ant-design/icons'
-import { useAuth } from '../context/AuthContext'
 import { useTheme } from '../context/ThemeContext'
 
 const { Sider } = Layout
@@ -17,7 +16,6 @@ const { Sider } = Layout
 export default function Sidebar() {
   const navigate = useNavigate()
   const location = useLocation()
-  const { namespace, setNamespace } = useAuth()
   const { mode, toggle } = useTheme()
   const [collapsed, setCollapsed] = useState(false)
 
@@ -55,19 +53,8 @@ export default function Sidebar() {
         className="border-0"
       />
 
-      {/* Bottom area */}
+      {/* Bottom area — v0.11.1+：移除 namespace 输入（移到 TopBar 显眼位置） */}
       <div className="absolute bottom-0 left-0 right-0 p-3 border-t border-gray-100 dark:border-gray-700">
-        {!collapsed && (
-          <div className="mb-2">
-            <Input
-              size="small"
-              placeholder="命名空间"
-              value={namespace}
-              onChange={(e) => setNamespace(e.target.value)}
-              className="!text-xs"
-            />
-          </div>
-        )}
         <div className="flex justify-center">
           <Tooltip title={mode === 'dark' ? '亮色模式' : '暗色模式'}>
             <Button

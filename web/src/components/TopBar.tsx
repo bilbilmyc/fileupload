@@ -1,5 +1,6 @@
-import { Input, Button, Space, Tooltip, Select } from 'antd'
-import { ReloadOutlined, SearchOutlined } from '@ant-design/icons'
+import { Input, Button, Space, Tooltip, Select, Dropdown } from 'antd'
+import { ReloadOutlined, SearchOutlined, UserOutlined, GlobalOutlined, LogoutOutlined } from '@ant-design/icons'
+import { useAuth } from '../context/AuthContext'
 
 interface TopBarProps {
   search: string
@@ -12,11 +13,14 @@ interface TopBarProps {
 export default function TopBar({
   search, typeFilter, onSearchChange, onTypeFilterChange, onRefresh,
 }: TopBarProps) {
+  const { namespace, setNamespace, userId, logout } = useAuth()
+
   return (
     <header
       className="bg-white dark:bg-gray-800 px-4 flex items-center justify-between border-b border-gray-200 dark:border-gray-700"
       style={{ height: 48, lineHeight: '48px' }}
     >
+      {/* 左：搜索 + 类型筛选 */}
       <Space size="small" wrap>
         <Input
           size="small"
@@ -39,9 +43,55 @@ export default function TopBar({
           ]}
         />
       </Space>
-      <Tooltip title="刷新">
-        <Button type="text" size="small" icon={<ReloadOutlined />} onClick={onRefresh} />
-      </Tooltip>
+
+      {/* 右：namespace 选择 + 刷新 + 用户菜单（v0.11.1+） */}
+      <Space size="middle">
+        <Tooltip title="命名空间">
+          <Select
+            size="small"
+            value={namespace}
+            onChange={setNamespace}
+            suffixIcon={<GlobalOutlined />}
+            className="!w-[100px] sm:!w-[140px]"
+            options={[
+              { value: namespace, label: namespace },
+            ]}
+          />
+        </Tooltip>
+        <Tooltip title="刷新">
+          <Button type="text" size="small" icon={<ReloadOutlined />} onClick={onRefresh} />
+        </Tooltip>
+        <Dropdown
+          menu={{
+            items: [
+              {
+                key: 'user',
+                label: (
+                  <div className="px-2 py-1">
+                    <div className="text-xs text-gray-400">登录身份</div>
+                    <div className="font-medium">{userId || 'anonymous'}</div>
+                  </div>
+                ),
+                disabled: true,
+              },
+              { type: 'divider' },
+              {
+                key: 'logout',
+                icon: <LogoutOutlined />,
+                label: '登出',
+                onClick: logout,
+              },
+            ],
+          }}
+          placement="bottomRight"
+        >
+          <Tooltip title="账号">
+            <Button type="text" size="small" icon={<UserOutlined />}>
+              <span className="ml-1 hidden sm:inline">{userId || 'user'}</span>
+            </Button>
+          </Tooltip>
+        </Dropdown>
+      </Space>
     </header>
   )
 }

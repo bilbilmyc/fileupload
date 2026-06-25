@@ -31,8 +31,9 @@ describe('Sidebar', () => {
     expect(screen.getByText('设置')).toBeInTheDocument()
   })
 
-  it('renders namespace input', () => {
+  // v0.11.1：namespace 输入框移到 TopBar（更显眼），Sidebar 不再包含
+  it('does NOT render namespace input (moved to TopBar)', () => {
     renderSidebar()
-    expect(screen.getByPlaceholderText('命名空间')).toBeInTheDocument()
+    expect(screen.queryByPlaceholderText('命名空间')).not.toBeInTheDocument()
   })
 })
