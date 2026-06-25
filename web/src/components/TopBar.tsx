@@ -13,7 +13,7 @@ interface TopBarProps {
 export default function TopBar({
   search, typeFilter, onSearchChange, onTypeFilterChange, onRefresh,
 }: TopBarProps) {
-  const { namespace, setNamespace, userId, logout } = useAuth()
+  const { namespace, setNamespace, logout } = useAuth()
 
   return (
     <header

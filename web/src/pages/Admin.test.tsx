@@ -5,21 +5,21 @@ import Admin from './Admin'
 
 // RED：Admin.tsx 应该是空壳（占位 0）。本测试 RED。
 describe('Admin (RED — should fetch real data)', () => {
-  let origFetch: typeof global.fetch
+  let origFetch: typeof globalThis.fetch
 
   beforeEach(() => {
-    origFetch = global.fetch
+    origFetch = globalThis.fetch
     localStorage.setItem('fileupload_token', 'test-token')
     localStorage.setItem('fileupload_namespace', 'default')
   })
 
   afterEach(() => {
-    global.fetch = origFetch
+    globalThis.fetch = origFetch
   })
 
   it('fetches /v1/admin/status and displays file/dir counts', async () => {
     // mock fetch 返回系统状态
-    global.fetch = vi.fn().mockResolvedValue({
+    globalThis.fetch = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
       json: async () => ({
