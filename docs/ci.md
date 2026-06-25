@@ -41,14 +41,18 @@ CGO 全关，`-ldflags="-s -w"` 剥离符号表。
 
 每个二进制作为 artifact 上传，供后续 docker / release jobs 使用。
 
-### 3. `docker` — 多架构镜像构建（v0.11.1+ 仅构建，不推）
+### 3. `docker` — 多架构镜像构建 + 推送
 
 `needs: [build]`。
 
 - 使用 build job 预编译的二进制，无需 QEMU 模拟编译
-- **v0.11.1 起 `push: false`**：CI 仅构建镜像用于验证，不推送到 ghcr.io
-- 不再产生 GitHub Packages 栏的堆积
-- 如需恢复推送：改 `push: ${{ github.event_name != 'pull_request' }}` + 重新加 `packages: write` 权限
+- 注册表：`ghcr.io/${{ github.repository_owner }}/fileupload-server` 与 `fileupload-cli`
+- tag 模式：
+  - `semver:{{version}}` — v1.2.3
+  - `semver:{{major}}.{{minor}}` — v1.2
+  - `latest`（仅 main 分支）
+  - `sha` 前缀（短 commit）
+- 镜像会出现在 GitHub Packages 侧栏 — 这是 ghcr.io 推送的固有行为
 
 ### 4. `dev-release` — 持续集成 Release
 
