@@ -1,8 +1,9 @@
 import { Drawer, Descriptions, Tag, Space, Button, Tooltip } from 'antd'
-import { DownloadOutlined, CopyOutlined } from '@ant-design/icons'
+import { DownloadOutlined, CopyOutlined, LinkOutlined } from '@ant-design/icons'
 import type { FileItem } from '../api/client'
 import { useState } from 'react'
 import { downloadFileUrl } from '../api/client'
+import ShareLinkManager from './ShareLinkManager'
 
 function formatBytes(bytes: number): string {
   if (!bytes) return '0 B'
@@ -18,6 +19,7 @@ interface PropertiesPanelProps {
 
 export default function PropertiesPanel({ file, onClose }: PropertiesPanelProps) {
   const [copied, setCopied] = useState(false)
+  const [shareOpen, setShareOpen] = useState(false)
 
   if (!file) return null
 
@@ -33,6 +35,7 @@ export default function PropertiesPanel({ file, onClose }: PropertiesPanelProps)
   const fileTypeColor = file.is_dir ? 'orange' : 'blue'
 
   return (
+    <>
     <Drawer
       title={<span>📄 {file.name}</span>}
       placement="right"
@@ -72,12 +75,17 @@ export default function PropertiesPanel({ file, onClose }: PropertiesPanelProps)
       </Descriptions>
 
       {!file.is_dir && (
-        <div className="mt-4">
+        <div className="properties-actions">
           <Button type="primary" icon={<DownloadOutlined />} block href={downloadFileUrl(file.file_id)}>
             下载文件
+          </Button>
+          <Button icon={<LinkOutlined />} block onClick={() => setShareOpen(true)}>
+            管理分享链接
           </Button>
         </div>
       )}
     </Drawer>
+    <ShareLinkManager file={file} open={shareOpen} onClose={() => setShareOpen(false)} />
+    </>
   )
 }

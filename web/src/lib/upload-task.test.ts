@@ -11,7 +11,7 @@ import {
 import type { UploadTask } from '../context/UploadContext'
 
 const baseTask: UploadTask = {
-  id: 't1', name: 'a.txt', progress: 0, speed: '', status: 'pending',
+  id: 't1', name: 'a.txt', progress: 0, speed: '', status: 'hashing',
 }
 
 describe('createTask', () => {
@@ -81,7 +81,7 @@ describe('isActiveStatus', () => {
   it('returns false for final statuses', () => {
     expect(isActiveStatus('done')).toBe(false)
     expect(isActiveStatus('error')).toBe(false)
-    expect(isActiveStatus('pending')).toBe(false)
+    expect(isActiveStatus('done')).toBe(false)
   })
 })
 
@@ -94,7 +94,7 @@ describe('isDoneStatus', () => {
   it('returns false for others', () => {
     expect(isDoneStatus('hashing')).toBe(false)
     expect(isDoneStatus('uploading')).toBe(false)
-    expect(isDoneStatus('pending')).toBe(false)
+    expect(isDoneStatus('retrying')).toBe(false)
   })
 })
 

@@ -41,7 +41,8 @@ type FileReader struct {
 	File     *FileMetadata
 	Blob     *ContentBlob
 	Reader   io.ReadCloser
-	FileSize int64 // HTTP Range 需要用到的文件总大小
+	FileSize int64         // HTTP Range 需要用到的文件总大小
+	Range    DownloadRange // 已规范化的实际读取范围
 }
 
 // GetFile 单文件下载，支持 Range
@@ -70,17 +71,18 @@ func (s *DownloadService) GetFile(ctx context.Context, fileID, namespace string,
 		return nil, ErrCorrupted
 	}
 
-	// 限制 range 不超出文件
-	offset := rng.Offset
-	length := rng.Length
-	if offset < 0 {
-		offset = 0
-	}
-	if offset >= blob.Size {
-		return nil, ErrInvalidArgument
-	}
-	if length == 0 || offset+length > blob.Size {
-		length = blob.Size - offset
+	// 规范化 range，确保响应头与实际 reader 的长度一致。完整下载允许 0 字节文件。
+	offset := int64(0)
+	length := blob.Size
+	if !rng.IsZero() {
+		offset = rng.Offset
+		length = rng.Length
+		if offset < 0 || offset >= blob.Size {
+			return nil, ErrInvalidArgument
+		}
+		if length == 0 || length > blob.Size-offset {
+			length = blob.Size - offset
+		}
 	}
 
 	reader, err := s.storage.Open(ctx, blob.StoragePath, offset, length)
@@ -94,16 +96,17 @@ func (s *DownloadService) GetFile(ctx context.Context, fileID, namespace string,
 		Blob:     blob,
 		Reader:   reader,
 		FileSize: blob.Size,
+		Range:    DownloadRange{Offset: offset, Length: length, Requested: rng.Requested},
 	}, nil
 }
 
 // DirWalker 目录遍历结果，含 manifest 哈希
 type DirWalker struct {
-	DirID       string
-	Name        string // 目录名（用于归档前缀）
-	Entries     []DirEntryInfo
-	TreeSHA256  string // X-Tree-SHA256
-	TotalSize   int64
+	DirID      string
+	Name       string // 目录名（用于归档前缀）
+	Entries    []DirEntryInfo
+	TreeSHA256 string // X-Tree-SHA256
+	TotalSize  int64
 }
 
 // DirEntryInfo 目录遍历中的一个文件条目
@@ -251,6 +254,14 @@ func computeTreeSHA256(entries []DirEntryInfo) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
+// GetNamespaceUsage 返回当前空间的逻辑文件数量与已用容量。
+func (s *DownloadService) GetNamespaceUsage(ctx context.Context, namespace string) (*NamespaceUsage, error) {
+	usage, err := s.meta.GetNamespaceUsage(ctx, namespace)
+	if err != nil {
+		return nil, fmt.Errorf("获取空间用量: %w", err)
+	}
+	return usage, nil
+}
 
 // ListDirPage 列目录，支持分页+排序
 func (s *DownloadService) ListDirPage(ctx context.Context, parentID, namespace, search string, page, perPage int, sortBy, sortOrder string) (*FileMetadata, []*FileMetadata, int, error) {
@@ -460,4 +471,3 @@ func (s *DownloadService) StreamBatch(ctx context.Context, ids []string, namespa
 
 	return pr, nil
 }
-

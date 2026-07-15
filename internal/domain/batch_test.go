@@ -45,13 +45,17 @@ func setupBatchTest(t *testing.T) (*BatchService, *mockMetadata) {
 var ctx = context.Background()
 
 func TestBatchService_BatchDelete(t *testing.T) {
-	svc, _ := setupBatchTest(t)
+	svc, meta := setupBatchTest(t)
 	result, err := svc.BatchDelete(ctx, []string{"f1", "f2"}, "demo")
 	if err != nil {
 		t.Fatalf("BatchDelete error = %v", err)
 	}
 	if result.Success != 2 {
 		t.Errorf("Success = %d, want 2", result.Success)
+	}
+	items, err := meta.ListTrash(ctx, "demo")
+	if err != nil || len(items) != 2 {
+		t.Fatalf("BatchDelete should move items to trash, items=%d err=%v", len(items), err)
 	}
 }
 

@@ -208,8 +208,8 @@ export default function FileTable({
               <Button type="text" icon={<EditOutlined />} size="small" onClick={() => handleRenameStart(record)} />
             </Tooltip>
           )}
-          <Popconfirm title="确认删除？" onConfirm={() => onDelete(record)}>
-            <Tooltip title="删除">
+          <Popconfirm title="移入回收站？" description="可在回收站恢复。" onConfirm={() => onDelete(record)}>
+            <Tooltip title="移入回收站">
               <Button type="text" icon={<DeleteOutlined />} size="small" danger />
             </Tooltip>
           </Popconfirm>

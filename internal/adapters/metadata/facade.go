@@ -29,6 +29,10 @@ type ColdStore interface {
 	ListFilesByBlob(ctx context.Context, sha256 string) ([]*domain.FileMetadata, error)
 	ListRoot(ctx context.Context, namespace string, search string) ([]*domain.FileMetadata, error)
 	ListRootPage(ctx context.Context, namespace string, search string, page, perPage int, sortBy, sortOrder string) ([]*domain.FileMetadata, int, error)
+	GetNamespaceUsage(ctx context.Context, namespace string) (*domain.NamespaceUsage, error)
+	ListTrash(ctx context.Context, namespace string) ([]*domain.FileMetadata, error)
+	MoveFileToTrash(ctx context.Context, id string, deletedAt time.Time) error
+	RestoreFile(ctx context.Context, id string) error
 
 	// 标签
 	SetFileTags(ctx context.Context, fileID string, tags []string) error
@@ -46,6 +50,8 @@ type ColdStore interface {
 	// 分享
 	CreateShare(ctx context.Context, token string, entry *domain.ShareEntry) error
 	GetShare(ctx context.Context, token string) (*domain.ShareEntry, error)
+	ListShares(ctx context.Context, namespace, fileID string) ([]*domain.ShareEntry, error)
+	DeleteShare(ctx context.Context, token, namespace string) error
 	IncrDownloads(ctx context.Context, token string) error
 
 	// 审计日志
@@ -162,6 +168,22 @@ func (f *Facade) ListRoot(ctx context.Context, namespace string, search string) 
 	return f.cold.ListRoot(ctx, namespace, search)
 }
 
+func (f *Facade) GetNamespaceUsage(ctx context.Context, namespace string) (*domain.NamespaceUsage, error) {
+	return f.cold.GetNamespaceUsage(ctx, namespace)
+}
+
+func (f *Facade) ListTrash(ctx context.Context, namespace string) ([]*domain.FileMetadata, error) {
+	return f.cold.ListTrash(ctx, namespace)
+}
+
+func (f *Facade) MoveFileToTrash(ctx context.Context, id string, deletedAt time.Time) error {
+	return f.cold.MoveFileToTrash(ctx, id, deletedAt)
+}
+
+func (f *Facade) RestoreFile(ctx context.Context, id string) error {
+	return f.cold.RestoreFile(ctx, id)
+}
+
 func (f *Facade) UpdateBlobStorage(ctx context.Context, sha256 string, storagePath string) error {
 	return f.cold.UpdateBlobStorage(ctx, sha256, storagePath)
 }
@@ -206,6 +228,14 @@ func (f *Facade) CreateShare(ctx context.Context, token string, entry *domain.Sh
 
 func (f *Facade) GetShare(ctx context.Context, token string) (*domain.ShareEntry, error) {
 	return f.cold.GetShare(ctx, token)
+}
+
+func (f *Facade) ListShares(ctx context.Context, namespace, fileID string) ([]*domain.ShareEntry, error) {
+	return f.cold.ListShares(ctx, namespace, fileID)
+}
+
+func (f *Facade) DeleteShare(ctx context.Context, token, namespace string) error {
+	return f.cold.DeleteShare(ctx, token, namespace)
 }
 
 func (f *Facade) IncrDownloads(ctx context.Context, token string) error {

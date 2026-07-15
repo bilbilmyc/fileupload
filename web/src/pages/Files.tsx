@@ -1,8 +1,8 @@
 import { useEffect, useCallback, useState } from 'react'
 import { message, Modal, Button, Tooltip } from 'antd'
-import { HistoryOutlined } from '@ant-design/icons'
+import { CloudUploadOutlined, HistoryOutlined } from '@ant-design/icons'
 import { useAuth } from '../context/AuthContext'
-import { useUploadCtx } from '../context/UploadContext'
+import { UPLOAD_COMPLETED_EVENT, useUploadCtx } from '../context/UploadContext'
 import * as api from '../api/client'
 import { useFileOperations } from '../hooks/useFileOperations'
 import ErrorBoundary from '../components/ErrorBoundary'
@@ -17,6 +17,7 @@ import BatchTagEditor from '../components/BatchTagEditor'
 import BatchHistoryPanel, { useBatchHistory } from '../components/BatchHistoryPanel'
 import FilePreview from '../components/FilePreview'
 import PropertiesPanel from '../components/PropertiesPanel'
+import UploadDropzone from '../components/UploadDropzone'
 
 export default function Files() {
   const { namespace } = useAuth()
@@ -40,6 +41,11 @@ export default function Files() {
 
   useEffect(() => { loadFiles() }, [loadFiles])
   useEffect(() => { loadFiles() }, [namespace]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const refresh = () => { void loadFiles() }
+    window.addEventListener(UPLOAD_COMPLETED_EVENT, refresh)
+    return () => window.removeEventListener(UPLOAD_COMPLETED_EVENT, refresh)
+  }, [loadFiles])
 
   const handlePreview = useCallback((record: { file_id: string; name: string; size: number }) => {
     setPreviewFile({ id: record.file_id, name: record.name, size: record.size })
@@ -52,29 +58,17 @@ export default function Files() {
   const handleBatchDelete = useCallback(async () => {
     if (selectedRowKeys.length === 0) return
     Modal.confirm({
-      title: `确认删除 ${selectedRowKeys.length} 个项目？`,
-      content: '删除后不可恢复。',
+      title: `移入回收站 ${selectedRowKeys.length} 个项目？`,
+      content: '可在回收站恢复；彻底删除才会释放存储空间。',
       onOk: async () => {
-        try {
-          const result = await api.batchDelete(selectedRowKeys as string[])
-          addRecord({ type: 'delete', fileCount: selectedRowKeys.length, status: result.failed === 0 ? 'success' : 'partial', detail: `${result.success} 成功, ${result.failed} 失败` })
-          setSelectedRowKeys([])
-          message.success(`删除完成: ${result.success} 成功${result.failed ? `, ${result.failed} 失败` : ''}`)
-          loadFiles()
-        } catch {
-          let ok = 0, fail = 0
-          for (const item of selectedFiles) {
-            try {
-              if (item.is_dir) await api.deleteDir(item.file_id)
-              else await api.deleteFile(item.file_id)
-              ok++
-            } catch { fail++ }
-          }
-          addRecord({ type: 'delete', fileCount: selectedRowKeys.length, status: fail === 0 ? 'success' : 'partial', detail: `${ok} 成功, ${fail} 失败` })
-          setSelectedRowKeys([])
-          message.success(`删除完成: ${ok} 成功${fail ? `, ${fail} 失败` : ''}`)
-          loadFiles()
-        }
+        const results = await Promise.allSettled(selectedFiles.map(item => item.is_dir ? api.deleteDir(item.file_id) : api.deleteFile(item.file_id)))
+        const ok = results.filter(result => result.status === 'fulfilled').length
+        const fail = results.length - ok
+        addRecord({ type: 'delete', fileCount: selectedRowKeys.length, status: fail === 0 ? 'success' : 'partial', detail: `已移入回收站：${ok} 成功, ${fail} 失败` })
+        setSelectedRowKeys([])
+        if (fail) message.warning(`已移入回收站: ${ok} 成功, ${fail} 失败`)
+        else message.success(`已移入回收站: ${ok} 项`)
+        loadFiles()
       },
     })
   }, [selectedRowKeys, selectedFiles, loadFiles, addRecord])
@@ -137,7 +131,7 @@ export default function Files() {
 
   // ---- Upload ----
   const handleUploadFile = useCallback((file: File) => {
-    uploadCtx.customRequest(file)
+    void uploadCtx.customRequest(file).catch(() => undefined)
   }, [uploadCtx])
 
   // ---- Single item actions ----
@@ -160,7 +154,7 @@ export default function Files() {
   }, [selectedFiles, selectedRowKeys, handleDelete, handleBatchDelete])
 
   return (
-    <div className="flex flex-col flex-1">
+    <div className="workspace-shell flex flex-col flex-1">
       <TopBar
         search={search}
         typeFilter={typeFilter}
@@ -169,36 +163,55 @@ export default function Files() {
         onRefresh={loadFiles}
       />
 
-      <div className="flex-1 p-4 overflow-auto">
-        <BreadcrumbNav items={breadcrumbItems} />
-
-        <div className="flex items-center justify-between mt-1">
-          <StatsBar dirs={stats.dirs} files={stats.files} totalSize={stats.totalSize} />
-          <Tooltip title="操作历史">
-            <Button type="text" size="small" icon={<HistoryOutlined />} onClick={() => setHistoryOpen(!historyOpen)} />
-          </Tooltip>
-        </div>
-
-        <ActionToolbar
-          onUpload={handleUploadFile}
-          onNewFolder={handleNewFolder}
-          onDownload={handleSingleDownload}
-          onDelete={handleSingleDelete}
-          onRefresh={loadFiles}
-          hasSelection={selectedRowKeys.length > 0}
-          hasSingleSelection={selectedFiles.length === 1}
-        />
-
-        {/* History panel */}
-        {historyOpen && (
-          <div className="mb-3">
-            <BatchHistoryPanel open={true} onClose={() => setHistoryOpen(false)} history={batchHistory} onClear={() => {}} />
+      <main className="workspace-page">
+        <section className="workspace-hero">
+          <div>
+            <span className="workspace-eyebrow">SECURE FILE WORKSPACE</span>
+            <h1>文件空间</h1>
+            <p>上传、管理和分发团队文件。支持断点续传、分片校验与安全下载。</p>
           </div>
+          <div className="workspace-hero__meta">
+            <span>当前空间</span>
+            <strong>{namespace}</strong>
+          </div>
+        </section>
+
+        <section className="surface-card workspace-controls">
+          <div className="workspace-controls__header">
+            <BreadcrumbNav items={breadcrumbItems} />
+            <Tooltip title="操作历史">
+              <Button type="text" size="small" icon={<HistoryOutlined />} onClick={() => setHistoryOpen(!historyOpen)} />
+            </Tooltip>
+          </div>
+          <div className="workspace-controls__actions">
+            <ActionToolbar
+              onUpload={handleUploadFile}
+              onNewFolder={handleNewFolder}
+              onDownload={handleSingleDownload}
+              onDelete={handleSingleDelete}
+              onRefresh={loadFiles}
+              hasSelection={selectedRowKeys.length > 0}
+              hasSingleSelection={selectedFiles.length === 1}
+            />
+          </div>
+          <UploadDropzone onUpload={handleUploadFile} />
+        </section>
+
+        {historyOpen && (
+          <section className="mb-4">
+            <BatchHistoryPanel open={true} onClose={() => setHistoryOpen(false)} history={batchHistory} onClear={() => {}} />
+          </section>
         )}
 
-        {/* File table */}
-        <ErrorBoundary title="文件列表异常">
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
+        <section className="surface-card file-list-card">
+          <div className="file-list-card__header">
+            <div>
+              <div className="file-list-card__title"><CloudUploadOutlined /> 文件与目录</div>
+              <div className="file-list-card__sub">所有变更实时反映在当前文件空间</div>
+            </div>
+            <StatsBar dirs={stats.dirs} files={stats.files} totalSize={stats.totalSize} />
+          </div>
+          <ErrorBoundary title="文件列表异常">
             <FileTable
               files={files}
               loading={loading}
@@ -216,11 +229,11 @@ export default function Files() {
               onPreview={handlePreview}
               onRename={handleRename}
               onSortChange={handleSortChange}
+              onShowProperties={setPropertiesFile}
             />
-          </div>
-        </ErrorBoundary>
+          </ErrorBoundary>
+        </section>
 
-        {/* Batch toolbar */}
         {selectedRowKeys.length > 0 && (
           <BatchToolbar
             selectedCount={selectedRowKeys.length}
@@ -237,9 +250,8 @@ export default function Files() {
             onBatchTag={handleBatchTag}
           />
         )}
-      </div>
+      </main>
 
-      {/* Modals */}
       <DirectoryPicker
         open={dirPickerOpen}
         title="选择目标目录"
@@ -261,10 +273,6 @@ export default function Files() {
           onClose={() => setPreviewFile(null)}
         />
       )}
-      <PropertiesPanel
-        file={propertiesFile}
-        onClose={() => setPropertiesFile(null)}
-      />
+      <PropertiesPanel file={propertiesFile} onClose={() => setPropertiesFile(null)} />
     </div>
-  )
-}
+  )}

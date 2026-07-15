@@ -22,7 +22,7 @@ type Config struct {
 	Upload   UploadConfig   `json:"upload" yaml:"upload"`
 	Download DownloadConfig `json:"download" yaml:"download"`
 	Auth     AuthConfig     `json:"auth" yaml:"auth"`
-	CORS     CORSConfig    `json:"cors" yaml:"cors"`
+	CORS     CORSConfig     `json:"cors" yaml:"cors"`
 }
 
 // ServerConfig HTTP 服务配置
@@ -35,10 +35,10 @@ type ServerConfig struct {
 
 // StorageConfig 存储配置
 type StorageConfig struct {
-	Type    string `json:"type" yaml:"type"`        // local / s3
-	DataDir string `json:"data_dir" yaml:"data_dir"` // local 模式数据目录
-	TempDir string `json:"temp_dir" yaml:"temp_dir"`  // 临时分片目录
-	S3      S3Config `json:"s3" yaml:"s3"`            // S3 模式配置
+	Type    string   `json:"type" yaml:"type"`         // local / s3
+	DataDir string   `json:"data_dir" yaml:"data_dir"` // local 模式数据目录
+	TempDir string   `json:"temp_dir" yaml:"temp_dir"` // 临时分片目录
+	S3      S3Config `json:"s3" yaml:"s3"`             // S3 模式配置
 }
 
 // S3Config S3 存储后端配置
@@ -61,11 +61,11 @@ type RedisConfig struct {
 // PGConfig PostgreSQL 连接配置（结构体形式，避免 DSN 转义问题）
 type PGConfig struct {
 	Host     string `json:"host" yaml:"host"`         // 主机地址，默认 localhost
-	Port     int    `json:"port" yaml:"port"`          // 端口，默认 5432
-	User     string `json:"user" yaml:"user"`          // 用户名
-	Password string `json:"password" yaml:"password"`  // 密码（无需 URI 转义）
-	DBName   string `json:"dbname" yaml:"dbname"`      // 数据库名
-	SSLMode  string `json:"sslmode" yaml:"sslmode"`    // sslmode，默认 disable
+	Port     int    `json:"port" yaml:"port"`         // 端口，默认 5432
+	User     string `json:"user" yaml:"user"`         // 用户名
+	Password string `json:"password" yaml:"password"` // 密码（无需 URI 转义）
+	DBName   string `json:"dbname" yaml:"dbname"`     // 数据库名
+	SSLMode  string `json:"sslmode" yaml:"sslmode"`   // sslmode，默认 disable
 }
 
 // BuildDSN 从结构体字段构建 PostgreSQL DSN 字符串
@@ -85,10 +85,10 @@ func (p PGConfig) BuildDSN() string {
 	}
 
 	u := &url.URL{
-		Scheme: "postgres",
-		User:   url.UserPassword(p.User, p.Password),
-		Host:   fmt.Sprintf("%s:%d", host, port),
-		Path:   p.DBName,
+		Scheme:   "postgres",
+		User:     url.UserPassword(p.User, p.Password),
+		Host:     fmt.Sprintf("%s:%d", host, port),
+		Path:     p.DBName,
 		RawQuery: fmt.Sprintf("sslmode=%s", sslmode),
 	}
 	return u.String()
@@ -103,10 +103,12 @@ type DatabaseConfig struct {
 
 // UploadConfig 上传服务配置
 type UploadConfig struct {
-	SessionTTLMinutes int   `json:"session_ttl_minutes" yaml:"session_ttl_minutes"`
-	DefaultChunkSize  int64 `json:"default_chunk_size" yaml:"default_chunk_size"`
-	WorkerPoolSize    int   `json:"worker_pool_size" yaml:"worker_pool_size"`
-	WorkerQueueSize   int   `json:"worker_queue_size" yaml:"worker_queue_size"`
+	SessionTTLMinutes   int   `json:"session_ttl_minutes" yaml:"session_ttl_minutes"`
+	DefaultChunkSize    int64 `json:"default_chunk_size" yaml:"default_chunk_size"`
+	WorkerPoolSize      int   `json:"worker_pool_size" yaml:"worker_pool_size"`
+	WorkerQueueSize     int   `json:"worker_queue_size" yaml:"worker_queue_size"`
+	NamespaceQuotaBytes int64 `json:"namespace_quota_bytes" yaml:"namespace_quota_bytes"` // 0 = unlimited
+	TrashRetentionHours int   `json:"trash_retention_hours" yaml:"trash_retention_hours"` // 0 = disabled
 }
 
 // DownloadConfig 下载服务配置
@@ -162,10 +164,11 @@ func DefaultConfig() Config {
 			},
 		},
 		Upload: UploadConfig{
-			SessionTTLMinutes: 60,
-			DefaultChunkSize:  10 * 1024 * 1024,
-			WorkerPoolSize:    16, // 多人并发建议 16-32
-			WorkerQueueSize: 400, // 建议 = pool_size * 25
+			SessionTTLMinutes:   60,
+			DefaultChunkSize:    10 * 1024 * 1024,
+			WorkerPoolSize:      16,  // 多人并发建议 16-32
+			WorkerQueueSize:     400, // 建议 = pool_size * 25
+			NamespaceQuotaBytes: 0,   // 0 = unlimited
 		},
 		Download: DownloadConfig{
 			MaxArchiveSize: 0,
@@ -187,6 +190,7 @@ func DefaultConfig() Config {
 // path 可以是目录或具体文件：
 //   - 传目录：在该目录下查找 fileupload.yaml / fileupload.yml
 //   - 传具体文件：直接解析该 YAML 文件
+//
 // 未指定 path 或不存在的文件：使用默认配置。
 // 之后以环境变量覆盖。
 func Load(path string) (Config, error) {
@@ -298,36 +302,46 @@ func loadEnv(cfg *Config) {
 			cfg.Upload.DefaultChunkSize = n
 		}
 	}
+	if v := os.Getenv("FILEUPLOAD_TRASH_RETENTION_HOURS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			cfg.Upload.TrashRetentionHours = n
+		}
+	}
+	if v := os.Getenv("FILEUPLOAD_NAMESPACE_QUOTA_BYTES"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n >= 0 {
+			cfg.Upload.NamespaceQuotaBytes = n
+		}
+	}
 	if v := os.Getenv("FILEUPLOAD_WORKER_POOL"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			cfg.Upload.WorkerPoolSize = n
 		}
 	}
 	if v := os.Getenv("FILEUPLOAD_AUTH_TOKEN"); v != "" {
-	if v := os.Getenv("FILEUPLOAD_JWT_SECRET"); v != "" {
-		cfg.Auth.JWTSecret = v
-	}
-	if v := os.Getenv("FILEUPLOAD_JWT_EXPIRY"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			cfg.Auth.JWTExpiry = n
+		if v := os.Getenv("FILEUPLOAD_JWT_SECRET"); v != "" {
+			cfg.Auth.JWTSecret = v
 		}
-	}
-	if v := os.Getenv("FILEUPLOAD_STORAGE_TYPE"); v != "" {
-		cfg.Storage.Type = v
-	}
-	if v := os.Getenv("FILEUPLOAD_REDIS_DB"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			cfg.Redis.DB = n
+		if v := os.Getenv("FILEUPLOAD_JWT_EXPIRY"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil {
+				cfg.Auth.JWTExpiry = n
+			}
 		}
-	}
-	if v := os.Getenv("FILEUPLOAD_REDIS_PREFIX"); v != "" {
-		cfg.Redis.Prefix = v
-	}
-	if v := os.Getenv("FILEUPLOAD_AUTH_ENFORCE"); v != "" {
-		if v == "true" || v == "1" {
-			cfg.Auth.Enforce = true
+		if v := os.Getenv("FILEUPLOAD_STORAGE_TYPE"); v != "" {
+			cfg.Storage.Type = v
 		}
-	}
+		if v := os.Getenv("FILEUPLOAD_REDIS_DB"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil {
+				cfg.Redis.DB = n
+			}
+		}
+		if v := os.Getenv("FILEUPLOAD_REDIS_PREFIX"); v != "" {
+			cfg.Redis.Prefix = v
+		}
+		if v := os.Getenv("FILEUPLOAD_AUTH_ENFORCE"); v != "" {
+			if v == "true" || v == "1" {
+				cfg.Auth.Enforce = true
+			}
+		}
 		cfg.Auth.Token = v
 		cfg.Auth.Enabled = true
 	}

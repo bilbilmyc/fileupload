@@ -31,16 +31,24 @@ func NewLocalFS(root string) (*LocalFS, error) {
 
 // absPath 将逻辑路径转为绝对路径，含路径穿越安全检查
 func (s *LocalFS) absPath(path string) (string, error) {
-	// 路径穿越检查
-	cleanPath := filepath.Clean(path)
-	if cleanPath == "." || cleanPath == "/" {
-		return "", domain.ErrInvalidArgument
-	}
-	// 禁止 .. 符号
-	if containsPathTraversal(cleanPath) {
+	if path == "" || filepath.IsAbs(path) || containsPathTraversal(path) {
 		return "", domain.ErrPathTraversal
 	}
-	return filepath.Join(s.root, cleanPath), nil
+	cleanPath := filepath.Clean(path)
+	if cleanPath == "." || cleanPath == string(filepath.Separator) {
+		return "", domain.ErrInvalidArgument
+	}
+
+	candidate := filepath.Join(s.root, cleanPath)
+	rel, err := filepath.Rel(s.root, candidate)
+	if err != nil {
+		return "", fmt.Errorf("校验存储路径: %w", err)
+	}
+	// Rel 结果仍以 .. 开头意味着路径已逃逸 root。这个检查也覆盖 Windows 卷路径。
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return "", domain.ErrPathTraversal
+	}
+	return candidate, nil
 }
 
 // Write 从 reader 流式写入文件

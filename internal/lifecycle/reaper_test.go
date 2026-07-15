@@ -18,9 +18,9 @@ import (
 // ===== In-memory mock Metadata for lifecycle tests =====
 
 type mockMeta struct {
-	sessions   map[string]*domain.UploadSession
-	blobs      map[string]*domain.ContentBlob
-	files      map[string]*domain.FileMetadata
+	sessions map[string]*domain.UploadSession
+	blobs    map[string]*domain.ContentBlob
+	files    map[string]*domain.FileMetadata
 }
 
 func newMockMeta() *mockMeta {
@@ -42,8 +42,12 @@ func (m *mockMeta) GetSession(_ context.Context, id string) (*domain.UploadSessi
 	}
 	return s, nil
 }
-func (m *mockMeta) UpdateOffset(_ context.Context, _ string, _ int, _ string, _ int64) error { return nil }
-func (m *mockMeta) ListChunks(_ context.Context, _ string) ([]domain.ChunkInfo, error) { return nil, nil }
+func (m *mockMeta) UpdateOffset(_ context.Context, _ string, _ int, _ string, _ int64) error {
+	return nil
+}
+func (m *mockMeta) ListChunks(_ context.Context, _ string) ([]domain.ChunkInfo, error) {
+	return nil, nil
+}
 func (m *mockMeta) DeleteSession(_ context.Context, id string) error {
 	delete(m.sessions, id)
 	return nil
@@ -70,8 +74,8 @@ func (m *mockMeta) PutBlob(_ context.Context, b *domain.ContentBlob) error {
 	return nil
 }
 func (m *mockMeta) UpdateBlobStorage(_ context.Context, _ string, _ string) error { return nil }
-func (m *mockMeta) IncrBlobRef(_ context.Context, _ string) error { return nil }
-func (m *mockMeta) DecrBlobRef(_ context.Context, _ string) (int, error) { return 0, nil }
+func (m *mockMeta) IncrBlobRef(_ context.Context, _ string) error                 { return nil }
+func (m *mockMeta) DecrBlobRef(_ context.Context, _ string) (int, error)          { return 0, nil }
 func (m *mockMeta) PutFile(_ context.Context, f *domain.FileMetadata) error {
 	m.files[f.FileID] = f
 	return nil
@@ -83,8 +87,38 @@ func (m *mockMeta) GetFile(_ context.Context, id string) (*domain.FileMetadata, 
 	}
 	return f, nil
 }
-func (m *mockMeta) GetFileByPath(_ context.Context, _, _ string) (*domain.FileMetadata, error) { return nil, nil }
-func (m *mockMeta) ListChildren(_ context.Context, _ string, _ string) ([]*domain.FileMetadata, error) { return nil, nil }
+func (m *mockMeta) GetFileByPath(_ context.Context, _, _ string) (*domain.FileMetadata, error) {
+	return nil, nil
+}
+func (m *mockMeta) ListChildren(_ context.Context, _ string, _ string) ([]*domain.FileMetadata, error) {
+	return nil, nil
+}
+func (m *mockMeta) GetNamespaceUsage(_ context.Context, _ string) (*domain.NamespaceUsage, error) {
+	return &domain.NamespaceUsage{}, nil
+}
+func (m *mockMeta) ListTrash(_ context.Context, namespace string) ([]*domain.FileMetadata, error) {
+	var files []*domain.FileMetadata
+	for _, file := range m.files {
+		if file.Namespace == namespace && file.DeletedAt != nil {
+			files = append(files, file)
+		}
+	}
+	return files, nil
+}
+func (m *mockMeta) MoveFileToTrash(_ context.Context, id string, deletedAt time.Time) error {
+	if file := m.files[id]; file != nil {
+		file.DeletedAt = &deletedAt
+		return nil
+	}
+	return domain.ErrNotFound
+}
+func (m *mockMeta) RestoreFile(_ context.Context, id string) error {
+	if file := m.files[id]; file != nil && file.DeletedAt != nil {
+		file.DeletedAt = nil
+		return nil
+	}
+	return domain.ErrNotFound
+}
 func (m *mockMeta) DeleteFile(_ context.Context, _ string) error { return nil }
 func (m *mockMeta) ListFilesByBlob(_ context.Context, sha string) ([]*domain.FileMetadata, error) {
 	var refs []*domain.FileMetadata
@@ -95,21 +129,29 @@ func (m *mockMeta) ListFilesByBlob(_ context.Context, sha string) ([]*domain.Fil
 	}
 	return refs, nil
 }
-func (m *mockMeta) ListRoot(_ context.Context, _ string, _ string) ([]*domain.FileMetadata, error) { return nil, nil }
-func (m *mockMeta) SetFileTags(_ context.Context, _ string, _ []string) error { return nil }
-func (m *mockMeta) GetFileTags(_ context.Context, _ string) ([]string, error) { return nil, nil }
-func (m *mockMeta) DeleteFileTags(_ context.Context, _ string) error { return nil }
+func (m *mockMeta) ListRoot(_ context.Context, _ string, _ string) ([]*domain.FileMetadata, error) {
+	return nil, nil
+}
+func (m *mockMeta) SetFileTags(_ context.Context, _ string, _ []string) error           { return nil }
+func (m *mockMeta) GetFileTags(_ context.Context, _ string) ([]string, error)           { return nil, nil }
+func (m *mockMeta) DeleteFileTags(_ context.Context, _ string) error                    { return nil }
 func (m *mockMeta) ReparentFile(_ context.Context, _ string, _ *string, _ string) error { return nil }
-func (m *mockMeta) UpdateFileParent(_ context.Context, _ string, _ *string) error { return nil }
+func (m *mockMeta) UpdateFileParent(_ context.Context, _ string, _ *string) error       { return nil }
 
 func (m *mockMeta) ListChildrenPage(_ context.Context, parentID string, search string, page, perPage int, sortBy, sortOrder string) ([]*domain.FileMetadata, int, error) {
 	all, _ := m.ListChildren(context.Background(), parentID, search)
 	total := len(all)
 	start := (page - 1) * perPage
-	if start < 0 { start = 0 }
-	if start >= total { return nil, total, nil }
+	if start < 0 {
+		start = 0
+	}
+	if start >= total {
+		return nil, total, nil
+	}
 	end := start + perPage
-	if end > total { end = total }
+	if end > total {
+		end = total
+	}
 	return all[start:end], total, nil
 }
 
@@ -117,10 +159,16 @@ func (m *mockMeta) ListRootPage(_ context.Context, namespace string, search stri
 	all, _ := m.ListRoot(context.Background(), namespace, search)
 	total := len(all)
 	start := (page - 1) * perPage
-	if start < 0 { start = 0 }
-	if start >= total { return nil, total, nil }
+	if start < 0 {
+		start = 0
+	}
+	if start >= total {
+		return nil, total, nil
+	}
 	end := start + perPage
-	if end > total { end = total }
+	if end > total {
+		end = total
+	}
 	return all[start:end], total, nil
 }
 func (m *mockMeta) RenameFile(_ context.Context, _, _, _ string) error { return nil }
@@ -140,9 +188,11 @@ func (m *mockMeta) ListAllFiles(_ context.Context) ([]*domain.FileMetadata, erro
 	return files, nil
 }
 func (m *mockMeta) WriteAuditLog(_ context.Context, _ *domain.AuditLogEntry) error { return nil }
-func (m *mockMeta) ListAuditLogs(_ context.Context, _, _ int) ([]*domain.AuditLogEntry, int, error) { return nil, 0, nil }
-func (m *mockMeta) AdminCountFiles(_ context.Context) (int, error) { return len(m.files), nil }
-func (m *mockMeta) AdminCountBlobs(_ context.Context) (int, error) { return len(m.blobs), nil }
+func (m *mockMeta) ListAuditLogs(_ context.Context, _, _ int) ([]*domain.AuditLogEntry, int, error) {
+	return nil, 0, nil
+}
+func (m *mockMeta) AdminCountFiles(_ context.Context) (int, error)      { return len(m.files), nil }
+func (m *mockMeta) AdminCountBlobs(_ context.Context) (int, error)      { return len(m.blobs), nil }
 func (m *mockMeta) AdminTotalBlobSize(_ context.Context) (int64, error) { return 0, nil }
 
 // ===== In-memory mock Storage =====
@@ -362,41 +412,81 @@ func TestReap_ListExpiredError(t *testing.T) {
 type errorMeta struct{}
 
 func (e *errorMeta) CreateSession(_ context.Context, _ *domain.UploadSession) error { return nil }
-func (e *errorMeta) GetSession(_ context.Context, _ string) (*domain.UploadSession, error) { return nil, fmt.Errorf("fail") }
-func (e *errorMeta) UpdateOffset(_ context.Context, _ string, _ int, _ string, _ int64) error { return nil }
-func (e *errorMeta) ListChunks(_ context.Context, _ string) ([]domain.ChunkInfo, error) { return nil, nil }
-func (e *errorMeta) DeleteSession(_ context.Context, _ string) error { return nil }
+func (e *errorMeta) GetSession(_ context.Context, _ string) (*domain.UploadSession, error) {
+	return nil, fmt.Errorf("fail")
+}
+func (e *errorMeta) UpdateOffset(_ context.Context, _ string, _ int, _ string, _ int64) error {
+	return nil
+}
+func (e *errorMeta) ListChunks(_ context.Context, _ string) ([]domain.ChunkInfo, error) {
+	return nil, nil
+}
+func (e *errorMeta) DeleteSession(_ context.Context, _ string) error                 { return nil }
 func (e *errorMeta) TouchSession(_ context.Context, _ string, _ time.Duration) error { return nil }
-func (e *errorMeta) ListExpiredSessions(_ context.Context) ([]string, error) { return nil, fmt.Errorf("list error") }
-func (e *errorMeta) GetBlobBySha(_ context.Context, _ string) (*domain.ContentBlob, error) { return nil, nil }
-func (e *errorMeta) PutBlob(_ context.Context, _ *domain.ContentBlob) error { return nil }
+func (e *errorMeta) ListExpiredSessions(_ context.Context) ([]string, error) {
+	return nil, fmt.Errorf("list error")
+}
+func (e *errorMeta) GetBlobBySha(_ context.Context, _ string) (*domain.ContentBlob, error) {
+	return nil, nil
+}
+func (e *errorMeta) PutBlob(_ context.Context, _ *domain.ContentBlob) error        { return nil }
 func (e *errorMeta) UpdateBlobStorage(_ context.Context, _ string, _ string) error { return nil }
-func (e *errorMeta) IncrBlobRef(_ context.Context, _ string) error { return nil }
-func (e *errorMeta) DecrBlobRef(_ context.Context, _ string) (int, error) { return 0, nil }
-func (e *errorMeta) PutFile(_ context.Context, _ *domain.FileMetadata) error { return nil }
-func (e *errorMeta) GetFile(_ context.Context, _ string) (*domain.FileMetadata, error) { return nil, nil }
-func (e *errorMeta) GetFileByPath(_ context.Context, _, _ string) (*domain.FileMetadata, error) { return nil, nil }
-func (e *errorMeta) ListChildren(_ context.Context, _ string, _ string) ([]*domain.FileMetadata, error) { return nil, nil }
-func (e *errorMeta) DeleteFile(_ context.Context, _ string) error { return nil }
-func (e *errorMeta) ListFilesByBlob(_ context.Context, _ string) ([]*domain.FileMetadata, error) { return nil, nil }
-func (e *errorMeta) ListRoot(_ context.Context, _ string, _ string) ([]*domain.FileMetadata, error) { return nil, nil }
-func (e *errorMeta) SetFileTags(_ context.Context, _ string, _ []string) error { return nil }
-func (e *errorMeta) GetFileTags(_ context.Context, _ string) ([]string, error) { return nil, nil }
-func (e *errorMeta) DeleteFileTags(_ context.Context, _ string) error { return nil }
+func (e *errorMeta) IncrBlobRef(_ context.Context, _ string) error                 { return nil }
+func (e *errorMeta) DecrBlobRef(_ context.Context, _ string) (int, error)          { return 0, nil }
+func (e *errorMeta) PutFile(_ context.Context, _ *domain.FileMetadata) error       { return nil }
+func (e *errorMeta) GetFile(_ context.Context, _ string) (*domain.FileMetadata, error) {
+	return nil, nil
+}
+func (e *errorMeta) GetFileByPath(_ context.Context, _, _ string) (*domain.FileMetadata, error) {
+	return nil, nil
+}
+func (e *errorMeta) ListChildren(_ context.Context, _ string, _ string) ([]*domain.FileMetadata, error) {
+	return nil, nil
+}
+func (e *errorMeta) GetNamespaceUsage(_ context.Context, _ string) (*domain.NamespaceUsage, error) {
+	return &domain.NamespaceUsage{}, nil
+}
+func (e *errorMeta) ListTrash(_ context.Context, _ string) ([]*domain.FileMetadata, error) {
+	return nil, nil
+}
+func (e *errorMeta) MoveFileToTrash(_ context.Context, _ string, _ time.Time) error { return nil }
+func (e *errorMeta) RestoreFile(_ context.Context, _ string) error                  { return nil }
+func (e *errorMeta) DeleteFile(_ context.Context, _ string) error                   { return nil }
+func (e *errorMeta) ListFilesByBlob(_ context.Context, _ string) ([]*domain.FileMetadata, error) {
+	return nil, nil
+}
+func (e *errorMeta) ListRoot(_ context.Context, _ string, _ string) ([]*domain.FileMetadata, error) {
+	return nil, nil
+}
+func (e *errorMeta) SetFileTags(_ context.Context, _ string, _ []string) error           { return nil }
+func (e *errorMeta) GetFileTags(_ context.Context, _ string) ([]string, error)           { return nil, nil }
+func (e *errorMeta) DeleteFileTags(_ context.Context, _ string) error                    { return nil }
 func (e *errorMeta) ReparentFile(_ context.Context, _ string, _ *string, _ string) error { return nil }
-func (e *errorMeta) UpdateFileParent(_ context.Context, _ string, _ *string) error { return nil }
+func (e *errorMeta) UpdateFileParent(_ context.Context, _ string, _ *string) error       { return nil }
 
-func (e *errorMeta) ListChildrenPage(_ context.Context, _ string, _ string, _, _ int, _, _ string) ([]*domain.FileMetadata, int, error) { return nil, 0, fmt.Errorf("fail") }
-func (e *errorMeta) ListRootPage(_ context.Context, _ string, _ string, _, _ int, _, _ string) ([]*domain.FileMetadata, int, error) { return nil, 0, fmt.Errorf("fail") }
+func (e *errorMeta) ListChildrenPage(_ context.Context, _ string, _ string, _, _ int, _, _ string) ([]*domain.FileMetadata, int, error) {
+	return nil, 0, fmt.Errorf("fail")
+}
+func (e *errorMeta) ListRootPage(_ context.Context, _ string, _ string, _, _ int, _, _ string) ([]*domain.FileMetadata, int, error) {
+	return nil, 0, fmt.Errorf("fail")
+}
 func (e *errorMeta) RenameFile(_ context.Context, _, _, _ string) error { return nil }
 
-func (e *errorMeta) ListAllBlobs(_ context.Context) ([]*domain.ContentBlob, error) { return nil, fmt.Errorf("fail") }
+func (e *errorMeta) ListAllBlobs(_ context.Context) ([]*domain.ContentBlob, error) {
+	return nil, fmt.Errorf("fail")
+}
 func (e *errorMeta) ListAllFiles(_ context.Context) ([]*domain.FileMetadata, error) { return nil, nil }
-func (e *errorMeta) WriteAuditLog(_ context.Context, _ *domain.AuditLogEntry) error { return fmt.Errorf("fail") }
-func (e *errorMeta) ListAuditLogs(_ context.Context, _, _ int) ([]*domain.AuditLogEntry, int, error) { return nil, 0, fmt.Errorf("fail") }
+func (e *errorMeta) WriteAuditLog(_ context.Context, _ *domain.AuditLogEntry) error {
+	return fmt.Errorf("fail")
+}
+func (e *errorMeta) ListAuditLogs(_ context.Context, _, _ int) ([]*domain.AuditLogEntry, int, error) {
+	return nil, 0, fmt.Errorf("fail")
+}
 func (e *errorMeta) AdminCountFiles(_ context.Context) (int, error) { return 0, fmt.Errorf("fail") }
 func (e *errorMeta) AdminCountBlobs(_ context.Context) (int, error) { return 0, fmt.Errorf("fail") }
-func (e *errorMeta) AdminTotalBlobSize(_ context.Context) (int64, error) { return 0, fmt.Errorf("fail") }
+func (e *errorMeta) AdminTotalBlobSize(_ context.Context) (int64, error) {
+	return 0, fmt.Errorf("fail")
+}
 
 func TestCleanupOrphanParts_GetSessionError(t *testing.T) {
 	meta := &errorMeta{}
@@ -766,7 +856,17 @@ func (m *errorMeta) HealthCheck(_ context.Context) error { return nil }
 
 func (m *mockMeta) CreateShare(_ context.Context, _ string, _ *domain.ShareEntry) error { return nil }
 func (m *mockMeta) GetShare(_ context.Context, _ string) (*domain.ShareEntry, error)    { return nil, nil }
+func (m *mockMeta) ListShares(_ context.Context, _, _ string) ([]*domain.ShareEntry, error) {
+	return nil, nil
+}
+func (m *mockMeta) DeleteShare(_ context.Context, _, _ string) error                     { return nil }
 func (m *mockMeta) IncrDownloads(_ context.Context, _ string) error                      { return nil }
 func (m *errorMeta) CreateShare(_ context.Context, _ string, _ *domain.ShareEntry) error { return nil }
-func (m *errorMeta) GetShare(_ context.Context, _ string) (*domain.ShareEntry, error)    { return nil, nil }
-func (m *errorMeta) IncrDownloads(_ context.Context, _ string) error                      { return nil }
+func (m *errorMeta) GetShare(_ context.Context, _ string) (*domain.ShareEntry, error) {
+	return nil, nil
+}
+func (m *errorMeta) ListShares(_ context.Context, _, _ string) ([]*domain.ShareEntry, error) {
+	return nil, nil
+}
+func (m *errorMeta) DeleteShare(_ context.Context, _, _ string) error { return nil }
+func (m *errorMeta) IncrDownloads(_ context.Context, _ string) error  { return nil }

@@ -264,13 +264,50 @@ func TestFinalize_Success(t *testing.T) {
 		t.Error("Finalize 后 file 未创建")
 	}
 
-	// 验证存储有数据（使用 mock 的 Stat 方法，线程安全）
-	_, exists, err := storage.Stat(ctx, "demo/finalize.txt")
+	// 验证存储有数据。物理路径带 session ID，避免同名文件互相覆盖。
+	blob, err := meta.GetBlobBySha(ctx, sha)
+	if err != nil || blob == nil {
+		t.Fatalf("GetBlobBySha error = %v, blob = %#v", err, blob)
+	}
+	_, exists, err := storage.Stat(ctx, blob.StoragePath)
 	if err != nil {
 		t.Fatalf("Stat error: %v", err)
 	}
 	if !exists {
 		t.Error("Finalize 后存储中没有文件")
+	}
+}
+
+func TestFinalize_RejectsIncompleteUpload(t *testing.T) {
+	svc, _, _ := newTestUploadService(t)
+	ctx := context.Background()
+
+	session, err := svc.CreateSession(ctx, "", 20, CompNone, 10, "demo", "partial.bin")
+	if err != nil {
+		t.Fatalf("CreateSession error = %v", err)
+	}
+	if err := svc.AppendChunk(ctx, session.SessionID, 0, bytes.NewReader([]byte("0123456789")), ""); err != nil {
+		t.Fatalf("AppendChunk error = %v", err)
+	}
+
+	_, err = svc.Finalize(ctx, session.SessionID)
+	if err != ErrUploadIncomplete {
+		t.Errorf("Finalize(partial) error = %v, want ErrUploadIncomplete", err)
+	}
+}
+
+func TestUploadSession_NamespaceIsolation(t *testing.T) {
+	svc, _, _ := newTestUploadService(t)
+	ctx := context.Background()
+
+	session, err := svc.CreateSession(ctx, "", 10, CompNone, 10, "tenant-a", "private.bin")
+	if err != nil {
+		t.Fatalf("CreateSession error = %v", err)
+	}
+
+	err = svc.AppendChunkForNamespace(ctx, session.SessionID, "tenant-b", 0, bytes.NewReader([]byte("0123456789")), "")
+	if err != ErrForbidden {
+		t.Errorf("AppendChunkForNamespace(cross tenant) error = %v, want ErrForbidden", err)
 	}
 }
 
@@ -673,5 +710,17 @@ func TestMockHashAccumulator(t *testing.T) {
 	}
 	if acc.SumHex() == "" {
 		t.Error("SumHex() is empty")
+	}
+}
+
+func TestCreateSession_RejectsNamespaceQuotaExceeded(t *testing.T) {
+	svc, meta, _ := newTestUploadService(t)
+	svc.cfg.NamespaceQuotaBytes = 100
+	ctx := context.Background()
+	if err := meta.PutFile(ctx, &FileMetadata{FileID: "existing", Namespace: "demo", Name: "existing.bin", Path: "existing.bin", Size: 80}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.CreateSession(ctx, "sha", 21, CompNone, 0, "demo", "new.bin"); err != ErrQuotaExceeded {
+		t.Fatalf("CreateSession quota error = %v, want %v", err, ErrQuotaExceeded)
 	}
 }

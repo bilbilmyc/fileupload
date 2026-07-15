@@ -27,7 +27,12 @@ func (h *DownloadHandler) GetFile(w http.ResponseWriter, r *http.Request) {
 	}
 	namespace := GetNamespace(r.Context())
 
-	rng := parseRangeHeader(r.Header.Get("Range"))
+	rng, err := parseRangeHeader(r.Header.Get("Range"))
+	if err != nil {
+		w.Header().Set("Content-Range", "bytes */*")
+		respondError(w, http.StatusRequestedRangeNotSatisfiable, err)
+		return
+	}
 
 	fileReader, err := h.downloadSvc.GetFile(r.Context(), fileID, namespace, rng)
 	if err != nil {
@@ -37,15 +42,17 @@ func (h *DownloadHandler) GetFile(w http.ResponseWriter, r *http.Request) {
 	defer fileReader.Reader.Close()
 
 	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Accept-Ranges", "bytes")
 	w.Header().Set("X-SHA256", fileReader.Blob.SHA256)
-	w.Header().Set("Content-Disposition", "attachment; filename=\""+fileReader.File.Name+"\"")
+	w.Header().Set("Content-Disposition", contentDisposition("attachment", fileReader.File.Name))
+	w.Header().Set("Cache-Control", "private, no-store")
 
-	if rng.IsZero() {
-		w.Header().Set("Content-Length", strconv.FormatInt(fileReader.Blob.Size, 10))
+	if !fileReader.Range.Requested {
+		w.Header().Set("Content-Length", strconv.FormatInt(fileReader.Range.Length, 10))
 		w.WriteHeader(http.StatusOK)
 	} else {
-		w.Header().Set("Content-Range", formatContentRange(rng.Offset, rng.Length, fileReader.FileSize))
-		w.Header().Set("Content-Length", strconv.FormatInt(rng.Length, 10))
+		w.Header().Set("Content-Range", formatContentRange(fileReader.Range.Offset, fileReader.Range.Length, fileReader.FileSize))
+		w.Header().Set("Content-Length", strconv.FormatInt(fileReader.Range.Length, 10))
 		w.WriteHeader(http.StatusPartialContent)
 	}
 
@@ -61,7 +68,12 @@ func (h *DownloadHandler) GetPreview(w http.ResponseWriter, r *http.Request) {
 	}
 	namespace := GetNamespace(r.Context())
 
-	rng := parseRangeHeader(r.Header.Get("Range"))
+	rng, err := parseRangeHeader(r.Header.Get("Range"))
+	if err != nil {
+		w.Header().Set("Content-Range", "bytes */*")
+		respondError(w, http.StatusRequestedRangeNotSatisfiable, err)
+		return
+	}
 
 	fileReader, err := h.downloadSvc.GetFile(r.Context(), fileID, namespace, rng)
 	if err != nil {
@@ -73,16 +85,17 @@ func (h *DownloadHandler) GetPreview(w http.ResponseWriter, r *http.Request) {
 	mimeType := guessMimeType(fileReader.File.Name)
 
 	w.Header().Set("Content-Type", mimeType)
+	w.Header().Set("Accept-Ranges", "bytes")
 	w.Header().Set("X-SHA256", fileReader.Blob.SHA256)
-	w.Header().Set("Cache-Control", "public, max-age=3600")
-	w.Header().Set("Content-Disposition", "inline; filename=\""+fileReader.File.Name+"\"")
+	w.Header().Set("Cache-Control", "private, no-store")
+	w.Header().Set("Content-Disposition", contentDisposition("inline", fileReader.File.Name))
 
-	if rng.IsZero() {
-		w.Header().Set("Content-Length", strconv.FormatInt(fileReader.Blob.Size, 10))
+	if !fileReader.Range.Requested {
+		w.Header().Set("Content-Length", strconv.FormatInt(fileReader.Range.Length, 10))
 		w.WriteHeader(http.StatusOK)
 	} else {
-		w.Header().Set("Content-Range", formatContentRange(rng.Offset, rng.Length, fileReader.FileSize))
-		w.Header().Set("Content-Length", strconv.FormatInt(rng.Length, 10))
+		w.Header().Set("Content-Range", formatContentRange(fileReader.Range.Offset, fileReader.Range.Length, fileReader.FileSize))
+		w.Header().Set("Content-Length", strconv.FormatInt(fileReader.Range.Length, 10))
 		w.WriteHeader(http.StatusPartialContent)
 	}
 
@@ -102,6 +115,10 @@ func (h *DownloadHandler) GetDir(w http.ResponseWriter, r *http.Request) {
 		formatStr = "tar.gz"
 	}
 	format := domain.CompressionFormat(formatStr)
+	if format != domain.CompTarGz && format != domain.CompTarZst && format != domain.CompZip {
+		respondError(w, http.StatusBadRequest, domain.ErrInvalidArgument)
+		return
+	}
 
 	dw, err := h.downloadSvc.GetDirManifest(r.Context(), dirID, namespace)
 	if err != nil {
@@ -117,7 +134,8 @@ func (h *DownloadHandler) GetDir(w http.ResponseWriter, r *http.Request) {
 	defer reader.Close()
 
 	w.Header().Set("X-Tree-SHA256", dw.TreeSHA256)
-	w.Header().Set("Content-Disposition", "attachment; filename=\"dir."+formatStr+"\"")
+	w.Header().Set("Content-Disposition", contentDisposition("attachment", "dir."+formatStr))
+	w.Header().Set("Cache-Control", "private, no-store")
 
 	switch format {
 	case domain.CompTarGz:

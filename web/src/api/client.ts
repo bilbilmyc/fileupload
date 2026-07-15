@@ -41,6 +41,7 @@ export interface FileItem {
   parent_id?: string
   tags?: string[]
   created_at: string
+  deleted_at?: string
 }
 
 export interface ListResult {
@@ -67,6 +68,28 @@ export interface FinalizeResult {
   sha256: string
   size: number
   name: string
+}
+
+export interface ShareEntry {
+  token: string
+  file_id: string
+  password_protected: boolean
+  expires_at?: string
+  max_downloads: number
+  cur_downloads: number
+  namespace: string
+  created_at?: string
+}
+
+export interface CreateShareOptions {
+  expires_in?: number
+  max_downloads?: number
+}
+
+export interface NamespaceUsage {
+  file_count: number
+  total_size: number
+  quota_bytes?: number
 }
 
 /**
@@ -121,6 +144,19 @@ export async function deleteDir(id: string): Promise<void> {
   await sdkClient.deleteDir(id)
 }
 
+export async function listTrash(): Promise<FileItem[]> {
+  const response = await axiosInstance.get('/v1/trash')
+  return response.data.items || []
+}
+
+export async function restoreTrash(id: string): Promise<void> {
+  await axiosInstance.post(`/v1/trash/${encodeURIComponent(id)}/restore`)
+}
+
+export async function purgeTrash(id: string): Promise<void> {
+  await axiosInstance.delete(`/v1/trash/${encodeURIComponent(id)}`)
+}
+
 export async function checkExists(sha256: string, name?: string): Promise<FileItem | null> {
   // v0.10.0：迁到 SDK
   try {
@@ -138,14 +174,14 @@ export async function checkExists(sha256: string, name?: string): Promise<FileIt
  */
 export async function initUpload(
   size: number,
-  sha256: string,
+  sha256: string | undefined,
   fileName: string,
   compression: 'none' | 'zstd' = 'none'
 ): Promise<UploadInitResult> {
   const r = await axiosInstance.post('/v1/uploads/init', null, {
     params: { size },
     headers: {
-      'X-SHA256': sha256,
+      ...(sha256 ? { 'X-SHA256': sha256 } : {}),
       'X-Compression': compression,
       'X-File-Name': encodeURIComponent(fileName),
     },
@@ -180,6 +216,11 @@ export async function finalizeUpload(sessionId: string): Promise<FinalizeResult>
   return r.data
 }
 
+/** Cancels a resumable upload and releases its temporary chunks. */
+export async function cancelUpload(sessionId: string): Promise<void> {
+  await axiosInstance.delete(`/uploads/${sessionId}`)
+}
+
 export async function uploadStatus(sessionId: string): Promise<UploadStatusResult> {
   // v0.10.0：迁到 SDK
   return sdkClient.getUploadStatus(sessionId) as any
@@ -200,6 +241,33 @@ export async function renameFile(id: string, name: string): Promise<void> {
 
 export function previewFileUrl(id: string): string {
   return `/v1/preview/${id}`
+}
+
+export async function createShare(fileId: string, options: CreateShareOptions = {}): Promise<ShareEntry> {
+  const r = await axiosInstance.post('/v1/share', {
+    file_id: fileId,
+    expires_in: options.expires_in || 0,
+    max_downloads: options.max_downloads || 0,
+  })
+  return r.data
+}
+
+export async function listShares(fileId?: string): Promise<ShareEntry[]> {
+  const r = await axiosInstance.get('/v1/shares', { params: fileId ? { file_id: fileId } : undefined })
+  return r.data.shares || []
+}
+
+export async function getNamespaceUsage(): Promise<NamespaceUsage> {
+  const r = await axiosInstance.get('/v1/usage')
+  return r.data
+}
+
+export async function revokeShare(token: string): Promise<void> {
+  await axiosInstance.delete(`/v1/shares/${encodeURIComponent(token)}`)
+}
+
+export function shareUrl(token: string): string {
+  return new URL(`/s/${token}`, window.location.origin).toString()
 }
 
 export async function submitDir(name: string, entries: { path: string; file_id: string }[]): Promise<{ file_id: string }> {

@@ -2,7 +2,9 @@ package transport
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
+	"mime"
 	"net/url"
 	"strconv"
 	"strings"
@@ -10,23 +12,45 @@ import (
 	"github.com/bilbilmyc/fileupload/internal/domain"
 )
 
-// parseRangeHeader 解析 HTTP Range 头
-// 支持格式: bytes=0-1023
-func parseRangeHeader(rangeStr string) domain.DownloadRange {
-	if !strings.HasPrefix(rangeStr, "bytes=") {
-		return domain.DownloadRange{}
+// parseRangeHeader parses a single RFC 7233 byte range. Multiple and suffix ranges are
+// intentionally rejected because the service only streams one continuous reader.
+func parseRangeHeader(rangeStr string) (domain.DownloadRange, error) {
+	if rangeStr == "" {
+		return domain.DownloadRange{}, nil
 	}
-	rangeStr = strings.TrimPrefix(rangeStr, "bytes=")
-	parts := strings.SplitN(rangeStr, "-", 2)
-	if len(parts) != 2 {
-		return domain.DownloadRange{}
+	if !strings.HasPrefix(rangeStr, "bytes=") || strings.Contains(rangeStr, ",") {
+		return domain.DownloadRange{}, domain.ErrInvalidArgument
 	}
-	start, _ := strconv.ParseInt(strings.TrimSpace(parts[0]), 10, 64)
-	end, _ := strconv.ParseInt(strings.TrimSpace(parts[1]), 10, 64)
-	if end > 0 && end >= start {
-		return domain.DownloadRange{Offset: start, Length: end - start + 1}
+	value := strings.TrimSpace(strings.TrimPrefix(rangeStr, "bytes="))
+	parts := strings.SplitN(value, "-", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" && !strings.HasSuffix(value, "-") {
+		return domain.DownloadRange{}, domain.ErrInvalidArgument
 	}
-	return domain.DownloadRange{Offset: start}
+	start, err := strconv.ParseInt(strings.TrimSpace(parts[0]), 10, 64)
+	if err != nil || start < 0 {
+		return domain.DownloadRange{}, domain.ErrInvalidArgument
+	}
+	rng := domain.DownloadRange{Offset: start, Requested: true}
+	endStr := strings.TrimSpace(parts[1])
+	if endStr == "" {
+		return rng, nil
+	}
+	end, err := strconv.ParseInt(endStr, 10, 64)
+	if err != nil || end < start {
+		return domain.DownloadRange{}, domain.ErrInvalidArgument
+	}
+	rng.Length = end - start + 1
+	return rng, nil
+}
+
+// contentDisposition returns an RFC 5987-safe header and prevents quote/newline injection
+// through untrusted file names.
+func contentDisposition(disposition, fileName string) string {
+	value := mime.FormatMediaType(disposition, map[string]string{"filename": fileName})
+	if value == "" {
+		return fmt.Sprintf(`%s; filename="download"`, disposition)
+	}
+	return value
 }
 
 // formatContentRange 格式化 Content-Range 响应头

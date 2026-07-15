@@ -162,7 +162,7 @@ func (m *MockMetadata) GetFile(_ context.Context, id string) (*domain.FileMetada
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	f, ok := m.Files[id]
-	if !ok {
+	if !ok || f.DeletedAt != nil {
 		return nil, nil
 	}
 	return f, nil
@@ -172,22 +172,27 @@ func (m *MockMetadata) GetFileByPath(_ context.Context, namespace, path string) 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, f := range m.Files {
-		if f.Namespace == namespace && f.Path == path {
+		if f.Namespace == namespace && f.Path == path && f.DeletedAt == nil {
 			return f, nil
 		}
 	}
 	return nil, nil
 }
 
-
 func (m *MockMetadata) ListChildrenPage(_ context.Context, parentID string, search string, page, perPage int, sortBy, sortOrder string) ([]*domain.FileMetadata, int, error) {
 	all, _ := m.ListChildren(context.Background(), parentID, search)
 	total := len(all)
 	start := (page - 1) * perPage
-	if start < 0 { start = 0 }
-	if start >= total { return nil, total, nil }
+	if start < 0 {
+		start = 0
+	}
+	if start >= total {
+		return nil, total, nil
+	}
 	end := start + perPage
-	if end > total { end = total }
+	if end > total {
+		end = total
+	}
 	return all[start:end], total, nil
 }
 
@@ -195,22 +200,25 @@ func (m *MockMetadata) ListRootPage(_ context.Context, namespace string, search 
 	all, _ := m.ListRoot(context.Background(), namespace, search)
 	total := len(all)
 	start := (page - 1) * perPage
-	if start < 0 { start = 0 }
-	if start >= total { return nil, total, nil }
+	if start < 0 {
+		start = 0
+	}
+	if start >= total {
+		return nil, total, nil
+	}
 	end := start + perPage
-	if end > total { end = total }
+	if end > total {
+		end = total
+	}
 	return all[start:end], total, nil
 }
-
-
-
 
 func (m *MockMetadata) ListChildren(_ context.Context, parentID string, search string) ([]*domain.FileMetadata, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var children []*domain.FileMetadata
 	for _, f := range m.Files {
-		if f.ParentID == parentID {
+		if f.ParentID == parentID && f.DeletedAt == nil {
 			if search == "" || ContainsIgnoreCase(f.Name, search) {
 				children = append(children, f)
 			}
@@ -233,6 +241,43 @@ func (m *MockMetadata) ListRoot(_ context.Context, namespace string, search stri
 	return roots, nil
 }
 
+func (m *MockMetadata) GetNamespaceUsage(_ context.Context, _ string) (*domain.NamespaceUsage, error) {
+	return &domain.NamespaceUsage{}, nil
+}
+
+func (m *MockMetadata) ListTrash(_ context.Context, namespace string) ([]*domain.FileMetadata, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var files []*domain.FileMetadata
+	for _, f := range m.Files {
+		if f.Namespace == namespace && f.DeletedAt != nil {
+			files = append(files, f)
+		}
+	}
+	return files, nil
+}
+
+func (m *MockMetadata) MoveFileToTrash(_ context.Context, id string, deletedAt time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	f, ok := m.Files[id]
+	if !ok || f.DeletedAt != nil {
+		return domain.ErrNotFound
+	}
+	f.DeletedAt = &deletedAt
+	return nil
+}
+
+func (m *MockMetadata) RestoreFile(_ context.Context, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	f, ok := m.Files[id]
+	if !ok || f.DeletedAt == nil {
+		return domain.ErrNotFound
+	}
+	f.DeletedAt = nil
+	return nil
+}
 func (m *MockMetadata) DeleteFile(_ context.Context, id string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -361,4 +406,8 @@ func (m *MockMetadata) CreateShare(_ context.Context, _ string, _ *domain.ShareE
 func (m *MockMetadata) GetShare(_ context.Context, _ string) (*domain.ShareEntry, error) {
 	return nil, nil
 }
-func (m *MockMetadata) IncrDownloads(_ context.Context, _ string) error { return nil }
+func (m *MockMetadata) ListShares(_ context.Context, _, _ string) ([]*domain.ShareEntry, error) {
+	return nil, nil
+}
+func (m *MockMetadata) DeleteShare(_ context.Context, _, _ string) error { return nil }
+func (m *MockMetadata) IncrDownloads(_ context.Context, _ string) error  { return nil }

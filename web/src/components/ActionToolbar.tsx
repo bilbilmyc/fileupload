@@ -33,10 +33,10 @@ export default function ActionToolbar({
   }
 
   return (
-    <div className="flex items-center justify-between py-2">
+    <div className="flex items-center justify-between py-1">
       <Space size="small">
         <Upload {...uploadProps}>
-          <Button type="primary" size="small" icon={<UploadOutlined />}>
+          <Button type="primary" icon={<UploadOutlined />}>
             上传
           </Button>
         </Upload>

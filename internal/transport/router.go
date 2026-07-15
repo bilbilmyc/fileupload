@@ -64,14 +64,14 @@ func NewRouter(mw *Middleware, tus *TusHandler, rest *RESTHandler, download *Dow
 // Handler 返回经过中间件包装的最终 handler
 func (r *Router) Handler() http.Handler {
 	var h http.Handler = r.mux
-	h = r.middleware.JWTValidate(h)   // JWT 验证（Bearer token）
-	h = r.middleware.Namespace(h)     // 命名空间注入
-	h = r.middleware.Auth(h)          // X-Auth-Token 认证
+	h = r.middleware.JWTValidate(h) // JWT 验证（Bearer token）
+	h = r.middleware.Namespace(h)   // 命名空间注入
+	h = r.middleware.Auth(h)        // X-Auth-Token 认证
 	h = r.middleware.RateLimit(h)
-	h = r.middleware.Logging(h)       // 请求日志
+	h = r.middleware.Logging(h) // 请求日志
 	h = r.middleware.RequestID(h)
 	h = r.middleware.Recover(h)
-	h = r.middleware.CORS(h)          // CORS（最外层）
+	h = r.middleware.CORS(h) // CORS（最外层）
 	return h
 }
 
@@ -108,6 +108,10 @@ func (r *Router) registerRoutes() {
 	r.mux.HandleFunc("DELETE /v1/dirs/{id}", r.rest.DeleteFile)
 	r.mux.HandleFunc("GET /v1/ls", r.rest.ListDir)
 	r.mux.HandleFunc("GET /v1/stat/{id}", r.rest.StatFile)
+	r.mux.HandleFunc("GET /v1/usage", r.rest.GetNamespaceUsage)
+	r.mux.HandleFunc("GET /v1/trash", r.rest.ListTrash)
+	r.mux.HandleFunc("POST /v1/trash/{id}/restore", r.rest.RestoreTrash)
+	r.mux.HandleFunc("DELETE /v1/trash/{id}", r.rest.PurgeTrash)
 
 	// === 秒传预检 ===
 	r.mux.HandleFunc("HEAD /v1/files", r.handleCheckExists)
@@ -125,6 +129,8 @@ func (r *Router) registerRoutes() {
 
 	if r.share != nil {
 		r.mux.HandleFunc("POST /v1/share", r.share.CreateShare)
+		r.mux.HandleFunc("GET /v1/shares", r.share.ListShares)
+		r.mux.HandleFunc("DELETE /v1/shares/{token}", r.share.RevokeShare)
 		r.mux.HandleFunc("GET /s/{token}", r.share.AccessShare)
 	}
 

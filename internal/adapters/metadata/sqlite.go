@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -50,7 +51,8 @@ func (s *SQLiteStore) migrate() error {
 			namespace  TEXT NOT NULL,
 			is_dir     INTEGER NOT NULL DEFAULT 0,
 			parent_id  TEXT,
-			created_at TEXT NOT NULL DEFAULT (datetime('now'))
+			created_at TEXT NOT NULL DEFAULT (datetime('now')),
+			deleted_at TEXT
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_files_namespace_parent ON files(namespace, parent_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_files_sha256 ON files(sha256)`,
@@ -80,7 +82,18 @@ func (s *SQLiteStore) migrate() error {
 			return fmt.Errorf("执行迁移: %w", err)
 		}
 	}
+	// 兼容已有 SQLite 数据库：新增回收站软删除标记。
+	if _, err := s.db.Exec(`ALTER TABLE files ADD COLUMN deleted_at TEXT`); err != nil && !containsSQLiteColumnExists(err.Error()) {
+		return fmt.Errorf("添加 files.deleted_at: %w", err)
+	}
+	if _, err := s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_files_namespace_deleted ON files(namespace, deleted_at)`); err != nil {
+		return fmt.Errorf("创建回收站索引: %w", err)
+	}
 	return nil
+}
+
+func containsSQLiteColumnExists(message string) bool {
+	return strings.Contains(message, "duplicate column name")
 }
 
 // ========== Content Blob ==========
@@ -180,7 +193,7 @@ func (s *SQLiteStore) PutFile(_ context.Context, f *domain.FileMetadata) error {
 func (s *SQLiteStore) GetFile(_ context.Context, id string) (*domain.FileMetadata, error) {
 	row := s.db.QueryRow(
 		`SELECT file_id, sha256, name, path, size, namespace, is_dir, parent_id, created_at
-		 FROM files WHERE file_id = ?`, id,
+		 FROM files WHERE file_id = ? AND deleted_at IS NULL`, id,
 	)
 	return scanFile(row)
 }
@@ -189,7 +202,7 @@ func (s *SQLiteStore) GetFile(_ context.Context, id string) (*domain.FileMetadat
 func (s *SQLiteStore) GetFileByPath(_ context.Context, namespace, path string) (*domain.FileMetadata, error) {
 	row := s.db.QueryRow(
 		`SELECT file_id, sha256, name, path, size, namespace, is_dir, parent_id, created_at
-		 FROM files WHERE namespace = ? AND path = ?`, namespace, path,
+		 FROM files WHERE namespace = ? AND path = ? AND deleted_at IS NULL`, namespace, path,
 	)
 	return scanFile(row)
 }
@@ -207,11 +220,13 @@ func (s *SQLiteStore) ListChildrenPage(ctx context.Context, parentID string, sea
 		order = "DESC"
 	}
 	offset := (page - 1) * perPage
-	if offset < 0 { offset = 0 }
+	if offset < 0 {
+		offset = 0
+	}
 
 	// Count
 	var total int
-	countSQL := "SELECT COUNT(*) FROM files WHERE parent_id=?"
+	countSQL := "SELECT COUNT(*) FROM files WHERE parent_id=? AND deleted_at IS NULL"
 	args := []any{parentID}
 	if search != "" {
 		countSQL += " AND name LIKE ?"
@@ -220,7 +235,7 @@ func (s *SQLiteStore) ListChildrenPage(ctx context.Context, parentID string, sea
 	s.db.QueryRowContext(ctx, countSQL, args...).Scan(&total)
 
 	// Query with limit
-	sql := fmt.Sprintf("SELECT file_id, sha256, name, path, size, namespace, is_dir, parent_id, created_at FROM files WHERE parent_id=?")
+	sql := fmt.Sprintf("SELECT file_id, sha256, name, path, size, namespace, is_dir, parent_id, created_at FROM files WHERE parent_id=? AND deleted_at IS NULL")
 	searchArgs := []any{parentID}
 	if search != "" {
 		sql += " AND name LIKE ?"
@@ -234,7 +249,9 @@ func (s *SQLiteStore) ListChildrenPage(ctx context.Context, parentID string, sea
 	}
 	defer rows.Close()
 	files, err := scanFiles(rows)
-	if err != nil { return nil, 0, err }
+	if err != nil {
+		return nil, 0, err
+	}
 	return files, total, nil
 }
 
@@ -244,13 +261,13 @@ func (s *SQLiteStore) ListChildren(_ context.Context, parentID string, search st
 	if search != "" {
 		rows, err = s.db.Query(
 			`SELECT file_id, sha256, name, path, size, namespace, is_dir, parent_id, created_at
-			 FROM files WHERE parent_id = ? AND name LIKE ? ORDER BY name`,
+			 FROM files WHERE parent_id = ? AND deleted_at IS NULL AND name LIKE ? ORDER BY name`,
 			parentID, "%"+search+"%",
 		)
 	} else {
 		rows, err = s.db.Query(
 			`SELECT file_id, sha256, name, path, size, namespace, is_dir, parent_id, created_at
-			 FROM files WHERE parent_id = ? ORDER BY name`, parentID,
+			 FROM files WHERE parent_id = ? AND deleted_at IS NULL ORDER BY name`, parentID,
 		)
 	}
 	if err != nil {
@@ -258,6 +275,63 @@ func (s *SQLiteStore) ListChildren(_ context.Context, parentID string, search st
 	}
 	defer rows.Close()
 	return scanFiles(rows)
+}
+
+// GetNamespaceUsage 按 namespace 聚合逻辑文件的容量与数量；目录不占容量。
+func (s *SQLiteStore) GetNamespaceUsage(ctx context.Context, namespace string) (*domain.NamespaceUsage, error) {
+	usage := &domain.NamespaceUsage{}
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*), COALESCE(SUM(size), 0) FROM files WHERE namespace = ? AND is_dir = 0 AND deleted_at IS NULL`, namespace).Scan(&usage.FileCount, &usage.TotalSize)
+	if err != nil {
+		return nil, err
+	}
+	return usage, nil
+}
+
+// ListTrash 返回命名空间中已软删除的节点（保留原父子关系，供恢复与彻底删除使用）。
+func (s *SQLiteStore) ListTrash(ctx context.Context, namespace string) ([]*domain.FileMetadata, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT file_id, sha256, name, path, size, namespace, is_dir, parent_id, created_at, deleted_at FROM files WHERE namespace = ? AND deleted_at IS NOT NULL ORDER BY deleted_at DESC, name ASC`, namespace)
+	if err != nil {
+		return nil, fmt.Errorf("列回收站: %w", err)
+	}
+	defer rows.Close()
+	var files []*domain.FileMetadata
+	for rows.Next() {
+		var f domain.FileMetadata
+		var sha, parent, created, deleted sql.NullString
+		var isDir int64
+		if err := rows.Scan(&f.FileID, &sha, &f.Name, &f.Path, &f.Size, &f.Namespace, &isDir, &parent, &created, &deleted); err != nil {
+			return nil, fmt.Errorf("扫描回收站文件: %w", err)
+		}
+		f.SHA256, f.ParentID, f.IsDir, f.CreatedAt = sha.String, parent.String, isDir != 0, parseTime(created.String)
+		if deleted.Valid {
+			value := parseTime(deleted.String)
+			f.DeletedAt = &value
+		}
+		files = append(files, &f)
+	}
+	return files, rows.Err()
+}
+
+func (s *SQLiteStore) MoveFileToTrash(ctx context.Context, id string, deletedAt time.Time) error {
+	res, err := s.db.ExecContext(ctx, `UPDATE files SET deleted_at = ? WHERE file_id = ? AND deleted_at IS NULL`, deletedAt.UTC().Format(time.RFC3339), id)
+	if err != nil {
+		return err
+	}
+	if affected, _ := res.RowsAffected(); affected == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
+}
+
+func (s *SQLiteStore) RestoreFile(ctx context.Context, id string) error {
+	res, err := s.db.ExecContext(ctx, `UPDATE files SET deleted_at = NULL WHERE file_id = ? AND deleted_at IS NOT NULL`, id)
+	if err != nil {
+		return err
+	}
+	if affected, _ := res.RowsAffected(); affected == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
 }
 
 // DeleteFile 删除文件记录
@@ -291,10 +365,12 @@ func (s *SQLiteStore) ListRootPage(ctx context.Context, namespace string, search
 		order = "DESC"
 	}
 	offset := (page - 1) * perPage
-	if offset < 0 { offset = 0 }
+	if offset < 0 {
+		offset = 0
+	}
 
 	var total int
-	countSQL := "SELECT COUNT(*) FROM files WHERE (parent_id IS NULL OR parent_id='') AND namespace=?"
+	countSQL := "SELECT COUNT(*) FROM files WHERE (parent_id IS NULL OR parent_id='') AND namespace=? AND deleted_at IS NULL"
 	args := []any{namespace}
 	if search != "" {
 		countSQL += " AND name LIKE ?"
@@ -302,7 +378,7 @@ func (s *SQLiteStore) ListRootPage(ctx context.Context, namespace string, search
 	}
 	s.db.QueryRowContext(ctx, countSQL, args...).Scan(&total)
 
-	sql := fmt.Sprintf("SELECT file_id, sha256, name, path, size, namespace, is_dir, parent_id, created_at FROM files WHERE (parent_id IS NULL OR parent_id='') AND namespace=?")
+	sql := fmt.Sprintf("SELECT file_id, sha256, name, path, size, namespace, is_dir, parent_id, created_at FROM files WHERE (parent_id IS NULL OR parent_id='') AND namespace=? AND deleted_at IS NULL")
 	searchArgs := []any{namespace}
 	if search != "" {
 		sql += " AND name LIKE ?"
@@ -316,7 +392,9 @@ func (s *SQLiteStore) ListRootPage(ctx context.Context, namespace string, search
 	}
 	defer rows.Close()
 	files, err := scanFiles(rows)
-	if err != nil { return nil, 0, err }
+	if err != nil {
+		return nil, 0, err
+	}
 	return files, total, nil
 }
 
@@ -326,13 +404,13 @@ func (s *SQLiteStore) ListRoot(_ context.Context, namespace string, search strin
 	if search != "" {
 		rows, err = s.db.Query(
 			`SELECT file_id, sha256, name, path, size, namespace, is_dir, parent_id, created_at
-			 FROM files WHERE namespace = ? AND parent_id IS NULL AND name LIKE ? ORDER BY name`,
+			 FROM files WHERE namespace = ? AND parent_id IS NULL AND deleted_at IS NULL AND name LIKE ? ORDER BY name`,
 			namespace, "%"+search+"%",
 		)
 	} else {
 		rows, err = s.db.Query(
 			`SELECT file_id, sha256, name, path, size, namespace, is_dir, parent_id, created_at
-			 FROM files WHERE namespace = ? AND parent_id IS NULL ORDER BY name`, namespace,
+			 FROM files WHERE namespace = ? AND parent_id IS NULL AND deleted_at IS NULL ORDER BY name`, namespace,
 		)
 	}
 	if err != nil {
@@ -368,14 +446,14 @@ func (s *SQLiteStore) ListAllBlobs(_ context.Context) ([]*domain.ContentBlob, er
 
 func (s *SQLiteStore) ListAllFiles(_ context.Context) ([]*domain.FileMetadata, error) {
 	rows, err := s.db.Query(
-		`SELECT file_id, sha256, name, path, size, namespace, is_dir, parent_id, created_at
+		`SELECT file_id, sha256, name, path, size, namespace, is_dir, parent_id, created_at, deleted_at
 		 FROM files ORDER BY file_id`,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("列举全部文件: %w", err)
 	}
 	defer rows.Close()
-	return scanFiles(rows)
+	return scanFilesWithDeleted(rows)
 }
 
 // ========== 标签管理 ==========
@@ -482,6 +560,41 @@ func (s *SQLiteStore) GetShare(_ context.Context, token string) (*domain.ShareEn
 	return &e, nil
 }
 
+func (s *SQLiteStore) ListShares(_ context.Context, namespace, fileID string) ([]*domain.ShareEntry, error) {
+	query := `SELECT token, file_id, password_hash, expires_at, max_downloads, cur_downloads, namespace, created_at FROM shares WHERE namespace = ?`
+	args := []any{namespace}
+	if fileID != "" {
+		query += ` AND file_id = ?`
+		args = append(args, fileID)
+	}
+	query += ` ORDER BY created_at DESC`
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	entries := make([]*domain.ShareEntry, 0)
+	for rows.Next() {
+		entry, err := scanShare(rows)
+		if err != nil {
+			return nil, err
+		}
+		entries = append(entries, entry)
+	}
+	return entries, rows.Err()
+}
+
+func (s *SQLiteStore) DeleteShare(_ context.Context, token, namespace string) error {
+	result, err := s.db.Exec(`DELETE FROM shares WHERE token = ? AND namespace = ?`, token, namespace)
+	if err != nil {
+		return err
+	}
+	if affected, _ := result.RowsAffected(); affected == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
+}
+
 func (s *SQLiteStore) IncrDownloads(_ context.Context, token string) error {
 	_, err := s.db.Exec(`UPDATE shares SET cur_downloads = cur_downloads + 1 WHERE token = ?`, token)
 	return err
@@ -493,6 +606,21 @@ func (s *SQLiteStore) Close() error {
 }
 
 // ========== 辅助函数 ==========
+
+type shareScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanShare(row shareScanner) (*domain.ShareEntry, error) {
+	var entry domain.ShareEntry
+	var createdAt string
+	if err := row.Scan(&entry.Token, &entry.FileID, &entry.PasswordHash, &entry.ExpiresAt, &entry.MaxDownloads, &entry.CurDownloads, &entry.Namespace, &createdAt); err != nil {
+		return nil, err
+	}
+	entry.CreatedAt = createdAt
+	entry.PasswordProtected = entry.PasswordHash != ""
+	return &entry, nil
+}
 
 func scanFile(row *sql.Row) (*domain.FileMetadata, error) {
 	var f domain.FileMetadata
@@ -525,6 +653,25 @@ func scanFiles(rows *sql.Rows) ([]*domain.FileMetadata, error) {
 		f.ParentID = parentID.String
 		f.IsDir = isDir != 0
 		f.CreatedAt = parseTime(createdAtStr.String)
+		files = append(files, &f)
+	}
+	return files, rows.Err()
+}
+
+func scanFilesWithDeleted(rows *sql.Rows) ([]*domain.FileMetadata, error) {
+	var files []*domain.FileMetadata
+	for rows.Next() {
+		var f domain.FileMetadata
+		var sha256, parentID, createdAt, deletedAt sql.NullString
+		var isDir int64
+		if err := rows.Scan(&f.FileID, &sha256, &f.Name, &f.Path, &f.Size, &f.Namespace, &isDir, &parentID, &createdAt, &deletedAt); err != nil {
+			return nil, fmt.Errorf("扫描文件: %w", err)
+		}
+		f.SHA256, f.ParentID, f.IsDir, f.CreatedAt = sha256.String, parentID.String, isDir != 0, parseTime(createdAt.String)
+		if deletedAt.Valid {
+			value := parseTime(deletedAt.String)
+			f.DeletedAt = &value
+		}
 		files = append(files, &f)
 	}
 	return files, rows.Err()

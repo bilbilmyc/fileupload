@@ -16,6 +16,11 @@ import (
 
 // FileDeleter 文件/目录删除接口 — 由 UploadService 实现
 type FileDeleter interface {
+	// Trash moves a file or directory tree to the recycle bin. It is the default
+	// user-facing deletion behavior and keeps restoration possible.
+	Trash(ctx context.Context, fileID, namespace string) error
+	// DeleteFile/DeleteDir remain explicit permanent-delete primitives for
+	// internal lifecycle cleanup and compatibility APIs.
 	DeleteFile(ctx context.Context, fileID, namespace string) error
 	DeleteDir(ctx context.Context, dirID string, recursive bool, namespace string) error
 }
@@ -94,12 +99,10 @@ func (s *BatchService) BatchDelete(ctx context.Context, ids []string, namespace 
 			continue
 		}
 
-		var delErr error
-		if file.IsDir {
-			delErr = s.deleter.DeleteDir(ctx, id, true, namespace)
-		} else {
-			delErr = s.deleter.DeleteFile(ctx, id, namespace)
-		}
+		// Batch delete follows the same reversible recycle-bin semantics as the
+		// single-file REST endpoint. Permanent deletion is reserved for the
+		// retention worker and explicitly named APIs.
+		delErr := s.deleter.Trash(ctx, id, namespace)
 		if delErr != nil {
 			log.Printf("[batch] 删除失败 id=%s: %v", id, delErr)
 			result.Failed++

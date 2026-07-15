@@ -17,11 +17,15 @@ export default function TopBar({
 
   return (
     <header
-      className="bg-white dark:bg-gray-800 px-4 flex items-center justify-between border-b border-gray-200 dark:border-gray-700"
-      style={{ height: 48, lineHeight: '48px' }}
+      className="topbar px-5 flex items-center justify-between"
+      style={{ minHeight: 64 }}
     >
-      {/* 左：搜索 + 类型筛选 */}
-      <Space size="small" wrap>
+      <div className="topbar__search">
+        <div className="topbar__label">
+          <span>FILEDOCK</span>
+          <strong>文件中心</strong>
+        </div>
+        <Space size="small" wrap>
         <Input
           size="small"
           prefix={<SearchOutlined className="text-gray-400" />}
@@ -42,7 +46,8 @@ export default function TopBar({
             { value: 'file', label: '文件' },
           ]}
         />
-      </Space>
+        </Space>
+      </div>
 
       {/* 右：namespace 选择 + 刷新 + 用户菜单（v0.11.2+） */}
       <Space size="middle">

@@ -56,7 +56,8 @@ func (s *PostgresStore) migrate() error {
 			namespace  TEXT NOT NULL,
 			is_dir     BOOLEAN NOT NULL DEFAULT FALSE,
 			parent_id  TEXT,
-			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			deleted_at TIMESTAMPTZ
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_files_namespace_parent ON files(namespace, parent_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_files_sha256 ON files(sha256)`,
@@ -94,6 +95,13 @@ func (s *PostgresStore) migrate() error {
 		if _, err := s.db.Exec(q); err != nil {
 			return fmt.Errorf("执行迁移: %w", err)
 		}
+	}
+	// 支持既有实例在线升级到回收站软删除字段。
+	if _, err := s.db.Exec(`ALTER TABLE files ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`); err != nil {
+		return fmt.Errorf("添加 files.deleted_at: %w", err)
+	}
+	if _, err := s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_files_namespace_deleted ON files(namespace, deleted_at)`); err != nil {
+		return fmt.Errorf("创建回收站索引: %w", err)
 	}
 	return nil
 }
@@ -151,13 +159,13 @@ func (s *PostgresStore) PutFile(ctx context.Context, f *domain.FileMetadata) err
 
 func (s *PostgresStore) GetFile(ctx context.Context, id string) (*domain.FileMetadata, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT file_id, sha256, name, path, size, namespace, is_dir, parent_id, created_at FROM files WHERE file_id = $1`, id)
+		`SELECT file_id, sha256, name, path, size, namespace, is_dir, parent_id, created_at FROM files WHERE file_id = $1 AND deleted_at IS NULL`, id)
 	return scanFilePG(row)
 }
 
 func (s *PostgresStore) GetFileByPath(ctx context.Context, namespace, path string) (*domain.FileMetadata, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT file_id, sha256, name, path, size, namespace, is_dir, parent_id, created_at FROM files WHERE namespace = $1 AND path = $2`,
+		`SELECT file_id, sha256, name, path, size, namespace, is_dir, parent_id, created_at FROM files WHERE namespace = $1 AND path = $2 AND deleted_at IS NULL`,
 		namespace, path)
 	return scanFilePG(row)
 }
@@ -177,14 +185,14 @@ func (s *PostgresStore) ListChildrenPage(ctx context.Context, parentID string, s
 		offset = 0
 	}
 	var total int
-	countSQL := "SELECT COUNT(*) FROM files WHERE parent_id=$1"
+	countSQL := "SELECT COUNT(*) FROM files WHERE parent_id=$1 AND deleted_at IS NULL"
 	countArgs := []any{parentID}
 	if search != "" {
 		countSQL += " AND name ILIKE $2"
 		countArgs = append(countArgs, "%"+search+"%")
 	}
 	s.db.QueryRowContext(ctx, countSQL, countArgs...).Scan(&total)
-	sql := "SELECT file_id, sha256, name, path, size, namespace, is_dir, parent_id, created_at FROM files WHERE parent_id=$1"
+	sql := "SELECT file_id, sha256, name, path, size, namespace, is_dir, parent_id, created_at FROM files WHERE parent_id=$1 AND deleted_at IS NULL"
 	queryArgs := []any{parentID}
 	paramIdx := 2
 	if search != "" {
@@ -211,11 +219,11 @@ func (s *PostgresStore) ListChildren(ctx context.Context, parentID string, searc
 	var err error
 	if search != "" {
 		rows, err = s.db.QueryContext(ctx,
-			`SELECT file_id, sha256, name, path, size, namespace, is_dir, parent_id, created_at FROM files WHERE parent_id = $1 AND name ILIKE $2 ORDER BY name`,
+			`SELECT file_id, sha256, name, path, size, namespace, is_dir, parent_id, created_at FROM files WHERE parent_id = $1 AND deleted_at IS NULL AND name ILIKE $2 ORDER BY name`,
 			parentID, "%"+search+"%")
 	} else {
 		rows, err = s.db.QueryContext(ctx,
-			`SELECT file_id, sha256, name, path, size, namespace, is_dir, parent_id, created_at FROM files WHERE parent_id = $1 ORDER BY name`,
+			`SELECT file_id, sha256, name, path, size, namespace, is_dir, parent_id, created_at FROM files WHERE parent_id = $1 AND deleted_at IS NULL ORDER BY name`,
 			parentID)
 	}
 	if err != nil {
@@ -223,6 +231,61 @@ func (s *PostgresStore) ListChildren(ctx context.Context, parentID string, searc
 	}
 	defer rows.Close()
 	return scanFilesPG(rows)
+}
+
+func (s *PostgresStore) GetNamespaceUsage(ctx context.Context, namespace string) (*domain.NamespaceUsage, error) {
+	usage := &domain.NamespaceUsage{}
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*), COALESCE(SUM(size), 0) FROM files WHERE namespace = $1 AND is_dir = FALSE AND deleted_at IS NULL`, namespace).Scan(&usage.FileCount, &usage.TotalSize)
+	if err != nil {
+		return nil, err
+	}
+	return usage, nil
+}
+
+func (s *PostgresStore) ListTrash(ctx context.Context, namespace string) ([]*domain.FileMetadata, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT file_id, sha256, name, path, size, namespace, is_dir, parent_id, created_at, deleted_at FROM files WHERE namespace = $1 AND deleted_at IS NOT NULL ORDER BY deleted_at DESC, name ASC`, namespace)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var files []*domain.FileMetadata
+	for rows.Next() {
+		var f domain.FileMetadata
+		var sha, parent sql.NullString
+		var created time.Time
+		var deleted sql.NullTime
+		if err := rows.Scan(&f.FileID, &sha, &f.Name, &f.Path, &f.Size, &f.Namespace, &f.IsDir, &parent, &created, &deleted); err != nil {
+			return nil, err
+		}
+		f.SHA256, f.ParentID, f.CreatedAt = sha.String, parent.String, created
+		if deleted.Valid {
+			f.DeletedAt = &deleted.Time
+		}
+		files = append(files, &f)
+	}
+	return files, rows.Err()
+}
+
+func (s *PostgresStore) MoveFileToTrash(ctx context.Context, id string, deletedAt time.Time) error {
+	res, err := s.db.ExecContext(ctx, `UPDATE files SET deleted_at = $1 WHERE file_id = $2 AND deleted_at IS NULL`, deletedAt.UTC(), id)
+	if err != nil {
+		return err
+	}
+	if affected, _ := res.RowsAffected(); affected == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
+}
+
+func (s *PostgresStore) RestoreFile(ctx context.Context, id string) error {
+	res, err := s.db.ExecContext(ctx, `UPDATE files SET deleted_at = NULL WHERE file_id = $1 AND deleted_at IS NOT NULL`, id)
+	if err != nil {
+		return err
+	}
+	if affected, _ := res.RowsAffected(); affected == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
 }
 
 func (s *PostgresStore) DeleteFile(ctx context.Context, id string) error {
@@ -255,14 +318,14 @@ func (s *PostgresStore) ListRootPage(ctx context.Context, namespace string, sear
 		offset = 0
 	}
 	var total int
-	countSQL := "SELECT COUNT(*) FROM files WHERE (parent_id IS NULL OR parent_id='') AND namespace=$1"
+	countSQL := "SELECT COUNT(*) FROM files WHERE (parent_id IS NULL OR parent_id='') AND namespace=$1 AND deleted_at IS NULL"
 	countArgs := []any{namespace}
 	if search != "" {
 		countSQL += " AND name ILIKE $2"
 		countArgs = append(countArgs, "%"+search+"%")
 	}
 	s.db.QueryRowContext(ctx, countSQL, countArgs...).Scan(&total)
-	sql := "SELECT file_id, sha256, name, path, size, namespace, is_dir, parent_id, created_at FROM files WHERE (parent_id IS NULL OR parent_id='') AND namespace=$1"
+	sql := "SELECT file_id, sha256, name, path, size, namespace, is_dir, parent_id, created_at FROM files WHERE (parent_id IS NULL OR parent_id='') AND namespace=$1 AND deleted_at IS NULL"
 	queryArgs := []any{namespace}
 	paramIdx := 2
 	if search != "" {
@@ -289,11 +352,11 @@ func (s *PostgresStore) ListRoot(ctx context.Context, namespace string, search s
 	var err error
 	if search != "" {
 		rows, err = s.db.QueryContext(ctx,
-			`SELECT file_id, sha256, name, path, size, namespace, is_dir, parent_id, created_at FROM files WHERE namespace = $1 AND parent_id IS NULL AND name ILIKE $2 ORDER BY name`,
+			`SELECT file_id, sha256, name, path, size, namespace, is_dir, parent_id, created_at FROM files WHERE namespace = $1 AND parent_id IS NULL AND deleted_at IS NULL AND name ILIKE $2 ORDER BY name`,
 			namespace, "%"+search+"%")
 	} else {
 		rows, err = s.db.QueryContext(ctx,
-			`SELECT file_id, sha256, name, path, size, namespace, is_dir, parent_id, created_at FROM files WHERE namespace = $1 AND parent_id IS NULL ORDER BY name`,
+			`SELECT file_id, sha256, name, path, size, namespace, is_dir, parent_id, created_at FROM files WHERE namespace = $1 AND parent_id IS NULL AND deleted_at IS NULL ORDER BY name`,
 			namespace)
 	}
 	if err != nil {
@@ -418,6 +481,44 @@ func (s *PostgresStore) GetShare(ctx context.Context, token string) (*domain.Sha
 	return &e, nil
 }
 
+func (s *PostgresStore) ListShares(ctx context.Context, namespace, fileID string) ([]*domain.ShareEntry, error) {
+	query := `SELECT token, file_id, password_hash, expires_at, max_downloads, cur_downloads, namespace, created_at FROM shares WHERE namespace = $1`
+	args := []any{namespace}
+	if fileID != "" {
+		query += ` AND file_id = $2`
+		args = append(args, fileID)
+	}
+	query += ` ORDER BY created_at DESC`
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	entries := make([]*domain.ShareEntry, 0)
+	for rows.Next() {
+		var entry domain.ShareEntry
+		var createdAt time.Time
+		if err := rows.Scan(&entry.Token, &entry.FileID, &entry.PasswordHash, &entry.ExpiresAt, &entry.MaxDownloads, &entry.CurDownloads, &entry.Namespace, &createdAt); err != nil {
+			return nil, err
+		}
+		entry.CreatedAt = createdAt.Format(time.RFC3339)
+		entry.PasswordProtected = entry.PasswordHash != ""
+		entries = append(entries, &entry)
+	}
+	return entries, rows.Err()
+}
+
+func (s *PostgresStore) DeleteShare(ctx context.Context, token, namespace string) error {
+	result, err := s.db.ExecContext(ctx, `DELETE FROM shares WHERE token = $1 AND namespace = $2`, token, namespace)
+	if err != nil {
+		return err
+	}
+	if affected, _ := result.RowsAffected(); affected == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
+}
+
 func (s *PostgresStore) IncrDownloads(ctx context.Context, token string) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE shares SET cur_downloads = cur_downloads + 1 WHERE token = $1`, token)
 	return err
@@ -452,7 +553,7 @@ func (s *PostgresStore) ListAllFiles(ctx context.Context) ([]*domain.FileMetadat
 		return nil, err
 	}
 	defer rows.Close()
-	return scanFilesPG(rows)
+	return scanFilesWithDeletedPG(rows)
 }
 
 // ========== 审计日志 ==========
@@ -566,6 +667,27 @@ func scanFilesPG(rows *sql.Rows) ([]*domain.FileMetadata, error) {
 		f.SHA256 = sha256.String
 		f.ParentID = parentID.String
 		f.CreatedAt = createdAt
+		files = append(files, &f)
+	}
+	return files, rows.Err()
+}
+
+func scanFilesWithDeletedPG(rows *sql.Rows) ([]*domain.FileMetadata, error) {
+	var files []*domain.FileMetadata
+	for rows.Next() {
+		var f domain.FileMetadata
+		var sha256, parentID sql.NullString
+		var isDir int64
+		var createdAt time.Time
+		var deletedAt sql.NullTime
+		if err := rows.Scan(&f.FileID, &sha256, &f.Name, &f.Path, &f.Size, &f.Namespace, &isDir, &parentID, &createdAt, &deletedAt); err != nil {
+			return nil, fmt.Errorf("扫描文件: %w", err)
+		}
+		f.SHA256, f.ParentID, f.IsDir, f.CreatedAt = sha256.String, parentID.String, isDir != 0, createdAt
+		if deletedAt.Valid {
+			value := deletedAt.Time
+			f.DeletedAt = &value
+		}
 		files = append(files, &f)
 	}
 	return files, rows.Err()

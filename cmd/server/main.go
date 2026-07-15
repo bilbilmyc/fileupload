@@ -7,10 +7,10 @@
 //
 // 默认配置：
 //
-//	- 监听 :8080
-//	- 本地文件系统存储（data/）
-//	- SQLite 数据库（fileupload.db）
-//	- Redis（localhost:6379）
+//   - 监听 :8080
+//   - 本地文件系统存储（data/）
+//   - SQLite 数据库（fileupload.db）
+//   - Redis（localhost:6379）
 //
 // main() 只负责：加载配置 → 装配依赖 → Build → 启动后台任务 →
 // ListenAndServe + 优雅关闭。所有依赖装配逻辑在 builder.go 的 Build() 中。
@@ -54,6 +54,8 @@ func main() {
 	}
 
 	srv.Reaper().Start()
+	srv.TrashJanitor().Start()
+	defer srv.TrashJanitor().Stop()
 	defer srv.Reaper().Stop()
 
 	// 首次启动后做一次快速巡检
@@ -145,18 +147,19 @@ func buildDeps(cfg *config.Config) (Deps, error) {
 	workerPool := domain.NewSimpleWorkerPool(cfg.Upload.WorkerPoolSize, cfg.Upload.WorkerQueueSize)
 
 	return Deps{
-		Storage:      localFS,
-		TempFS:       tempFS,
-		Metadata:     metaFacade,
-		Compressor:   compress,
-		Hasher:       hash,
-		WorkerPool:   workerPool,
-		Auth:         authSvc,
-		UploadCfg:    domain.UploadConfig{SessionTTL: cfg.Upload.SessionTTL(), DataDir: cfg.Storage.DataDir, DefaultChunkSize: cfg.Upload.DefaultChunkSize},
-		DownloadCfg:  domain.DownloadConfig{DataDir: cfg.Storage.DataDir},
-		AuthCfg:      transport.AuthConfig{Enabled: cfg.Auth.Enabled, Token: cfg.Auth.Token, Header: cfg.Auth.Header},
-		CORSOrigins:  cfg.CORS.AllowedOrigins,
-		ServerCfg:    ServerConfig{Addr: cfg.Server.Addr, ReadTimeout: time.Duration(cfg.Server.ReadTimeout) * time.Second, WriteTimeout: time.Duration(cfg.Server.WriteTimeout) * time.Second, IdleTimeout: time.Duration(cfg.Server.IdleTimeout) * time.Second},
+		Storage:        localFS,
+		TempFS:         tempFS,
+		Metadata:       metaFacade,
+		Compressor:     compress,
+		Hasher:         hash,
+		WorkerPool:     workerPool,
+		Auth:           authSvc,
+		UploadCfg:      domain.UploadConfig{SessionTTL: cfg.Upload.SessionTTL(), DataDir: cfg.Storage.DataDir, DefaultChunkSize: cfg.Upload.DefaultChunkSize, NamespaceQuotaBytes: cfg.Upload.NamespaceQuotaBytes},
+		DownloadCfg:    domain.DownloadConfig{DataDir: cfg.Storage.DataDir},
+		AuthCfg:        transport.AuthConfig{Enabled: cfg.Auth.Enabled, Token: cfg.Auth.Token, Header: cfg.Auth.Header},
+		CORSOrigins:    cfg.CORS.AllowedOrigins,
+		ServerCfg:      ServerConfig{Addr: cfg.Server.Addr, ReadTimeout: time.Duration(cfg.Server.ReadTimeout) * time.Second, WriteTimeout: time.Duration(cfg.Server.WriteTimeout) * time.Second, IdleTimeout: time.Duration(cfg.Server.IdleTimeout) * time.Second},
 		ReaperInterval: time.Minute,
+		TrashRetention: time.Duration(cfg.Upload.TrashRetentionHours) * time.Hour,
 	}, nil
 }

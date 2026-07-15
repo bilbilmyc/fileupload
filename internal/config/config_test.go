@@ -121,10 +121,12 @@ func TestLoad_EnvOverride(t *testing.T) {
 	os.Setenv("FILEUPLOAD_SERVER_ADDR", ":1234")
 	os.Setenv("FILEUPLOAD_REDIS_ADDR", "envredis:9999")
 	os.Setenv("FILEUPLOAD_CHUNK_SIZE", "4194304")
+	os.Setenv("FILEUPLOAD_NAMESPACE_QUOTA_BYTES", "10485760")
 	defer func() {
 		os.Unsetenv("FILEUPLOAD_SERVER_ADDR")
 		os.Unsetenv("FILEUPLOAD_REDIS_ADDR")
 		os.Unsetenv("FILEUPLOAD_CHUNK_SIZE")
+		os.Unsetenv("FILEUPLOAD_NAMESPACE_QUOTA_BYTES")
 	}()
 
 	cfg, err := Load("")
@@ -139,6 +141,9 @@ func TestLoad_EnvOverride(t *testing.T) {
 	}
 	if cfg.Upload.DefaultChunkSize != 4194304 {
 		t.Errorf("env chunk_size = %d, want 4194304", cfg.Upload.DefaultChunkSize)
+	}
+	if cfg.Upload.NamespaceQuotaBytes != 10485760 {
+		t.Errorf("env namespace quota = %d, want 10485760", cfg.Upload.NamespaceQuotaBytes)
 	}
 }
 

@@ -125,6 +125,7 @@ func TestGetUploadInfo_Success(t *testing.T) {
 
 	req := httptest.NewRequest("HEAD", "/uploads/"+session.SessionID, nil)
 	req.SetPathValue("id", session.SessionID)
+	req = withNamespace(req, "demo")
 	w := httptest.NewRecorder()
 	tusHandler.GetUploadInfo(w, req)
 
@@ -157,6 +158,7 @@ func TestCancelUpload_Success(t *testing.T) {
 
 	req := httptest.NewRequest("DELETE", "/uploads/"+session.SessionID, nil)
 	req.SetPathValue("id", session.SessionID)
+	req = withNamespace(req, "demo")
 	w := httptest.NewRecorder()
 	tusHandler.CancelUpload(w, req)
 
@@ -213,6 +215,7 @@ func TestREST_UploadChunk(t *testing.T) {
 	req := httptest.NewRequest("PUT", fmt.Sprintf("/v1/uploads/%s/chunks/0", session.SessionID), strings.NewReader("chunk data"))
 	req.SetPathValue("id", session.SessionID)
 	req.SetPathValue("index", "0")
+	req = withNamespace(req, "demo")
 	w := httptest.NewRecorder()
 	restHandler.UploadChunk(w, req)
 
@@ -531,4 +534,3 @@ func TestGetUploadInfo_EmptySessionID(t *testing.T) {
 		t.Errorf("status = %d, want 400", w.Code)
 	}
 }
-

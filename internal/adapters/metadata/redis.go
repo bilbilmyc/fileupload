@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -85,11 +86,16 @@ func (r *RedisStore) UpdateOffset(ctx context.Context, id string, sliceIndex int
 		local sha = ARGV[2]
 		local bytes = tonumber(ARGV[3])
 
-		-- 更新分片信息
-		redis.call("HSET", chunksKey, index, sha)
+		-- 分片可重试：同一 index 覆盖时先扣除旧尺寸，避免 offset 虚高。
+		local previous = redis.call("HGET", chunksKey, index)
+		local previousSize = 0
+		if previous then
+			local encodedSize = string.match(previous, ":(%d+)$")
+			if encodedSize then previousSize = tonumber(encodedSize) end
+		end
 
-		-- 更新 offset（原子增）
-		local newOffset = redis.call("INCRBY", offsetKey, bytes)
+		redis.call("HSET", chunksKey, index, sha .. ":" .. bytes)
+		local newOffset = redis.call("INCRBY", offsetKey, bytes - previousSize)
 
 		return newOffset
 	`
@@ -108,14 +114,21 @@ func (r *RedisStore) ListChunks(ctx context.Context, id string) ([]domain.ChunkI
 	}
 
 	var chunks []domain.ChunkInfo
-	for idxStr, sha256 := range result {
+	for idxStr, encoded := range result {
 		idx, err := strconv.Atoi(idxStr)
 		if err != nil {
 			continue
 		}
+		sha256, size := encoded, int64(0)
+		if separator := strings.LastIndex(encoded, ":"); separator > 0 {
+			if parsed, parseErr := strconv.ParseInt(encoded[separator+1:], 10, 64); parseErr == nil && parsed >= 0 {
+				sha256, size = encoded[:separator], parsed
+			}
+		}
 		chunks = append(chunks, domain.ChunkInfo{
 			Index:  idx,
 			SHA256: sha256,
+			Size:   size,
 		})
 	}
 	return chunks, nil

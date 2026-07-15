@@ -6,10 +6,11 @@
 import type { UploadTask, UploadStatus } from '../context/UploadContext'
 
 /** 创建初始 pending 任务 */
-export function createTask(id: string, name: string, _fileSize?: number): UploadTask {
+export function createTask(id: string, name: string, fileSize?: number): UploadTask {
   return {
     id,
     name,
+    size: fileSize,
     progress: 0,
     speed: '',
     status: 'hashing',

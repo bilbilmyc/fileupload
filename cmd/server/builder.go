@@ -31,21 +31,23 @@ type Deps struct {
 
 	// 后台任务
 	ReaperInterval time.Duration
+	TrashRetention time.Duration
 }
 
 // ServerConfig HTTP 服务端配置。
 type ServerConfig struct {
-	Addr        string
-	ReadTimeout time.Duration
+	Addr         string
+	ReadTimeout  time.Duration
 	WriteTimeout time.Duration
-	IdleTimeout time.Duration
+	IdleTimeout  time.Duration
 }
 
 // Server 已装配的服务端，含 HTTP handler 与后台任务句柄。
 type Server struct {
-	httpServer *http.Server
-	reaper     *lifecycle.SessionReaper
-	scanner    *lifecycle.ConsistencyScanner
+	httpServer   *http.Server
+	reaper       *lifecycle.SessionReaper
+	scanner      *lifecycle.ConsistencyScanner
+	trashJanitor *lifecycle.TrashJanitor
 }
 
 // HTTP 返回底层 *http.Server（用于 graceful shutdown）。
@@ -56,6 +58,8 @@ func (s *Server) Reaper() *lifecycle.SessionReaper { return s.reaper }
 
 // Scanner 返回 scanner 句柄（用于手动触发巡检）。
 func (s *Server) Scanner() *lifecycle.ConsistencyScanner { return s.scanner }
+
+func (s *Server) TrashJanitor() *lifecycle.TrashJanitor { return s.trashJanitor }
 
 // Build 装配所有依赖并返回可启动的 Server。
 // main() 调用此函数后只需 ListenAndServe + 等待信号。
@@ -74,7 +78,7 @@ func Build(d Deps) (*Server, error) {
 	go mw.RateLimiterCleanup(10*time.Minute, 5*time.Minute)
 
 	tusHandler := transport.NewTusHandler(uploadSvc)
-	restHandler := transport.NewRESTHandler(uploadSvc, downloadSvc)
+	restHandler := transport.NewRESTHandler(uploadSvc, downloadSvc).WithNamespaceQuota(d.UploadCfg.NamespaceQuotaBytes)
 	downloadHandler := transport.NewDownloadHandler(downloadSvc)
 	batchHandler := transport.NewBatchHandler(batchSvc)
 	var authHandler *transport.AuthHandler
@@ -88,6 +92,7 @@ func Build(d Deps) (*Server, error) {
 	// 后台任务
 	reaper := lifecycle.NewSessionReaperWithStorage(d.Metadata, d.TempFS, d.ReaperInterval)
 	scanner := lifecycle.NewConsistencyScanner(d.Metadata, d.Storage, d.UploadCfg.DataDir, d.UploadCfg.DataDir)
+	trashJanitor := lifecycle.NewTrashJanitor(d.Metadata, uploadSvc, d.TrashRetention, d.ReaperInterval)
 
 	// 健康检查器（不依赖 redis/os，直接走 Storage + Metadata 端口）
 	healthChecker := &serverHealth{storage: d.Storage, metadata: d.Metadata}
@@ -103,9 +108,10 @@ func Build(d Deps) (*Server, error) {
 	}
 
 	return &Server{
-		httpServer: httpServer,
-		reaper:     reaper,
-		scanner:    scanner,
+		httpServer:   httpServer,
+		reaper:       reaper,
+		scanner:      scanner,
+		trashJanitor: trashJanitor,
 	}, nil
 }
 

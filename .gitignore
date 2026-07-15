@@ -47,3 +47,8 @@ sdk/js/dist/
 # 根目录 node_modules（如果以后有顶层 npm 依赖）+ vitest 缓存
 node_modules/
 .vite/
+
+# 本地工具缓存
+.cache/
+.uv-cache/
+.test-home/

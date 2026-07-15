@@ -30,24 +30,24 @@ const (
 
 // UploadSession 一个上传会话，对应一个文件的完整上传过程
 type UploadSession struct {
-	SessionID    string          `json:"session_id"`
-	FileID       string          `json:"file_id,omitempty"` // Finalize 后赋值
-	SHA256       string          `json:"sha256"`            // 客户端声明的原始内容 SHA-256
-	UploadLength int64           `json:"upload_length"`     // 总字节数
+	SessionID    string            `json:"session_id"`
+	FileID       string            `json:"file_id,omitempty"` // Finalize 后赋值
+	SHA256       string            `json:"sha256"`            // 客户端声明的原始内容 SHA-256
+	UploadLength int64             `json:"upload_length"`     // 总字节数
 	Compression  CompressionFormat `json:"compression"`
-	ChunkSize    int64           `json:"chunk_size"`
-	Namespace    string          `json:"namespace"`
-	FileName     string          `json:"file_name,omitempty"`
-	CreatedAt    time.Time        `json:"created_at"`
-	ExpireAt     time.Time        `json:"expire_at"`
-	Status       SessionStatus   `json:"status"`
+	ChunkSize    int64             `json:"chunk_size"`
+	Namespace    string            `json:"namespace"`
+	FileName     string            `json:"file_name,omitempty"`
+	CreatedAt    time.Time         `json:"created_at"`
+	ExpireAt     time.Time         `json:"expire_at"`
+	Status       SessionStatus     `json:"status"`
 }
 
 // ChunkInfo 单个分片信息
 type ChunkInfo struct {
-	Index   int    `json:"index"`
-	SHA256  string `json:"sha256"` // 分片 SHA-256（压缩后）
-	Size    int64  `json:"size"`
+	Index  int    `json:"index"`
+	SHA256 string `json:"sha256"` // 分片 SHA-256（压缩后）
+	Size   int64  `json:"size"`
 }
 
 // --- 内容寻址去重 ---
@@ -65,16 +65,17 @@ type ContentBlob struct {
 
 // FileMetadata 逻辑文件或目录节点
 type FileMetadata struct {
-	FileID    string    `json:"file_id"`
-	SHA256    string    `json:"sha256,omitempty"` // 文件指向 content_blob；目录为空
-	Name      string    `json:"name"`
-	Path      string    `json:"path"` // 含目录相对路径
-	Size      int64     `json:"size"`
-	Namespace string    `json:"namespace"`
-	IsDir     bool      `json:"is_dir"`
-	ParentID  string    `json:"parent_id,omitempty"` // 自引用目录树
-	Tags      []string  `json:"tags,omitempty"`      // 文件标签
-	CreatedAt time.Time `json:"created_at"`
+	FileID    string     `json:"file_id"`
+	SHA256    string     `json:"sha256,omitempty"` // 文件指向 content_blob；目录为空
+	Name      string     `json:"name"`
+	Path      string     `json:"path"` // 含目录相对路径
+	Size      int64      `json:"size"`
+	Namespace string     `json:"namespace"`
+	IsDir     bool       `json:"is_dir"`
+	ParentID  string     `json:"parent_id,omitempty"` // 自引用目录树
+	Tags      []string   `json:"tags,omitempty"`      // 文件标签
+	CreatedAt time.Time  `json:"created_at"`
+	DeletedAt *time.Time `json:"deleted_at,omitempty"`
 }
 
 // Clone 深拷贝（用于 deleteDir 事务回滚保存原记录）。
@@ -84,6 +85,12 @@ func (f *FileMetadata) Clone() *FileMetadata {
 		c.Tags = append([]string{}, f.Tags...)
 	}
 	return &c
+}
+
+// NamespaceUsage 是某个文件空间的逻辑容量统计。目录不占用容量，文件按逻辑大小计数。
+type NamespaceUsage struct {
+	FileCount int   `json:"file_count"`
+	TotalSize int64 `json:"total_size"`
 }
 
 // --- 目录 Manifest ---
@@ -96,7 +103,7 @@ type DirManifest struct {
 
 // DirEntry 目录中的一个文件项
 type DirEntry struct {
-	Path   string `json:"path"`   // 相对于目录的路径
+	Path   string `json:"path"` // 相对于目录的路径
 	FileID string `json:"file_id"`
 }
 
@@ -104,13 +111,14 @@ type DirEntry struct {
 
 // DownloadRange 可选的文件范围
 type DownloadRange struct {
-	Offset int64 // 起始偏移
-	Length int64 // 0 表示到文件尾
+	Offset    int64 // 起始偏移
+	Length    int64 // 0 表示到文件尾
+	Requested bool  // 是否由客户端显式请求 Range（bytes=0- 与完整文件可区分）
 }
 
-// IsZero 是否未指定范围
+// IsZero 是否未指定范围。
 func (r DownloadRange) IsZero() bool {
-	return r.Offset == 0 && r.Length == 0
+	return !r.Requested && r.Offset == 0 && r.Length == 0
 }
 
 // --- 领域错误（typed errors） ---
@@ -126,6 +134,7 @@ const (
 	ErrSessionNotFound  DomainError = "会话不存在或已过期"
 	ErrSessionState     DomainError = "会话状态不允许此操作"
 	ErrOffsetConflict   DomainError = "偏移量冲突（分片重叠）"
+	ErrUploadIncomplete DomainError = "上传尚未完成"
 	ErrForbidden        DomainError = "namespace 无权访问"
 	ErrBusy             DomainError = "服务忙，请稍后重试"
 	ErrStorage          DomainError = "存储操作失败"
@@ -134,4 +143,5 @@ const (
 	ErrInvalidArgument  DomainError = "参数不合法"
 	ErrPathTraversal    DomainError = "路径穿越被拒绝"
 	ErrShareExhausted   DomainError = "分享链接已过期或已达下载上限"
+	ErrQuotaExceeded    DomainError = "命名空间容量配额不足"
 )

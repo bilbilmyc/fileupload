@@ -6,6 +6,7 @@ import {
   DashboardOutlined,
   HistoryOutlined,
   SettingOutlined,
+  DeleteOutlined,
   SunOutlined,
   MoonOutlined,
 } from '@ant-design/icons'
@@ -23,6 +24,7 @@ export default function Sidebar() {
     { key: '/', icon: <FolderOutlined />, label: '文件管理' },
     { key: '/admin', icon: <DashboardOutlined />, label: '控制台' },
     { key: '/logs', icon: <HistoryOutlined />, label: '操作日志' },
+    { key: '/trash', icon: <DeleteOutlined />, label: '回收站' },
     { key: '/settings', icon: <SettingOutlined />, label: '设置' },
   ]
 

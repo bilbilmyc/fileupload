@@ -12,6 +12,7 @@ import ErrorBoundary from './components/ErrorBoundary'
 const Admin = lazy(() => import('./pages/Admin'))
 const Logs = lazy(() => import('./pages/Logs'))
 const Settings = lazy(() => import('./pages/Settings'))
+const Trash = lazy(() => import('./pages/Trash'))
 
 const { Content } = Layout
 
@@ -29,10 +30,10 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
 
 function AppLayout({ children }: { children: React.ReactNode }) {
   return (
-    <Layout className="min-h-screen">
+    <Layout className="app-shell min-h-screen">
       <Sidebar />
       <Layout>
-        <Content className="bg-gray-50 dark:bg-gray-900 flex flex-col">
+        <Content className="app-content flex flex-col">
           {children}
           <UploadProgressBar />
         </Content>
@@ -66,6 +67,9 @@ export default function App() {
                     } />
                     <Route path="/settings" element={
                       <Suspense fallback={<LoadingFallback />}><Settings /></Suspense>
+                    } />
+                    <Route path="/trash" element={
+                      <Suspense fallback={<LoadingFallback />}><Trash /></Suspense>
                     } />
                     <Route path="*" element={<Navigate to="/" />} />
                   </Routes>

@@ -28,14 +28,14 @@ func TestNewID_Format(t *testing.T) {
 
 func TestDownloadRange_IsZero(t *testing.T) {
 	tests := []struct {
-		name  string
-		rng   DownloadRange
+		name   string
+		rng    DownloadRange
 		isZero bool
 	}{
-		{"全零", DownloadRange{0, 0}, true},
-		{"有 offset", DownloadRange{100, 0}, false},
-		{"有 length", DownloadRange{0, 1024}, false},
-		{"两者都有", DownloadRange{100, 1024}, false},
+		{"未请求范围", DownloadRange{}, true},
+		{"旧调用方带 offset", DownloadRange{Offset: 100}, false},
+		{"旧调用方带 length", DownloadRange{Length: 1024}, false},
+		{"从零开始的请求范围", DownloadRange{Offset: 0, Requested: true}, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

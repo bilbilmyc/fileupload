@@ -2,8 +2,8 @@ package transport
 
 import (
 	"bytes"
-	"encoding/json"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -31,6 +31,25 @@ func (m *mockShareStore) GetShare(_ context.Context, token string) (*domain.Shar
 	}
 	return e, nil
 }
+func (m *mockShareStore) ListShares(_ context.Context, namespace, fileID string) ([]*domain.ShareEntry, error) {
+	entries := make([]*domain.ShareEntry, 0)
+	for _, entry := range m.shares {
+		if entry.Namespace == namespace && (fileID == "" || entry.FileID == fileID) {
+			entries = append(entries, entry)
+		}
+	}
+	return entries, nil
+}
+
+func (m *mockShareStore) DeleteShare(_ context.Context, token, namespace string) error {
+	entry, ok := m.shares[token]
+	if !ok || entry.Namespace != namespace {
+		return domain.ErrNotFound
+	}
+	delete(m.shares, token)
+	return nil
+}
+
 func (m *mockShareStore) IncrDownloads(_ context.Context, token string) error {
 	if e, ok := m.shares[token]; ok {
 		e.CurDownloads++
@@ -159,5 +178,39 @@ func TestShareHandler_AccessShare_MaxDownloads(t *testing.T) {
 
 	if w.Code != http.StatusGone {
 		t.Errorf("status = %d, want 410", w.Code)
+	}
+}
+
+func TestShareHandler_ListAndRevoke(t *testing.T) {
+	store := newMockShareStore()
+	store.shares["s-default"] = &domain.ShareEntry{Token: "s-default", FileID: "f1", Namespace: "default"}
+	store.shares["s-other"] = &domain.ShareEntry{Token: "s-other", FileID: "f2", Namespace: "other"}
+	handler := NewShareHandler(domain.NewShareService(store), nil)
+
+	listReq := httptest.NewRequest(http.MethodGet, "/v1/shares?file_id=f1", nil)
+	listW := httptest.NewRecorder()
+	handler.ListShares(listW, listReq)
+	if listW.Code != http.StatusOK {
+		t.Fatalf("list status = %d, want 200", listW.Code)
+	}
+	var payload struct {
+		Shares []domain.ShareEntry `json:"shares"`
+	}
+	if err := json.NewDecoder(listW.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode list response: %v", err)
+	}
+	if len(payload.Shares) != 1 || payload.Shares[0].Token != "s-default" {
+		t.Fatalf("unexpected list result: %#v", payload.Shares)
+	}
+
+	revokeReq := httptest.NewRequest(http.MethodDelete, "/v1/shares/s-default", nil)
+	revokeReq.SetPathValue("token", "s-default")
+	revokeW := httptest.NewRecorder()
+	handler.RevokeShare(revokeW, revokeReq)
+	if revokeW.Code != http.StatusNoContent {
+		t.Fatalf("revoke status = %d, want 204", revokeW.Code)
+	}
+	if _, ok := store.shares["s-default"]; ok {
+		t.Fatal("share should have been revoked")
 	}
 }

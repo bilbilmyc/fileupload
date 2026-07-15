@@ -22,8 +22,8 @@ import (
 type ctxKey string
 
 const (
-	ctxKeyRequestID ctxKey = "request_id"
-	ctxKeyNamespace ctxKey = "namespace"
+	ctxKeyRequestID  ctxKey = "request_id"
+	ctxKeyNamespace  ctxKey = "namespace"
 	ctxKeyAuthClaims ctxKey = "auth_claims"
 )
 
@@ -38,7 +38,7 @@ type Middleware struct {
 // AuthConfig 认证中间件配置
 type AuthConfig struct {
 	Enabled bool
-	Enforce bool   // JWT 强制认证（无 token 返回 401）
+	Enforce bool // JWT 强制认证（无 token 返回 401）
 	Token   string
 	Header  string
 }
@@ -99,8 +99,6 @@ func (m *Middleware) CORS(next http.Handler) http.Handler {
 		next.ServeHTTP(w, r)
 	})
 }
-
-
 
 // RateLimiterCleanup 启动限流器条目定期清理（应作为 goroutine 启动）
 func (m *Middleware) RateLimiterCleanup(maxAge, interval time.Duration) {
@@ -229,7 +227,6 @@ func (g *RateLimiterGroup) Allow(key string) bool {
 	return l.Allow()
 }
 
-
 // Cleanup 定期清理过期限流器条目，防止 map 无限增长。
 // maxAge 为条目空闲超时；interval 为清理间隔。
 // 应作为 goroutine 启动：
@@ -312,7 +309,7 @@ func (m *Middleware) Auth(next http.Handler) http.Handler {
 
 		// 健康检查和前端静态资源免认证
 		path := r.URL.Path
-		if path == "/health" || path == "/" {
+		if path == "/health" || path == "/" || strings.HasPrefix(path, "/s/") {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -462,6 +459,8 @@ func domainErrorToStatus(err error) int {
 			return http.StatusConflict
 		case domain.ErrOffsetConflict:
 			return http.StatusConflict
+		case domain.ErrUploadIncomplete:
+			return http.StatusConflict
 		case domain.ErrForbidden:
 			return http.StatusForbidden
 		case domain.ErrBusy:
@@ -470,6 +469,8 @@ func domainErrorToStatus(err error) int {
 			return http.StatusGone
 		case domain.ErrShareExhausted:
 			return http.StatusGone
+		case domain.ErrQuotaExceeded:
+			return http.StatusInsufficientStorage
 		case domain.ErrNotFound:
 			return http.StatusNotFound
 		case domain.ErrInvalidArgument:

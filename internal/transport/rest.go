@@ -9,13 +9,20 @@ import (
 
 // RESTHandler 自定义 REST 分片上传处理器
 type RESTHandler struct {
-	uploadSvc   *domain.UploadService
-	downloadSvc *domain.DownloadService
+	uploadSvc           *domain.UploadService
+	downloadSvc         *domain.DownloadService
+	namespaceQuotaBytes int64
 }
 
 // NewRESTHandler 创建 REST 处理器
 func NewRESTHandler(uploadSvc *domain.UploadService, downloadSvc *domain.DownloadService) *RESTHandler {
 	return &RESTHandler{uploadSvc: uploadSvc, downloadSvc: downloadSvc}
+}
+
+// WithNamespaceQuota exposes the active server-side quota to the settings UI.
+func (h *RESTHandler) WithNamespaceQuota(bytes int64) *RESTHandler {
+	h.namespaceQuotaBytes = bytes
+	return h
 }
 
 // InitUpload POST /v1/uploads/init
@@ -48,12 +55,18 @@ func (h *RESTHandler) UploadChunk(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, domain.ErrInvalidArgument)
 		return
 	}
-	index, _ := strconv.Atoi(indexStr)
+	index, err := strconv.Atoi(indexStr)
+	if err != nil || index < 0 {
+		respondError(w, http.StatusBadRequest, domain.ErrInvalidArgument)
+		return
+	}
 	sliceSha256 := r.Header.Get("X-Slice-SHA256")
+	namespace := GetNamespace(r.Context())
 
-	r.Body = http.MaxBytesReader(w, r.Body, 50<<20)
+	// 绝对上限由服务层按协商 chunk_size 再次校验；这里提前拒绝畸形请求。
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<20)
 
-	err := h.uploadSvc.AppendChunk(r.Context(), sessionID, index, r.Body, sliceSha256)
+	err = h.uploadSvc.AppendChunkForNamespace(r.Context(), sessionID, namespace, index, r.Body, sliceSha256)
 	if err != nil {
 		respondError(w, domainErrorToStatus(err), err)
 		return
@@ -70,7 +83,8 @@ func (h *RESTHandler) GetUploadStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	chunks, total, err := h.uploadSvc.GetStatus(r.Context(), sessionID)
+	namespace := GetNamespace(r.Context())
+	chunks, total, err := h.uploadSvc.GetStatusForNamespace(r.Context(), sessionID, namespace)
 	if err != nil {
 		respondError(w, domainErrorToStatus(err), err)
 		return
@@ -91,7 +105,8 @@ func (h *RESTHandler) FinalizeUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := h.uploadSvc.Finalize(r.Context(), sessionID)
+	namespace := GetNamespace(r.Context())
+	result, err := h.uploadSvc.FinalizeForNamespace(r.Context(), sessionID, namespace)
 	if err != nil {
 		respondError(w, domainErrorToStatus(err), err)
 		return
@@ -134,7 +149,7 @@ func (h *RESTHandler) DeleteFile(w http.ResponseWriter, r *http.Request) {
 	}
 	namespace := GetNamespace(r.Context())
 
-	if err := h.uploadSvc.Delete(r.Context(), fileID, namespace); err != nil {
+	if err := h.uploadSvc.Trash(r.Context(), fileID, namespace); err != nil {
 		respondError(w, domainErrorToStatus(err), err)
 		return
 	}
@@ -149,14 +164,24 @@ func (h *RESTHandler) ListDir(w http.ResponseWriter, r *http.Request) {
 
 	// 分页参数
 	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
-	if page < 1 { page = 1 }
+	if page < 1 {
+		page = 1
+	}
 	perPage, _ := strconv.Atoi(r.URL.Query().Get("per_page"))
-	if perPage < 1 { perPage = 50 }
-	if perPage > 200 { perPage = 200 }
+	if perPage < 1 {
+		perPage = 50
+	}
+	if perPage > 200 {
+		perPage = 200
+	}
 	sortBy := r.URL.Query().Get("sort_by")
-	if sortBy == "" { sortBy = "name" }
+	if sortBy == "" {
+		sortBy = "name"
+	}
 	sortOrder := r.URL.Query().Get("sort_order")
-	if sortOrder == "" { sortOrder = "asc" }
+	if sortOrder == "" {
+		sortOrder = "asc"
+	}
 
 	dir, children, total, err := h.downloadSvc.ListDirPage(r.Context(), parentID, namespace, search, page, perPage, sortBy, sortOrder)
 	if err != nil {
@@ -187,6 +212,57 @@ func (h *RESTHandler) ListDir(w http.ResponseWriter, r *http.Request) {
 		"page":      page,
 		"per_page":  perPage,
 	})
+}
+
+// ListTrash GET /v1/trash — 列出当前命名空间的回收站内容。
+func (h *RESTHandler) ListTrash(w http.ResponseWriter, r *http.Request) {
+	items, err := h.uploadSvc.ListTrash(r.Context(), GetNamespace(r.Context()))
+	if err != nil {
+		respondError(w, domainErrorToStatus(err), err)
+		return
+	}
+	if items == nil {
+		items = make([]*domain.FileMetadata, 0)
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+// RestoreTrash POST /v1/trash/{id}/restore — 恢复文件或整棵目录树。
+func (h *RESTHandler) RestoreTrash(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		respondError(w, http.StatusBadRequest, domain.ErrInvalidArgument)
+		return
+	}
+	if err := h.uploadSvc.RestoreFromTrash(r.Context(), id, GetNamespace(r.Context())); err != nil {
+		respondError(w, domainErrorToStatus(err), err)
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]string{"status": "restored"})
+}
+
+// PurgeTrash DELETE /v1/trash/{id} — 彻底删除。调用者必须在 UI 中进行二次确认。
+func (h *RESTHandler) PurgeTrash(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		respondError(w, http.StatusBadRequest, domain.ErrInvalidArgument)
+		return
+	}
+	if err := h.uploadSvc.PurgeFromTrash(r.Context(), id, GetNamespace(r.Context())); err != nil {
+		respondError(w, domainErrorToStatus(err), err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// GetNamespaceUsage GET /v1/usage — 当前命名空间的逻辑容量统计。
+func (h *RESTHandler) GetNamespaceUsage(w http.ResponseWriter, r *http.Request) {
+	usage, err := h.downloadSvc.GetNamespaceUsage(r.Context(), GetNamespace(r.Context()))
+	if err != nil {
+		respondError(w, domainErrorToStatus(err), err)
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"file_count": usage.FileCount, "total_size": usage.TotalSize, "quota_bytes": h.namespaceQuotaBytes})
 }
 
 // RenameFile PATCH /v1/files/{id} — 重命名文件/目录

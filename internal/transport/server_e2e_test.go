@@ -899,7 +899,7 @@ func TestE2E_ErrorCases(t *testing.T) {
 		{
 			name:   "Upload chunk nonexistent session",
 			method: "PUT",
-			path:   "/v1/uploads/x/chunks/abc",
+			path:   "/v1/uploads/x/chunks/0",
 			headers: map[string]string{"X-Namespace": "ns"},
 			want:   http.StatusNotFound,
 		},

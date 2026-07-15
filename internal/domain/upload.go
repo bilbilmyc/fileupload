@@ -11,11 +11,12 @@ import (
 	"strings"
 	"time"
 )
+
 // UploadService 上传编排核心
 // 处理上传会话生命周期、秒传预检、分片追加、Finalize 合并+解压+校验、
 // content_blobs 去重写入、目录 manifest 提交、删除去重。
 type UploadService struct {
-	meta        interface {
+	meta interface {
 		SessionStore
 		BlobStore
 		FileStore
@@ -31,9 +32,10 @@ type UploadService struct {
 
 // UploadConfig 上传服务配置
 type UploadConfig struct {
-	SessionTTL       time.Duration // 会话无活动超时
-	DataDir          string        // 数据目录（data/<namespace>/<fileID>）
-	DefaultChunkSize int64         // 默认分片大小
+	SessionTTL          time.Duration // 会话无活动超时
+	DataDir             string        // 数据目录（data/<namespace>/<fileID>）
+	DefaultChunkSize    int64         // 默认分片大小
+	NamespaceQuotaBytes int64         // 命名空间逻辑容量上限；0 表示不限制
 }
 
 // NewUploadService 创建上传服务
@@ -71,6 +73,10 @@ func (s *UploadService) CheckExists(ctx context.Context, sha256, namespace, name
 		return nil, nil
 	}
 
+	if err := s.ensureNamespaceCapacity(ctx, namespace, blob.Size); err != nil {
+		return nil, err
+	}
+
 	log.Printf("[upload] 秒传命中 sha256=%s (%s)", shaPrefix(sha256), name)
 	// 命中：增加引用计数（带回滚）
 	rollback, err := IncrWithRollback(ctx, s.meta, sha256)
@@ -106,8 +112,15 @@ func (s *UploadService) CreateSession(ctx context.Context, sha256 string, length
 	if length < 0 {
 		return nil, ErrInvalidArgument
 	}
+	if err := s.ensureNamespaceCapacity(ctx, namespace, length); err != nil {
+		return nil, err
+	}
 	if chunkSize <= 0 {
 		chunkSize = s.cfg.DefaultChunkSize
+	}
+	// Never persist a chunk size that the request path cannot safely accept.
+	if chunkSize <= 0 || chunkSize > maxUploadChunkSize {
+		chunkSize = maxUploadChunkSize
 	}
 
 	sessionID := NewID()
@@ -132,12 +145,28 @@ func (s *UploadService) CreateSession(ctx context.Context, sha256 string, length
 	return session, nil
 }
 
-// AppendChunk 追加一个分片（由 tus/REST handler 调用）
-// body 在当前 goroutine 中完全读进内存后，提交到 worker 池异步处理。
-// worker 池使用 background context，不受 HTTP handler 取消影响。
-// 调用方通过 done channel 等待处理完成。
+const maxUploadChunkSize = 64 << 20 // 64 MiB hard ceiling, protects workers from unbounded requests.
+
+// ensureNamespaceCapacity enforces the configured logical capacity before accepting a
+// new upload or a deduplicated logical reference. A zero quota means unlimited.
+func (s *UploadService) ensureNamespaceCapacity(ctx context.Context, namespace string, incomingBytes int64) error {
+	if s.cfg.NamespaceQuotaBytes <= 0 || incomingBytes <= 0 {
+		return nil
+	}
+	usage, err := s.meta.GetNamespaceUsage(ctx, namespace)
+	if err != nil {
+		return fmt.Errorf("读取命名空间用量: %w", err)
+	}
+	if usage != nil && incomingBytes > s.cfg.NamespaceQuotaBytes-usage.TotalSize {
+		return ErrQuotaExceeded
+	}
+	return nil
+}
+
+// AppendChunk 追加一个分片（由 tus/REST handler 调用）。
+// 请求体先被限制到会话协商的分片上限，再交由受限 worker 池写入临时存储，
+// 这样不会因为伪造的 Content-Length 或超大请求耗尽进程内存。
 func (s *UploadService) AppendChunk(ctx context.Context, sessionID string, index int, body io.Reader, declaredSha256 string) error {
-	// 校验会话存在且状态正确
 	session, err := s.meta.GetSession(ctx, sessionID)
 	if err != nil {
 		return fmt.Errorf("获取会话: %w", err)
@@ -145,32 +174,42 @@ func (s *UploadService) AppendChunk(ctx context.Context, sessionID string, index
 	if session == nil {
 		return ErrSessionNotFound
 	}
+	return s.appendChunkForSession(ctx, session, index, body, declaredSha256)
+}
+
+func (s *UploadService) appendChunkForSession(ctx context.Context, session *UploadSession, index int, body io.Reader, declaredSha256 string) error {
 	if session.Status != SessionActive {
 		return ErrSessionState
 	}
+	if index < 0 {
+		return ErrInvalidArgument
+	}
 
-	// 续期
-	_ = s.meta.TouchSession(ctx, sessionID, s.cfg.SessionTTL)
-
-	// 在当前 goroutine 中先把 body 完全读进内存
-	chunkData, err := io.ReadAll(body)
+	// 续期。会话协商的 chunk_size 是主限制；同时保留 64 MiB 绝对上限。
+	maxBytes := session.ChunkSize
+	if maxBytes <= 0 || maxBytes > maxUploadChunkSize {
+		maxBytes = maxUploadChunkSize
+	}
+	limited := io.LimitReader(body, maxBytes+1)
+	chunkData, err := io.ReadAll(limited)
 	if err != nil {
 		return fmt.Errorf("读取分片数据: %w", err)
 	}
-
-	// 提交到 worker 池异步处理（使用 background context 避免 HTTP handler 取消的影响）
-	done := make(chan error, 1)
-	task := func() {
-		// 使用 background context，防止 HTTP handler 返回后 ctx 取消导致操作失败
-		bgCtx := context.Background()
-		done <- s.processChunkBytes(bgCtx, sessionID, session.Namespace, index, chunkData, declaredSha256)
+	if int64(len(chunkData)) > maxBytes {
+		return ErrInvalidArgument
 	}
 
+	if err := s.meta.TouchSession(ctx, session.SessionID, s.cfg.SessionTTL); err != nil {
+		return fmt.Errorf("续期会话: %w", err)
+	}
+
+	done := make(chan error, 1)
+	task := func() {
+		done <- s.processChunkBytes(context.Background(), session.SessionID, session.Namespace, index, chunkData, declaredSha256)
+	}
 	if err := s.pool.Submit(ctx, task); err != nil {
 		return err
 	}
-
-	// 等待异步处理完成
 	select {
 	case err := <-done:
 		return err
@@ -202,6 +241,86 @@ func (s *UploadService) processChunkBytes(ctx context.Context, sessionID string,
 	}
 	log.Printf("[upload] 分片写入 %s/%d: %d 字节 (sha256=%s)", sessionID, index, written, shaPrefix(actualSha))
 	return nil
+}
+
+// sessionForNamespace 校验上传会话归属，避免只持有 session_id 的请求跨 namespace
+// 查询、续传、完成或取消别人的上传。
+func (s *UploadService) sessionForNamespace(ctx context.Context, sessionID, namespace string) (*UploadSession, error) {
+	session, err := s.meta.GetSession(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("获取会话: %w", err)
+	}
+	if session == nil {
+		return nil, ErrSessionNotFound
+	}
+	if session.Namespace != namespace {
+		return nil, ErrForbidden
+	}
+	return session, nil
+}
+
+// AppendChunkForNamespace 是 HTTP 层使用的受 namespace 隔离版本。
+func (s *UploadService) AppendChunkForNamespace(ctx context.Context, sessionID, namespace string, index int, body io.Reader, declaredSHA256 string) error {
+	session, err := s.sessionForNamespace(ctx, sessionID, namespace)
+	if err != nil {
+		return err
+	}
+	return s.appendChunkForSession(ctx, session, index, body, declaredSHA256)
+}
+
+// GetOffsetForNamespace 返回指定 namespace 中上传会话的偏移量。
+func (s *UploadService) GetOffsetForNamespace(ctx context.Context, sessionID, namespace string) (int64, error) {
+	if _, err := s.sessionForNamespace(ctx, sessionID, namespace); err != nil {
+		return 0, err
+	}
+	return s.GetOffset(ctx, sessionID)
+}
+
+// GetStatusForNamespace 返回指定 namespace 中上传会话的状态。
+func (s *UploadService) GetStatusForNamespace(ctx context.Context, sessionID, namespace string) ([]ChunkInfo, int64, error) {
+	if _, err := s.sessionForNamespace(ctx, sessionID, namespace); err != nil {
+		return nil, 0, err
+	}
+	return s.GetStatus(ctx, sessionID)
+}
+
+// FinalizeForNamespace 完成指定 namespace 中的上传会话。
+func (s *UploadService) FinalizeForNamespace(ctx context.Context, sessionID, namespace string) (*FileMetadata, error) {
+	if _, err := s.sessionForNamespace(ctx, sessionID, namespace); err != nil {
+		return nil, err
+	}
+	return s.Finalize(ctx, sessionID)
+}
+
+// AbortForNamespace 取消指定 namespace 中的上传会话。
+func (s *UploadService) AbortForNamespace(ctx context.Context, sessionID, namespace string) error {
+	if _, err := s.sessionForNamespace(ctx, sessionID, namespace); err != nil {
+		return err
+	}
+	return s.Abort(ctx, sessionID)
+}
+
+// AppendChunkAtOffsetForNamespace 提供 tus 的 offset 语义。当前偏移必须精确匹配，
+// 才会把请求体写入下一个分片，避免并发 PATCH 覆盖已有数据。
+func (s *UploadService) AppendChunkAtOffsetForNamespace(ctx context.Context, sessionID, namespace string, offset int64, body io.Reader, declaredSHA256 string) (int64, error) {
+	session, err := s.sessionForNamespace(ctx, sessionID, namespace)
+	if err != nil {
+		return 0, err
+	}
+	if offset < 0 || session.ChunkSize <= 0 || offset%session.ChunkSize != 0 {
+		return 0, ErrOffsetConflict
+	}
+	current, err := s.GetOffset(ctx, sessionID)
+	if err != nil {
+		return 0, err
+	}
+	if current != offset {
+		return current, ErrOffsetConflict
+	}
+	if err := s.appendChunkForSession(ctx, session, int(offset/session.ChunkSize), body, declaredSHA256); err != nil {
+		return 0, err
+	}
+	return s.GetOffset(ctx, sessionID)
 }
 
 // GetOffset 获取当前已接收字节偏移（断点续传用）
@@ -245,6 +364,46 @@ func (s *UploadService) GetStatus(ctx context.Context, sessionID string) ([]Chun
 	return chunks, total, nil
 }
 
+// validateUploadedChunks ensures finalize only commits a complete, contiguous byte stream.
+// The metadata store can receive retries and out-of-order chunks, so only the expected
+// indexes and the final chunk are accepted here.
+func validateUploadedChunks(chunks []ChunkInfo, uploadLength, chunkSize int64, enforceLength bool) error {
+	if uploadLength < 0 || chunkSize <= 0 {
+		return ErrInvalidArgument
+	}
+	if uploadLength == 0 {
+		if len(chunks) != 0 {
+			return ErrUploadIncomplete
+		}
+		return nil
+	}
+	if len(chunks) == 0 {
+		return ErrUploadIncomplete
+	}
+	sort.Slice(chunks, func(i, j int) bool { return chunks[i].Index < chunks[j].Index })
+	for index, chunk := range chunks {
+		if chunk.Index != index || chunk.Size <= 0 || chunk.Size > chunkSize {
+			return ErrUploadIncomplete
+		}
+	}
+	if !enforceLength {
+		return nil
+	}
+	expectedCount := int((uploadLength + chunkSize - 1) / chunkSize)
+	if len(chunks) != expectedCount {
+		return ErrUploadIncomplete
+	}
+	for index, chunk := range chunks {
+		expectedSize := chunkSize
+		if index == expectedCount-1 {
+			expectedSize = uploadLength - int64(index)*chunkSize
+		}
+		if chunk.Size != expectedSize {
+			return ErrUploadIncomplete
+		}
+	}
+	return nil
+}
 
 // safeStorageName 将用户提供的文件名转为安全的存储路径名。
 // 保留原始文件名不变，仅处理会导致文件系统问题的边缘情况。
@@ -302,6 +461,7 @@ func safeStorageName(name string) string {
 
 	return base
 }
+
 // Finalize 完成上传：合并分片 → 解压 → 整体 SHA-256 校验 → 写入 Storage
 //
 // 使用三阶段流水线：mergeChunks → verifyStream → commitStream
@@ -328,6 +488,10 @@ func (s *UploadService) Finalize(ctx context.Context, sessionID string) (*FileMe
 		return nil, fmt.Errorf("列举分片: %w", err)
 	}
 
+	if err := validateUploadedChunks(chunks, session.UploadLength, session.ChunkSize, session.Compression == CompNone); err != nil {
+		return nil, err
+	}
+
 	// 0 字节无声明 SHA → 使用空内容标准哈希
 	if len(chunks) == 0 && session.SHA256 == "" {
 		session.SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -352,7 +516,9 @@ func (s *UploadService) Finalize(ctx context.Context, sessionID string) (*FileMe
 	if fileName == "" {
 		fileName = NewID()
 	}
-	storagePath := s.layout.FlatPath(session.Namespace, fileName)
+	// 物理路径必须与用户可见名称解耦：同名文件可安全并存，且不会把路径
+	// 分隔符、保留设备名等带入底层存储。
+	storagePath := s.layout.FlatPath(session.Namespace, sessionID+"-"+safeStorageName(fileName))
 
 	// Phase 3: 写入存储 + 创建去重和文件记录
 	fileMeta, err := commitStream(ctx, verifiedReader, storagePath, session, s.storage, s.meta, s.meta, hashRes)
@@ -378,9 +544,68 @@ func (s *UploadService) cleanupTempChunks(ctx context.Context, sessionID string,
 	}
 }
 
+// validateDirManifest validates every entry before creating any directory record. It prevents
+// malformed paths and cross-namespace file IDs from partially mutating the directory tree.
+func (s *UploadService) validateDirManifest(ctx context.Context, manifest DirManifest, namespace string) error {
+	const maxDirEntries = 10000
+	if len(manifest.Entries) > maxDirEntries {
+		return ErrInvalidArgument
+	}
+	seenPaths := make(map[string]struct{}, len(manifest.Entries))
+	seenFiles := make(map[string]struct{}, len(manifest.Entries))
+	for _, entry := range manifest.Entries {
+		if entry.FileID == "" || !isSafeRelativePath(entry.Path) {
+			return ErrInvalidArgument
+		}
+		if _, ok := seenPaths[entry.Path]; ok {
+			return ErrInvalidArgument
+		}
+		if _, ok := seenFiles[entry.FileID]; ok {
+			return ErrInvalidArgument
+		}
+		seenPaths[entry.Path] = struct{}{}
+		seenFiles[entry.FileID] = struct{}{}
+
+		file, err := s.meta.GetFile(ctx, entry.FileID)
+		if err != nil {
+			return fmt.Errorf("获取目录文件: %w", err)
+		}
+		if file == nil || file.IsDir {
+			return ErrInvalidArgument
+		}
+		if file.Namespace != namespace {
+			return ErrForbidden
+		}
+	}
+	return nil
+}
+
+func isSafeRelativePath(value string) bool {
+	if value == "" || strings.Contains(value, "\\") || strings.ContainsRune(value, '\x00') || strings.HasPrefix(value, "/") {
+		return false
+	}
+	for _, part := range strings.Split(value, "/") {
+		if part == "" || part == "." || part == ".." {
+			return false
+		}
+	}
+	return true
+}
+
+func safeStorageRelativePath(value string) string {
+	parts := strings.Split(value, "/")
+	for i, part := range parts {
+		parts[i] = safeStorageName(part)
+	}
+	return strings.Join(parts, "/")
+}
+
 // SubmitDir 提交目录 manifest，建目录树
 // 支持嵌套目录结构：entry.Path 中的 "/" 分隔符会被解析为子目录层级。
 func (s *UploadService) SubmitDir(ctx context.Context, manifest DirManifest, namespace string) (*FileMetadata, error) {
+	if err := s.validateDirManifest(ctx, manifest, namespace); err != nil {
+		return nil, err
+	}
 	dirID := NewID()
 	now := time.Now()
 
@@ -472,7 +697,7 @@ func (s *UploadService) SubmitDir(ctx context.Context, manifest DirManifest, nam
 		if parentFile.SHA256 != "" {
 			blob, err := s.meta.GetBlobBySha(ctx, parentFile.SHA256)
 			if err == nil && blob != nil {
-				hierPath := s.layout.HierarchicalPath(namespace, dirName, entry.Path)
+				hierPath := s.layout.HierarchicalPath(namespace, safeStorageName(dirName), safeStorageRelativePath(entry.Path))
 				if blob.StoragePath != hierPath {
 					// layout.Move 不再静默吞错（与之前 upload.go:472-479 不同）：
 					// 失败会让调用方知晓，留下脏文件供 reaper 处理。
