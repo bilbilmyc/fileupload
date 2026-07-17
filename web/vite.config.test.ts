@@ -13,13 +13,15 @@ import { join } from 'path'
  */
 
 describe('vite.config.ts', () => {
-  it('包含 manualChunks 配置把 vendor 分离', () => {
+  it('固定基础 vendor，并让 Ant Design 按路由自动分包', () => {
     const config = readFileSync(join(__dirname, 'vite.config.ts'), 'utf8')
     expect(config).toMatch(/manualChunks/)
     expect(config).toMatch(/['"]react['"]/)
-    expect(config).toMatch(/['"]antd-core['"]/)
+    expect(config).not.toMatch(/['"]antd-core['"]/)
     expect(config).toMatch(/['"]antd-icons['"]/)
     expect(config).toMatch(/['"]axios['"]/)
+    expect(config).toMatch(/['"]fileupload-sdk['"]/)
+    expect(config).toMatch(/Ant Design 组件按路由依赖图自动拆分/)
   })
 })
 

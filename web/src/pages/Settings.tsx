@@ -4,6 +4,7 @@ import {
   CheckCircleFilled,
   CloudServerOutlined,
   DatabaseOutlined,
+  DesktopOutlined,
   GlobalOutlined,
   MoonOutlined,
   SaveOutlined,
@@ -25,7 +26,7 @@ function formatBytes(bytes: number): string {
 
 export default function Settings() {
   const { namespace, setNamespace } = useAuth()
-  const { mode, setMode } = useTheme()
+  const { mode, resolvedMode, setMode } = useTheme()
   const [namespaceDraft, setNamespaceDraft] = useState(namespace)
   const [usage, setUsage] = useState<api.NamespaceUsage | null>(null)
   const [usageLoading, setUsageLoading] = useState(false)
@@ -106,15 +107,16 @@ export default function Settings() {
             <div className="settings-theme-row">
               <div>
                 <div className="settings-field__label">界面主题</div>
-                <Text type="secondary">选择最适合当前工作环境的显示模式。</Text>
+                <Text type="secondary">可固定亮色或暗色，也可自动跟随操作系统（当前为{resolvedMode === 'dark' ? '暗色' : '亮色'}）。</Text>
               </div>
               <Segmented
                 size="large"
                 value={mode}
-                onChange={value => setMode(value as 'light' | 'dark')}
+                onChange={value => setMode(value as 'light' | 'dark' | 'system')}
                 options={[
                   { value: 'light', label: '亮色', icon: <SunOutlined /> },
                   { value: 'dark', label: '暗色', icon: <MoonOutlined /> },
+                  { value: 'system', label: '跟随系统', icon: <DesktopOutlined /> },
                 ]}
               />
             </div>

@@ -212,3 +212,10 @@ body {
 .logs-page__tip { display: flex; align-items: center; gap: 8px; padding: 12px 14px; color: #718097; font-size: 13px; }
 .logs-page__tip .anticon { color: #2d6cdf; }
 .dark .logs-page__tip { color: #a7b2c5; }
+
+/* Route-level loading state */
+.route-loading { display: grid; flex: 1; min-height: 18rem; place-items: center; padding: 32px; }
+.dark .route-loading { color: #d7e2f2; }
+
+.settings-theme-row .ant-segmented-item-label { min-width: 72px; }
+@media (max-width: 560px) { .settings-theme-row .ant-segmented-group { grid-template-columns: repeat(3, minmax(0, 1fr)); } .settings-theme-row .ant-segmented-item-label { min-width: 0; } }

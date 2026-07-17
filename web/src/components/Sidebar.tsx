@@ -17,7 +17,7 @@ const { Sider } = Layout
 export default function Sidebar() {
   const navigate = useNavigate()
   const location = useLocation()
-  const { mode, toggle } = useTheme()
+  const { mode, resolvedMode, toggle } = useTheme()
   const [collapsed, setCollapsed] = useState(false)
 
   const menuItems = [
@@ -58,11 +58,11 @@ export default function Sidebar() {
       {/* Bottom area — v0.11.1+：移除 namespace 输入（移到 TopBar 显眼位置） */}
       <div className="absolute bottom-0 left-0 right-0 p-3 border-t border-gray-100 dark:border-gray-700">
         <div className="flex justify-center">
-          <Tooltip title={mode === 'dark' ? '亮色模式' : '暗色模式'}>
+          <Tooltip title={mode === 'system' ? '当前跟随系统；点击切换为手动主题' : resolvedMode === 'dark' ? '切换为亮色模式' : '切换为暗色模式'}>
             <Button
               type="text"
               size="small"
-              icon={mode === 'dark' ? <SunOutlined /> : <MoonOutlined />}
+              icon={resolvedMode === 'dark' ? <SunOutlined /> : <MoonOutlined />}
               onClick={toggle}
             />
           </Tooltip>

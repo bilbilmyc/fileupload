@@ -1,14 +1,14 @@
 import { lazy, Suspense } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { Layout, Spin } from 'antd'
-import Login from './pages/Login'
-import Files from './pages/Files'
 import Sidebar from './components/Sidebar'
 import UploadProgressBar from './components/UploadProgressBar'
 import { UploadProvider } from './context/UploadContext'
 import ErrorBoundary from './components/ErrorBoundary'
 
-// v0.6.0：路由级代码分割 — 非首屏页面按需加载
+// 所有页面均按路由加载：登录页不会预加载文件管理，管理功能也不阻塞工作台首屏。
+const Login = lazy(() => import('./pages/Login'))
+const Files = lazy(() => import('./pages/Files'))
 const Admin = lazy(() => import('./pages/Admin'))
 const Logs = lazy(() => import('./pages/Logs'))
 const Settings = lazy(() => import('./pages/Settings'))
@@ -18,8 +18,8 @@ const { Content } = Layout
 
 function LoadingFallback() {
   return (
-    <div className="flex items-center justify-center h-64">
-      <Spin size="large" tip="加载中..." />
+    <div className="route-loading" role="status" aria-live="polite">
+      <Spin size="large" tip="正在加载工作区…" />
     </div>
   )
 }
@@ -45,40 +45,34 @@ function AppLayout({ children }: { children: React.ReactNode }) {
 export default function App() {
   return (
     <ErrorBoundary title="应用崩溃">
-      <Routes>
-        <Route path="/login" element={<Login />} />
-        <Route
-          path="/*"
-          element={
-            <RequireAuth>
-              <UploadProvider>
-                <AppLayout>
-                  <Routes>
-                    <Route path="/" element={
-                      <ErrorBoundary title="文件管理异常">
-                        <Files />
-                      </ErrorBoundary>
-                    } />
-                    <Route path="/admin" element={
-                      <Suspense fallback={<LoadingFallback />}><Admin /></Suspense>
-                    } />
-                    <Route path="/logs" element={
-                      <Suspense fallback={<LoadingFallback />}><Logs /></Suspense>
-                    } />
-                    <Route path="/settings" element={
-                      <Suspense fallback={<LoadingFallback />}><Settings /></Suspense>
-                    } />
-                    <Route path="/trash" element={
-                      <Suspense fallback={<LoadingFallback />}><Trash /></Suspense>
-                    } />
-                    <Route path="*" element={<Navigate to="/" />} />
-                  </Routes>
-                </AppLayout>
-              </UploadProvider>
-            </RequireAuth>
-          }
-        />
-      </Routes>
+      <Suspense fallback={<LoadingFallback />}>
+        <Routes>
+          <Route path="/login" element={<Login />} />
+          <Route
+            path="/*"
+            element={
+              <RequireAuth>
+                <UploadProvider>
+                  <AppLayout>
+                    <Routes>
+                      <Route path="/" element={
+                        <ErrorBoundary title="文件管理异常">
+                          <Files />
+                        </ErrorBoundary>
+                      } />
+                      <Route path="/admin" element={<Admin />} />
+                      <Route path="/logs" element={<Logs />} />
+                      <Route path="/settings" element={<Settings />} />
+                      <Route path="/trash" element={<Trash />} />
+                      <Route path="*" element={<Navigate to="/" />} />
+                    </Routes>
+                  </AppLayout>
+                </UploadProvider>
+              </RequireAuth>
+            }
+          />
+        </Routes>
+      </Suspense>
     </ErrorBoundary>
   )
 }
