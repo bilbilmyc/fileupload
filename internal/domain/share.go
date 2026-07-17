@@ -110,6 +110,12 @@ func (s *ShareService) AuthorizeShare(ctx context.Context, token, password strin
 	return s.authorizeShare(ctx, token, password, false)
 }
 
+// InspectShare 检查公开分享链接是否可用，但不验证密码也不增加下载次数。
+// 它只用于浏览器展示密码输入页，避免首次打开页面触发昂贵的 bcrypt 校验。
+func (s *ShareService) InspectShare(ctx context.Context, token string) (*ShareEntry, error) {
+	return s.authorizeShare(ctx, token, "", true)
+}
+
 // AccessShare 访问分享链接并在下载开始时增加计数。
 // 返回 ErrNotFound 表示不存在，ErrShareExhausted 表示过期或下载次数耗尽，
 // ErrForbidden 表示密码错误。

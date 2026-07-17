@@ -703,11 +703,15 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIs...
 
 ### GET /s/{token} — 访问分享链接
 
-**请求：**
+**程序化请求：**
 ```
 GET /s/s-abc123def456...
 X-Share-Password: optional-pass
 ```
+
+**浏览器访问：** 若链接受密码保护，首次 `GET` 会返回密码页面；通过 `POST /s/{token}` 提交
+`application/x-www-form-urlencoded` 的 `password` 字段后，服务签发仅作用于该分享路径、有效期 15 分钟的
+HttpOnly cookie，并以 `303 See Other` 跳回下载地址。首次展示密码页不会计入下载次数，也不会触发 bcrypt 密码比较。
 
 **响应 `302 Found`：** 重定向到文件下载。
 
@@ -715,8 +719,9 @@ X-Share-Password: optional-pass
 | 状态码 | 说明 |
 |--------|------|
 | 404 | 链接不存在或已过期 |
-| 401 | 密码错误（返回 `{"code": "share_password_required"}`） |
+| 401 | 密码错误（程序化请求返回 `{"code": "share_password_required"}`；浏览器返回密码页） |
 | 410 | 下载次数已达上限或已过期 |
+| 429 | 同一客户端对同一分享链接连续 5 次密码验证失败后触发，冷却 15 分钟；响应含 `Retry-After`，程序化请求返回 `{"code": "share_password_rate_limited", "retry_after_seconds": ...}` |
 
 ---
 

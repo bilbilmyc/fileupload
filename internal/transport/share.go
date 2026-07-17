@@ -26,10 +26,11 @@ const (
 // passwordKey 是进程内签名密钥，用于签发短期、HttpOnly 的密码验证 cookie；服务重启后
 // 旧 cookie 会自动失效并要求重新输入密码。
 type ShareHandler struct {
-	shareSvc    *domain.ShareService
-	downloadSvc *domain.DownloadService
-	passwordKey []byte
-	audit       auditLogger
+	shareSvc        *domain.ShareService
+	downloadSvc     *domain.DownloadService
+	passwordKey     []byte
+	passwordLimiter *sharePasswordLimiter
+	audit           auditLogger
 }
 
 // NewShareHandler 创建分享处理器。
@@ -40,7 +41,18 @@ func NewShareHandler(shareSvc *domain.ShareService, downloadSvc *domain.Download
 		// 而不是退化为可预测的签名密钥。
 		key = nil
 	}
-	return &ShareHandler{shareSvc: shareSvc, downloadSvc: downloadSvc, passwordKey: key}
+	return &ShareHandler{
+		shareSvc:        shareSvc,
+		downloadSvc:     downloadSvc,
+		passwordKey:     key,
+		passwordLimiter: newSharePasswordLimiter(defaultSharePasswordMaxFailures, defaultSharePasswordCooldown, nil),
+	}
+}
+
+// withPasswordLimiter 替换公开分享密码限流器，仅用于注入确定性测试策略。
+func (h *ShareHandler) withPasswordLimiter(limiter *sharePasswordLimiter) *ShareHandler {
+	h.passwordLimiter = limiter
+	return h
 }
 
 // WithAuditLogger 为分享创建、撤销和公开下载补充非阻塞审计记录。
@@ -111,8 +123,19 @@ func (h *ShareHandler) SubmitSharePassword(w http.ResponseWriter, r *http.Reques
 		h.renderSharePasswordPage(w, token, "请求格式无效，请重试。", http.StatusBadRequest)
 		return
 	}
+	client := shareClientAddress(r)
+	if retryAfter, allowed := h.passwordLimiter.Allow(token, client); !allowed {
+		h.respondSharePasswordRateLimited(w, r, token, retryAfter)
+		return
+	}
 	if _, err := h.shareSvc.AuthorizeShare(r.Context(), token, r.PostForm.Get("password")); err != nil {
 		if err == domain.ErrForbidden {
+			if retryAfter, locked := h.passwordLimiter.RecordFailure(token, client); locked {
+				h.auditSharePasswordThrottled(r, retryAfter)
+				h.respondSharePasswordRateLimited(w, r, token, retryAfter)
+				return
+			}
+			writeAudit(h.audit, r.Context(), "share_password_failed", "share", "", "public", "rejected password for public share")
 			h.renderSharePasswordPage(w, token, "访问密码不正确，请重新输入。", http.StatusUnauthorized)
 			return
 		}
@@ -120,6 +143,7 @@ func (h *ShareHandler) SubmitSharePassword(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	h.passwordLimiter.Reset(token, client)
 	h.setShareAccessCookie(w, r, token)
 	http.Redirect(w, r, "/s/"+token, http.StatusSeeOther)
 }
@@ -140,12 +164,44 @@ func (h *ShareHandler) AccessShare(w http.ResponseWriter, r *http.Request) {
 		entry *domain.ShareEntry
 		err   error
 	)
-	if h.hasValidShareAccessCookie(r, token) {
+	hasCookie := h.hasValidShareAccessCookie(r, token)
+	password := r.Header.Get("X-Share-Password")
+	client := shareClientAddress(r)
+
+	// 浏览器首次打开受保护链接时，仅检查分享状态并展示密码页，避免空密码触发 bcrypt 校验。
+	if !hasCookie && password == "" && acceptsHTML(r) {
+		entry, err = h.shareSvc.InspectShare(r.Context(), token)
+		if err != nil {
+			h.respondShareAccessError(w, r, err)
+			return
+		}
+		if entry.PasswordProtected {
+			h.renderSharePasswordPage(w, token, "", http.StatusUnauthorized)
+			return
+		}
+	}
+
+	if hasCookie {
 		entry, err = h.shareSvc.AccessAuthorizedShare(r.Context(), token)
 	} else {
-		entry, err = h.shareSvc.AccessShare(r.Context(), token, r.Header.Get("X-Share-Password"))
+		if password != "" {
+			if retryAfter, allowed := h.passwordLimiter.Allow(token, client); !allowed {
+				h.auditSharePasswordThrottled(r, retryAfter)
+				h.respondSharePasswordRateLimited(w, r, token, retryAfter)
+				return
+			}
+		}
+		entry, err = h.shareSvc.AccessShare(r.Context(), token, password)
 	}
 	if err != nil {
+		if err == domain.ErrForbidden && password != "" {
+			if retryAfter, locked := h.passwordLimiter.RecordFailure(token, client); locked {
+				h.auditSharePasswordThrottled(r, retryAfter)
+				h.respondSharePasswordRateLimited(w, r, token, retryAfter)
+				return
+			}
+			writeAudit(h.audit, r.Context(), "share_password_failed", "share", "", "public", "rejected password for public share")
+		}
 		if err == domain.ErrForbidden && acceptsHTML(r) {
 			h.renderSharePasswordPage(w, token, "", http.StatusUnauthorized)
 			return
@@ -153,10 +209,12 @@ func (h *ShareHandler) AccessShare(w http.ResponseWriter, r *http.Request) {
 		h.respondShareAccessError(w, r, err)
 		return
 	}
+	if password != "" {
+		h.passwordLimiter.Reset(token, client)
+	}
 
-	// Tests can instantiate the handler without a download service to exercise
-	// share validation only. Production always streams the file directly so public
-	// links do not need access to an authenticated /v1/files endpoint.
+	// 测试可不注入下载服务，只验证分享访问流程；生产环境直接流式输出文件，
+	// 公开链接无需访问受鉴权保护的 /v1/files 接口。
 	if h.downloadSvc == nil {
 		http.Redirect(w, r, "/v1/files/"+entry.FileID+"?namespace="+entry.Namespace, http.StatusFound)
 		return
@@ -190,6 +248,29 @@ func (h *ShareHandler) AccessShare(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}
 	_, _ = io.Copy(w, fileReader.Reader)
+}
+
+func (h *ShareHandler) auditSharePasswordThrottled(r *http.Request, retryAfter time.Duration) {
+	detail := fmt.Sprintf("password verification temporarily throttled; retry after %d seconds", int((retryAfter+time.Second-1)/time.Second))
+	writeAudit(h.audit, r.Context(), "share_password_throttled", "share", "", "public", detail)
+}
+
+func (h *ShareHandler) respondSharePasswordRateLimited(w http.ResponseWriter, r *http.Request, token string, retryAfter time.Duration) {
+	seconds := int((retryAfter + time.Second - 1) / time.Second)
+	if seconds < 1 {
+		seconds = 1
+	}
+	w.Header().Set("Retry-After", strconv.Itoa(seconds))
+	message := fmt.Sprintf("密码尝试次数过多，请在 %d 秒后再试。", seconds)
+	if acceptsHTML(r) {
+		h.renderSharePasswordPage(w, token, message, http.StatusTooManyRequests)
+		return
+	}
+	respondJSON(w, http.StatusTooManyRequests, map[string]any{
+		"error":               "密码尝试次数过多，请稍后再试",
+		"code":                "share_password_rate_limited",
+		"retry_after_seconds": seconds,
+	})
 }
 
 func (h *ShareHandler) respondShareAccessError(w http.ResponseWriter, r *http.Request, err error) {

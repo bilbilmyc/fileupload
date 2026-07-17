@@ -14,6 +14,8 @@ const actionMeta: Record<string, { label: string; color: string }> = {
   share_create: { label: '创建分享', color: 'green' },
   share_revoke: { label: '撤销分享', color: 'orange' },
   share_download: { label: '分享下载', color: 'purple' },
+  share_password_failed: { label: '分享密码错误', color: 'volcano' },
+  share_password_throttled: { label: '分享密码限流', color: 'red' },
 }
 
 function formatTime(value: string): string {
@@ -84,7 +86,7 @@ export default function Logs() {
         <div className="file-list-card__header">
           <div>
             <div className="file-list-card__title"><SafetyCertificateOutlined /> 安全审计记录</div>
-            <div className="file-list-card__sub">系统记录成功发起的关键文件访问和分享管理操作。</div>
+            <div className="file-list-card__sub">系统记录关键文件访问、分享管理及异常密码尝试，帮助安全排查。</div>
           </div>
           <Button icon={<ReloadOutlined />} onClick={() => void load()} loading={loading}>刷新</Button>
         </div>
