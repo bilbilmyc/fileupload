@@ -25,9 +25,9 @@ WEB_DIST_PLACEHOLDER := web/dist/index.html
 web-deps:
 	@if [ ! -d "web/node_modules" ]; then \
 		echo "▸ 安装前端依赖"; \
-		cd web && npm install; \
+		cd web && npm ci; \
 	else \
-		echo "▸ 前端依赖已存在，跳过 npm install"; \
+		echo "▸ 前端依赖已存在，跳过 npm ci"; \
 	fi
 
 .PHONY: web
@@ -38,12 +38,12 @@ web: web-deps
 .PHONY: web-force
 web-force:
 	@echo "▸ 强制重新安装前端依赖并构建"
-	@cd web && npm install && npm run build
+	@cd web && npm ci && npm run build
 
 .PHONY: web-placeholder
 web-placeholder:
 	@echo "▸ 恢复占位 index.html（提交前执行，避免误追踪构建产物）"
-	@printf '<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/><title>fileupload 管理面板</title></head><body><div style="padding:48px;font-family:sans-serif;text-align:center;color:#64748b;"><h1>📦 fileupload</h1><p>前端尚未构建。</p><p>请运行：<code style="background:#f1f5f9;padding:4px 8px;border-radius:4px;">cd web && npm install && npm run build</code></p><p>然后重启服务端。</p></div></body></html>' > $(WEB_DIST_PLACEHOLDER)
+	@printf '<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/><title>fileupload 管理面板</title></head><body><div style="padding:48px;font-family:sans-serif;text-align:center;color:#64748b;"><h1>📦 fileupload</h1><p>前端尚未构建。</p><p>请运行：<code style="background:#f1f5f9;padding:4px 8px;border-radius:4px;">cd web && npm ci && npm run build</code></p><p>然后重启服务端。</p></div></body></html>' > $(WEB_DIST_PLACEHOLDER)
 
 .PHONY: web-dev
 web-dev:
@@ -189,7 +189,7 @@ help:
 	@echo ""
 	@echo "编译:"
 	@echo "  all                  编译前端 + server + cli"
-	@echo "  web                  构建前端（npm install + build）"
+	@echo "  web                  构建前端（npm ci + build）"
 	@echo "  web-dev              启动前端开发服务器"
 	@echo "  server               编译当前平台 server"
 	@echo "  cli                  编译当前平台 cli"

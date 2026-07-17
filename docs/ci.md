@@ -1,30 +1,36 @@
-# CI/CD 工作流
+# fileupload CI/CD 工作流
 
-本文档说明 fileupload 项目的持续集成与发布流程。所有配置在 `.github/workflows/ci.yml`。
+本文档说明 fileupload 项目的持续集成与发布流程，配置位于 `.github/workflows/ci.yml`。
 
 ## 触发矩阵
 
-| 触发条件 | 跑的 jobs | 产物 |
+| 触发条件 | jobs | 产物 |
 |---|---|---|
-| PR / push 到 main | test + build + docker | Docker 镜像（仅 push 时） |
-| tag push (`v*`) | test + build + docker + **release** | GitHub Release + 8 个二进制 |
-| 任意 main push | + **dev-release** | 持续 dev Release（每次 commit） |
+| Pull Request | `test` + `web` + `build` | 8 个跨平台二进制 artifacts |
+| push 到 `main` | 上述 jobs + `docker` + `dev-release` | GHCR server 镜像 + 持续开发版 Release |
+| tag push（`v*`） | 上述 jobs + `docker` + `release` | 版本 server 镜像 + GitHub Release |
+| 手动运行 | 按选择的 workflow 事件执行 | 依触发 ref 决定是否发布 |
+
+所有 job 默认仅拥有 `contents: read`；只有 Docker job 获得 `packages: write`，只有 Release job 获得 `contents: write`。
 
 ## Jobs 详解
 
-### 1. `test` — 单元测试 + vet
+### 1. `test` — 后端质量门禁
 
-- 镜像：`ubuntu-latest`
-- 服务依赖：Redis 7-alpine（`localhost:6379`）
-- 命令：`go test -race -count=1 -timeout 120s ./...`
-- 加 `go vet ./...`
-- PR 时阻塞合并；push 时不影响后续 jobs（无依赖）
+- Redis 7-alpine 服务运行在 `localhost:6379`
+- 执行 `go test -race -count=1 -timeout 120s ./...`
+- 执行 `go vet ./...`
+- 失败后不会进入跨平台构建
 
-### 2. `build` — 8 平台交叉编译
+### 2. `web` — 前端生产构建
 
-`needs: [test]` — 测试失败则跳过构建。
+- 使用 Node.js 20
+- 使用 `npm ci`，严格按照 `web/package-lock.json` 安装依赖
+- 执行 `npm run build`，确保 TypeScript 与 Vite 生产构建可用
 
-矩阵 4 平台 × 2 组件（server / fileupload CLI）= 8 个二进制：
+### 3. `build` — 8 个跨平台二进制
+
+`needs: [test, web]`。矩阵为 Linux/macOS × amd64/arm64 × server/CLI：
 
 | 平台 | 组件 | 二进制 |
 |---|---|---|
@@ -32,120 +38,56 @@
 | linux/arm64 | server | `fileupload-server-linux-arm64` |
 | darwin/amd64 | server | `fileupload-server-darwin-amd64` |
 | darwin/arm64 | server | `fileupload-server-darwin-arm64` |
-| linux/amd64 | cli | `fileupload-cli-linux-amd64` |
-| linux/arm64 | cli | `fileupload-cli-linux-arm64` |
-| darwin/amd64 | cli | `fileupload-cli-darwin-amd64` |
-| darwin/arm64 | cli | `fileupload-cli-darwin-arm64` |
+| linux/amd64 | CLI | `fileupload-cli-linux-amd64` |
+| linux/arm64 | CLI | `fileupload-cli-linux-arm64` |
+| darwin/amd64 | CLI | `fileupload-cli-darwin-amd64` |
+| darwin/arm64 | CLI | `fileupload-cli-darwin-arm64` |
 
-CGO 全关，`-ldflags="-s -w"` 剥离符号表。
+编译关闭 CGO，使用 `-trimpath -ldflags="-s -w"` 减少产物体积。Artifacts 保留 14 天。
 
-每个二进制作为 artifact 上传，供后续 docker / release jobs 使用。
+### 4. `docker` — server 镜像构建与推送
 
-### 3. `docker` — 多架构镜像构建 + 推送
+仅在 `main` push 或 `v*` tag push 时运行，使用 `build` job 的预编译 server 二进制，不需要 QEMU 模拟 Go 编译。
 
-`needs: [build]`。
+- 注册表：`ghcr.io/${{ github.repository_owner }}/fileupload-server`
+- 架构：`linux/amd64`、`linux/arm64`
+- main 推送生成 `latest` 与 commit SHA tag
+- 版本 tag 生成 semver tag、`latest`（仅默认分支）与 commit SHA tag
+- 开启 BuildKit GitHub Container Registry 缓存、 provenance 与 SBOM
+- CLI 仅作为 GitHub Release 二进制发布，不制作没有运行时意义的 CLI 镜像
 
-- 使用 build job 预编译的二进制，无需 QEMU 模拟编译
-- 注册表：`ghcr.io/${{ github.repository_owner }}/fileupload-server` 与 `fileupload-cli`
-- tag 模式：
-  - `semver:{{version}}` — v1.2.3
-  - `semver:{{major}}.{{minor}}` — v1.2
-  - `latest`（仅 main 分支）
-  - `sha` 前缀（短 commit）
-- 镜像会出现在 GitHub Packages 侧栏 — 这是 ghcr.io 推送的固有行为
+### 5. `dev-release` — main 持续 Release
 
-### 4. `dev-release` — 持续集成 Release
+仅当 `github.ref == 'refs/heads/main'` 时触发，下载 8 个二进制并生成 `checksums.txt`，更新 `dev` Release。
 
-仅当 `github.ref == 'refs/heads/main'` 时触发。
+### 6. `release` — 正式版本发布
 
-- 下载所有 build artifacts
-- 生成 `checksums.txt`
-- 用 `softprops/action-gh-release` 创建 tag `dev` 的 GitHub Release
-- target_commitish 指向当前 SHA
+仅当 tag 匹配 `v*`，且所有质量门禁、构建和 server 镜像发布成功后触发。下载 8 个二进制，生成 `checksums.txt`，再创建 GitHub Release 并自动生成 release notes。
 
-用途：每次 main 分支提交都有可下载的开发版本。
+## 本地复现构建
 
-### 5. `release` — 正式版本发布
-
-仅当 tag 匹配 `v*` 时触发。
-
-- `needs: [build, docker]` — 等二进制与镜像都准备好
-- 下载所有 artifacts → 生成 checksums → `softprops/action-gh-release` 创建正式 Release
-- `generate_release_notes: true` 自动生成 release notes
-
-## 本地复现 CI
-
-### 跑测试（带 race）
 ```bash
-make test
-# 等价于：go test -race -count=1 ./...
-```
+# 构建前端
+cd web && npm ci && npm run build
 
-### 跑完整 release（4 平台二进制）
-```bash
+# 构建多平台二进制
 make release
-# 输出到 build/fileupload-{server,cli}-{linux,darwin}-{amd64,arm64}
-```
 
-### 跑 Docker 构建
-```bash
-# 单平台（amd64）
+# 构建完整 server Docker 镜像
 make docker
-# 单平台（arm64）
-make docker-arm64
 ```
 
-### 打 tag 触发 CI release
+## 发布版本
+
 ```bash
 git tag v0.5.0
 git push origin v0.5.0
-# CI 自动：build 8 个二进制 + docker 2 镜像 + 创建 GitHub Release
 ```
 
-## 权限矩阵
-
-| Job | permissions |
-|---|---|
-| (全局) | `contents: read`, `packages: write` |
-| dev-release | + `contents: write`（创建 Release） |
-| release | + `contents: write`（创建 Release） |
-
-`packages: write` 用于推送 ghcr.io Docker 镜像。
-
-## 故障排查
-
-### CI 跑挂了？
-
-1. **测试失败**：本地 `make test` 重现
-2. **Docker 镜像缺失 `fileupload.yaml`**：检查 `deploy/docker/` 是否有正确的 Dockerfile
-3. **二进制嵌入 dist 失败**：`make web` 先构建前端
-4. **Release 不创建**：检查 tag 格式是否匹配 `v*`（v 开头）
-
-### 本地发布调试
-
-```bash
-# 只跑某个目标
-make server-linux-amd64
-
-# 看完整 release 过程
-make release 2>&1 | tail -20
-
-# 清理重跑
-make clean && make release
-```
+CI 会执行质量门禁、构建 8 个二进制、发布两个架构的 server 镜像，并创建正式 GitHub Release。
 
 ## 修改 workflow 后
 
-修改 `.github/workflows/ci.yml` 后：
-- 提交到 PR 分支即可触发 test + build + docker（不会触发 release）
-- 合入 main 后会触发 dev-release
-- 打新 tag 才会触发正式 release
-
-## 相关文档
-
-- `docs/api.md` — API 参考
-- `sdk/USAGE.md` — SDK 使用指南
-- `deploy/prometheus/alerts.yml` — Prometheus 告警
-- `deploy/grafana/dashboard.json` — Grafana 仪表盘
-- `CONTEXT.md` — 领域词汇表
-- `docs/adr/` — 架构决策记录
+- PR 会执行后端质量检查、前端生产构建和跨平台编译
+- 合入 `main` 后额外发布 `latest` server 镜像与 `dev` Release
+- 推送 `v*` tag 后发布 semver server 镜像与正式 Release

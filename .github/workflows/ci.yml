@@ -1,45 +1,51 @@
-# fileupload CI/CD — 自动构建、测试、发布
+# fileupload CI/CD — 自动构建、校验、发布
 #
 # 触发条件:
-#   - push 到 main 分支
-#   - 创建 tag (v*) 时自动发布 Release
-#
-# 构建产物:
-#   - fileupload-server-{os}-{arch}  (Linux arm64/amd64, macOS amd64/arm64)
-#   - fileupload-cli-{os}-{arch}     (Linux arm64/amd64, macOS amd64/arm64)
-#   - Docker 镜像 (linux/amd64, linux/arm64) — 推 ghcr.io
+#   - Pull Request: 后端质量检查、前端生产构建、跨平台编译
+#   - push 到 main: 上述检查 + GHCR server 镜像 + dev Release
+#   - 创建 v* tag: 上述检查 + 版本镜像 + 正式 Release
 
 name: CI/CD
 
-permissions:
-  contents: read
-  packages: write
-
 on:
+  workflow_dispatch:
   push:
     branches: [main]
     tags: ["v*"]
   pull_request:
     branches: [main]
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# 默认只读，发布 job 在自身作用域内声明写权限。
+permissions:
+  contents: read
+
 env:
-  GO_VERSION: "1.25"
+  GO_VERSION: "1.25.5"
+  NODE_VERSION: "20"
   APP_NAME: "fileupload"
 
 jobs:
   # ========================================
-  # 测试
+  # 后端质量门禁
   # ========================================
   test:
-    name: Test
+    name: Backend quality
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     services:
       redis:
         image: redis:7-alpine
         ports:
           - 6379:6379
-        options: --health-cmd "redis-cli ping" --health-interval 10s --health-timeout 5s --health-retries 5
-
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v4
 
@@ -57,33 +63,87 @@ jobs:
         run: go vet ./...
 
   # ========================================
+  # 前端生产构建
+  # ========================================
+  web:
+    name: Web production build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Build production assets
+        run: npm run build
+
+  # ========================================
   # 全平台交叉编译
   # ========================================
   build:
-    name: Build
-    needs: [test]
+    name: Build ${{ matrix.bin_name }} (${{ matrix.goos }}/${{ matrix.goarch }})
+    needs: [test, web]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     strategy:
+      fail-fast: false
       matrix:
-        goos: [linux, darwin]
-        goarch: [amd64, arm64]
-        component: [server, fileupload]
         include:
-          - component: server
+          - goos: linux
+            goarch: amd64
+            component: server
             bin_name: server
-          - component: fileupload
+          - goos: linux
+            goarch: arm64
+            component: server
+            bin_name: server
+          - goos: darwin
+            goarch: amd64
+            component: server
+            bin_name: server
+          - goos: darwin
+            goarch: arm64
+            component: server
+            bin_name: server
+          - goos: linux
+            goarch: amd64
+            component: fileupload
+            bin_name: cli
+          - goos: linux
+            goarch: arm64
+            component: fileupload
+            bin_name: cli
+          - goos: darwin
+            goarch: amd64
+            component: fileupload
+            bin_name: cli
+          - goos: darwin
+            goarch: arm64
+            component: fileupload
             bin_name: cli
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
 
-      - name: Build ${{ matrix.component }} (${{ matrix.goos }}/${{ matrix.goarch }})
+      - name: Build binary
         run: |
+          mkdir -p build
           CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} \
-            go build -ldflags="-s -w" \
+            go build -trimpath -ldflags="-s -w" \
             -o build/${{ env.APP_NAME }}-${{ matrix.bin_name }}-${{ matrix.goos }}-${{ matrix.goarch }} \
             ./cmd/${{ matrix.component }}
 
@@ -91,44 +151,47 @@ jobs:
         with:
           name: ${{ env.APP_NAME }}-${{ matrix.bin_name }}-${{ matrix.goos }}-${{ matrix.goarch }}
           path: build/${{ env.APP_NAME }}-${{ matrix.bin_name }}-${{ matrix.goos }}-${{ matrix.goarch }}
+          if-no-files-found: error
+          retention-days: 14
 
   # ========================================
-  # Docker 镜像构建（使用 build job 预编译产物，无需 QEMU 模拟编译）
+  # Docker server 镜像构建与发布
+  # 使用预编译产物，无需 QEMU 模拟 Go 编译。
+  # CLI 通过 GitHub Release 发布，不制作没有运行时意义的 CLI 镜像。
   # ========================================
   docker:
-    name: Docker (${{ matrix.component }} / ${{ matrix.platform }})
+    name: Docker server (${{ matrix.platform }})
+    if: >-
+      github.event_name == 'push' &&
+      (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
     needs: [build]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
     strategy:
+      fail-fast: false
       matrix:
-        platform: [linux/amd64, linux/arm64]
-        component: [server, fileupload]
         include:
-          - component: server
-            bin_name: server
-            image_name: fileupload-server
-          - component: fileupload
-            bin_name: cli
-            image_name: fileupload-cli
+          - platform: linux/amd64
+            goarch: amd64
+          - platform: linux/arm64
+            goarch: arm64
     steps:
       - uses: actions/checkout@v4
 
-      - name: Resolve Go arch from platform
-        id: arch
-        run: |
-          ARCH=$(echo "${{ matrix.platform }}" | cut -d/ -f2)
-          echo "goarch=$ARCH" >> "$GITHUB_OUTPUT"
-
       - uses: actions/download-artifact@v4
         with:
-          name: ${{ env.APP_NAME }}-${{ matrix.bin_name }}-linux-${{ steps.arch.outputs.goarch }}
+          name: ${{ env.APP_NAME }}-server-linux-${{ matrix.goarch }}
           path: build/
 
-      - name: Rename binary for Dockerfile
-        run: cp build/${{ env.APP_NAME }}-${{ matrix.bin_name }}-linux-${{ steps.arch.outputs.goarch }} ./${{ env.APP_NAME }}-${{ matrix.bin_name }}
+      - name: Prepare server binary
+        run: |
+          cp build/${{ env.APP_NAME }}-server-linux-${{ matrix.goarch }} ./${{ env.APP_NAME }}-server
+          chmod +x ./${{ env.APP_NAME }}-server
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v3
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
@@ -137,28 +200,30 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata
+      - name: Extract image metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository_owner }}/${{ matrix.image_name }}
+          images: ghcr.io/${{ github.repository_owner }}/${{ env.APP_NAME }}-server
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest,enable={{is_default_branch}}
             type=sha,prefix=
 
-      - name: Build and push Docker image
+      - name: Build and push server image
         uses: docker/build-push-action@v6
         with:
           context: .
           file: deploy/docker/Dockerfile.dist
-          build-args: BINARY=${{ matrix.bin_name }}
+          build-args: BINARY=server
           platforms: ${{ matrix.platform }}
-          push: ${{ github.event_name != 'pull_request' }}
+          push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=registry,ref=ghcr.io/${{ github.repository_owner }}/${{ matrix.image_name }}:latest
+          provenance: mode=max
+          sbom: true
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository_owner }}/${{ env.APP_NAME }}-server:latest
           cache-to: type=inline
 
   # ========================================
@@ -166,12 +231,12 @@ jobs:
   # ========================================
   dev-release:
     name: Dev Release
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && needs.build.result == 'success'
     needs: [build]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: write
-      packages: write
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -186,6 +251,7 @@ jobs:
       - name: Upload dev release
         uses: softprops/action-gh-release@v2
         with:
+          token: ${{ secrets.GITHUB_TOKEN }}
           tag_name: dev
           name: "Dev Build (${{ github.sha }})"
           body: |
@@ -196,22 +262,19 @@ jobs:
           target_commitish: ${{ github.sha }}
 
   # ========================================
-  # Release: tag 推送时创建正式版本 Release + 版本镜像
-  #
-  # 触发: `git push origin vX.Y.Z`
-  # 产物:
-  #   - GitHub Release（自动生成 release notes）
-  #   - 8 个二进制（linux/darwin × amd64/arm64 × server/cli）+ checksums.txt
-  #   - Docker 镜像（由 docker job 推送，含 semver tag）
+  # Release: tag 推送时创建正式版本 Release
   # ========================================
   release:
     name: Release
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: >-
+      startsWith(github.ref, 'refs/tags/v') &&
+      needs.build.result == 'success' &&
+      needs.docker.result == 'success'
     needs: [build, docker]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: write
-      packages: write
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -225,5 +288,6 @@ jobs:
 
       - uses: softprops/action-gh-release@v2
         with:
+          token: ${{ secrets.GITHUB_TOKEN }}
           files: build/*
           generate_release_notes: true

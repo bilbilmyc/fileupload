@@ -1,37 +1,27 @@
-# fileupload Docker 镜像 — 发行版构建
-# 使用预编译好的二进制（从 CI build job 产物下载），无需 QEMU 模拟编译。
-# 通过 --build-arg BINARY=server|fileupload 选择组件。
-# 用于 CI 中的 Docker 镜像构建，本地开发请用 Dockerfile。
+# fileupload CI/CD — 发行版 Docker 构建
+# 使用 CI 预编译好的 server 二进制；CLI 通过 GitHub Release 发布。
+# 本地开发请使用 deploy/docker/Dockerfile。
 
 ARG BINARY=server
 
 FROM alpine:3.20
 
-RUN apk add --no-cache ca-certificates tzdata
+RUN apk add --no-cache ca-certificates tzdata \
+    && adduser -D -h /var/lib/fileupload fileupload \
+    && mkdir -p /var/lib/fileupload/data /var/lib/fileupload/tmp \
+    && chown -R fileupload:fileupload /var/lib/fileupload
 
 ARG BINARY
+RUN test "$BINARY" = "server"
 
-RUN if [ "$BINARY" = "server" ]; then \
-        adduser -D -h /var/lib/fileupload fileupload && \
-        mkdir -p /var/lib/fileupload/data /var/lib/fileupload/tmp && \
-        chown -R fileupload:fileupload /var/lib/fileupload; \
-    fi
-
-# 预编译二进制（由 CI build job 交叉编译产出）
 COPY fileupload-${BINARY} /usr/local/bin/fileupload-${BINARY}
-
-# 默认配置文件（仅 server 需要）
 COPY fileupload.yaml.example /etc/fileupload/fileupload.yaml
 
-# server 以非 root 运行
 USER fileupload
 WORKDIR /var/lib/fileupload
-
-# server 监听 8080
 EXPOSE 8080
 
-# server 健康检查
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD wget -qO- http://localhost:8080/health || exit 1
 
-ENTRYPOINT /usr/local/bin/fileupload-${BINARY}
+ENTRYPOINT ["/usr/local/bin/fileupload-server"]
