@@ -132,6 +132,7 @@ func (r *Router) registerRoutes() {
 		r.mux.HandleFunc("GET /v1/shares", r.share.ListShares)
 		r.mux.HandleFunc("DELETE /v1/shares/{token}", r.share.RevokeShare)
 		r.mux.HandleFunc("GET /s/{token}", r.share.AccessShare)
+		r.mux.HandleFunc("POST /s/{token}", r.share.SubmitSharePassword)
 	}
 
 	// === 前端 React 构建产物 ===

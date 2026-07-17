@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Button, Drawer, Empty, InputNumber, List, Popconfirm, Select, Space, Tag, Tooltip, Typography, message } from 'antd'
+import { Button, Drawer, Empty, Input, InputNumber, List, Popconfirm, Select, Space, Tag, Tooltip, Typography, message } from 'antd'
 import { CopyOutlined, DeleteOutlined, LinkOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import type { FileItem, ShareEntry } from '../api/client'
 import * as api from '../api/client'
@@ -24,6 +24,7 @@ export default function ShareLinkManager({ file, open, onClose }: ShareLinkManag
   const [creating, setCreating] = useState(false)
   const [expiresIn, setExpiresIn] = useState(168)
   const [maxDownloads, setMaxDownloads] = useState<number | null>(0)
+  const [password, setPassword] = useState('')
 
   const load = useCallback(async () => {
     if (!file || file.is_dir) return
@@ -57,7 +58,9 @@ export default function ShareLinkManager({ file, open, onClose }: ShareLinkManag
       const entry = await api.createShare(file.file_id, {
         expires_in: expiresIn,
         max_downloads: maxDownloads || 0,
+        password,
       })
+      setPassword('')
       setEntries(current => [entry, ...current])
       await copy(entry.token)
     } catch (error: any) {
@@ -88,7 +91,7 @@ export default function ShareLinkManager({ file, open, onClose }: ShareLinkManag
     >
       <section className="share-create-card" aria-label="创建分享链接">
         <Text strong>{file?.name || '文件'}</Text>
-        <Text type="secondary" className="share-create-card__hint">链接创建后可随时撤销；访问次数在下载开始时计数。</Text>
+        <Text type="secondary" className="share-create-card__hint">链接创建后可随时撤销；访问次数在下载开始时计数。设置密码后，访问者将在安全页面验证密码。</Text>
         <div className="share-create-card__fields">
           <label>
             <span>有效期</span>
@@ -103,6 +106,16 @@ export default function ShareLinkManager({ file, open, onClose }: ShareLinkManag
           <label>
             <span>最大下载次数</span>
             <InputNumber min={0} max={1000000} value={maxDownloads} onChange={setMaxDownloads} placeholder="0 = 不限" />
+          </label>
+          <label className="share-create-card__password">
+            <span>访问密码 <em>（可选）</em></span>
+            <Input.Password
+              value={password}
+              onChange={event => setPassword(event.target.value)}
+              autoComplete="new-password"
+              maxLength={256}
+              placeholder="留空则任何获得链接的人均可下载"
+            />
           </label>
         </div>
         <Button type="primary" icon={<PlusOutlined />} loading={creating} onClick={() => void create()} block>

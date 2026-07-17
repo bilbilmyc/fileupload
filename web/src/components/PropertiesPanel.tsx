@@ -1,8 +1,8 @@
-import { Drawer, Descriptions, Tag, Space, Button, Tooltip } from 'antd'
+import { Drawer, Descriptions, Tag, Space, Button, Tooltip, message } from 'antd'
 import { DownloadOutlined, CopyOutlined, LinkOutlined } from '@ant-design/icons'
 import type { FileItem } from '../api/client'
 import { useState } from 'react'
-import { downloadFileUrl } from '../api/client'
+import { downloadFile, saveBlob } from '../api/client'
 import ShareLinkManager from './ShareLinkManager'
 
 function formatBytes(bytes: number): string {
@@ -28,6 +28,14 @@ export default function PropertiesPanel({ file, onClose }: PropertiesPanelProps)
       await navigator.clipboard.writeText(file.sha256)
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
+    }
+  }
+
+  const handleDownload = async () => {
+    try {
+      saveBlob(await downloadFile(file.file_id), file.name)
+    } catch (error: any) {
+      message.error(`下载失败：${error.message || '请稍后重试'}`)
     }
   }
 
@@ -76,7 +84,7 @@ export default function PropertiesPanel({ file, onClose }: PropertiesPanelProps)
 
       {!file.is_dir && (
         <div className="properties-actions">
-          <Button type="primary" icon={<DownloadOutlined />} block href={downloadFileUrl(file.file_id)}>
+          <Button type="primary" icon={<DownloadOutlined />} block onClick={() => void handleDownload()}>
             下载文件
           </Button>
           <Button icon={<LinkOutlined />} block onClick={() => setShareOpen(true)}>

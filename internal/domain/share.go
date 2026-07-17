@@ -104,18 +104,41 @@ func (s *ShareService) CreateShare(ctx context.Context, req CreateShareRequest, 
 	return entry, nil
 }
 
-// AccessShare 访问分享链接
-// 返回值含义：
-//
-//	entry — 分享条目
-//	err — 错误（ErrNotFound 表示不存在/已过期/已达上限，ErrForbidden 表示密码错误）
+// AuthorizeShare 验证分享链接当前是否可访问以及访问密码。它不会增加下载次数，
+// 因此可以安全用于浏览器密码表单和签发短期访问 cookie。
+func (s *ShareService) AuthorizeShare(ctx context.Context, token, password string) (*ShareEntry, error) {
+	return s.authorizeShare(ctx, token, password, false)
+}
+
+// AccessShare 访问分享链接并在下载开始时增加计数。
+// 返回 ErrNotFound 表示不存在，ErrShareExhausted 表示过期或下载次数耗尽，
+// ErrForbidden 表示密码错误。
 func (s *ShareService) AccessShare(ctx context.Context, token, password string) (*ShareEntry, error) {
+	entry, err := s.AuthorizeShare(ctx, token, password)
+	if err != nil {
+		return nil, err
+	}
+	_ = s.store.IncrDownloads(ctx, token)
+	return entry, nil
+}
+
+// AccessAuthorizedShare 在 HTTP 层已验证短期、签名访问凭据后下载分享文件。
+// 仍会重新检查链接的过期时间和下载次数，且只跳过 bcrypt 密码比较。
+func (s *ShareService) AccessAuthorizedShare(ctx context.Context, token string) (*ShareEntry, error) {
+	entry, err := s.authorizeShare(ctx, token, "", true)
+	if err != nil {
+		return nil, err
+	}
+	_ = s.store.IncrDownloads(ctx, token)
+	return entry, nil
+}
+
+func (s *ShareService) authorizeShare(ctx context.Context, token, password string, passwordVerified bool) (*ShareEntry, error) {
 	entry, err := s.store.GetShare(ctx, token)
 	if err != nil || entry == nil {
 		return nil, ErrNotFound
 	}
 
-	// 检查过期
 	if entry.ExpiresAt != "" {
 		exp, err := time.Parse(time.RFC3339, entry.ExpiresAt)
 		if err == nil && time.Now().After(exp) {
@@ -123,22 +146,16 @@ func (s *ShareService) AccessShare(ctx context.Context, token, password string) 
 		}
 	}
 
-	// 检查下载次数
 	if entry.MaxDownloads > 0 && entry.CurDownloads >= entry.MaxDownloads {
 		return nil, ErrShareExhausted
 	}
 
-	// 验证密码（bcrypt）
 	entry.PasswordProtected = entry.PasswordHash != ""
-	if entry.PasswordHash != "" {
+	if entry.PasswordHash != "" && !passwordVerified {
 		if err := bcrypt.CompareHashAndPassword([]byte(entry.PasswordHash), []byte(password)); err != nil {
 			return nil, ErrForbidden
 		}
 	}
-
-	// 增加下载计数
-	_ = s.store.IncrDownloads(ctx, token)
-
 	return entry, nil
 }
 

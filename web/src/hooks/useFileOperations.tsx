@@ -124,14 +124,15 @@ export function useFileOperations(_namespace?: string) {
     return items
   }, [ancestors, navigateToDir])
 
-  const handleDownload = useCallback((record: FileItem) => {
-    const url = record.is_dir
-      ? api.downloadDirUrl(record.file_id)
-      : api.downloadFileUrl(record.file_id)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = record.name
-    a.click()
+  const handleDownload = useCallback(async (record: FileItem) => {
+    try {
+      const blob = record.is_dir
+        ? await api.downloadDir(record.file_id)
+        : await api.downloadFile(record.file_id)
+      api.saveBlob(blob, record.is_dir ? `${record.name}.tar.gz` : record.name)
+    } catch (e: any) {
+      message.error(`下载失败: ${e.message || '请稍后重试'}`)
+    }
   }, [])
 
   const handleDelete = useCallback(async (record: FileItem) => {

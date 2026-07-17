@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/bilbilmyc/fileupload/internal/domain"
@@ -212,5 +213,84 @@ func TestShareHandler_ListAndRevoke(t *testing.T) {
 	}
 	if _, ok := store.shares["s-default"]; ok {
 		t.Fatal("share should have been revoked")
+	}
+}
+
+func TestShareHandler_AccessShare_HTMLPasswordPage(t *testing.T) {
+	store := newMockShareStore()
+	handler := NewShareHandler(domain.NewShareService(store), nil)
+	hash, _ := bcrypt.GenerateFromPassword([]byte("pw"), bcrypt.DefaultCost)
+	store.CreateShare(context.Background(), "s-html", &domain.ShareEntry{
+		Token: "s-html", FileID: "f1", PasswordHash: string(hash), Namespace: "demo",
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/s/s-html", nil)
+	req.Header.Set("Accept", "text/html")
+	w := httptest.NewRecorder()
+	handler.AccessShare(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "此分享受密码保护") || !strings.Contains(w.Body.String(), `method="post"`) {
+		t.Fatalf("unexpected password page: %s", w.Body.String())
+	}
+}
+
+func TestShareHandler_AccessShare_HTMLExpiredPage(t *testing.T) {
+	store := newMockShareStore()
+	handler := NewShareHandler(domain.NewShareService(store), nil)
+	store.CreateShare(context.Background(), "s-expired", &domain.ShareEntry{
+		Token: "s-expired", FileID: "f1", MaxDownloads: 1, CurDownloads: 1, Namespace: "demo",
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/s/s-expired", nil)
+	req.Header.Set("Accept", "text/html")
+	w := httptest.NewRecorder()
+	handler.AccessShare(w, req)
+
+	if w.Code != http.StatusGone {
+		t.Fatalf("status = %d, want 410", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "此分享链接不可用") || strings.Contains(w.Body.String(), `method="post"`) {
+		t.Fatalf("unexpected expired page: %s", w.Body.String())
+	}
+}
+
+func TestShareHandler_SubmitSharePassword_SetsShortLivedCookie(t *testing.T) {
+	store := newMockShareStore()
+	handler := NewShareHandler(domain.NewShareService(store), nil)
+	hash, _ := bcrypt.GenerateFromPassword([]byte("pw"), bcrypt.DefaultCost)
+	store.CreateShare(context.Background(), "s-cookie", &domain.ShareEntry{
+		Token: "s-cookie", FileID: "f1", PasswordHash: string(hash), Namespace: "demo",
+	})
+
+	form := strings.NewReader("password=pw")
+	req := httptest.NewRequest(http.MethodPost, "/s/s-cookie", form)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.SetPathValue("token", "s-cookie")
+	w := httptest.NewRecorder()
+	handler.SubmitSharePassword(w, req)
+
+	if w.Code != http.StatusSeeOther {
+		t.Fatalf("submit status = %d, want 303", w.Code)
+	}
+	cookies := w.Result().Cookies()
+	if len(cookies) != 1 || cookies[0].Name != shareAccessCookieName || !cookies[0].HttpOnly {
+		t.Fatalf("unexpected cookies: %#v", cookies)
+	}
+	if store.shares["s-cookie"].CurDownloads != 0 {
+		t.Fatalf("password verification should not count as download, got %d", store.shares["s-cookie"].CurDownloads)
+	}
+
+	accessReq := httptest.NewRequest(http.MethodGet, "/s/s-cookie", nil)
+	accessReq.AddCookie(cookies[0])
+	accessW := httptest.NewRecorder()
+	handler.AccessShare(accessW, accessReq)
+	if accessW.Code != http.StatusFound {
+		t.Fatalf("cookie access status = %d, want 302", accessW.Code)
+	}
+	if store.shares["s-cookie"].CurDownloads != 1 {
+		t.Fatalf("cookie download count = %d, want 1", store.shares["s-cookie"].CurDownloads)
 	}
 }

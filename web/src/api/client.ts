@@ -84,12 +84,32 @@ export interface ShareEntry {
 export interface CreateShareOptions {
   expires_in?: number
   max_downloads?: number
+  /** 可选访问密码；仅发送给服务端进行 bcrypt 哈希，绝不在响应中返回。 */
+  password?: string
 }
 
 export interface NamespaceUsage {
   file_count: number
   total_size: number
   quota_bytes?: number
+}
+
+export interface AuditLogEntry {
+  id: number
+  action: string
+  target_type: string
+  target_id: string
+  user_id: string
+  namespace: string
+  detail: string
+  created_at: string
+}
+
+export interface AuditLogResult {
+  entries: AuditLogEntry[]
+  total: number
+  page: number
+  per_page: number
 }
 
 /**
@@ -234,6 +254,38 @@ export function downloadDirUrl(id: string, format: string = 'tar.gz'): string {
   return `/v1/dirs/${id}?format=${format}`
 }
 
+/** 使用统一认证头下载单个文件，避免直接链接在启用鉴权后失效。 */
+export async function downloadFile(id: string): Promise<Blob> {
+  const r = await axiosInstance.get(downloadFileUrl(id), { responseType: 'blob' })
+  return r.data
+}
+
+/** 使用统一认证头下载目录打包文件。 */
+export async function downloadDir(id: string, format: string = 'tar.gz'): Promise<Blob> {
+  const r = await axiosInstance.get(downloadDirUrl(id, format), { responseType: 'blob' })
+  return r.data
+}
+
+/** 受认证保护的预览数据读取。text 预览可通过 Range 控制读取上限。 */
+export async function fetchPreviewBlob(id: string, maxBytes?: number): Promise<Blob> {
+  const headers = maxBytes ? { Range: `bytes=0-${maxBytes - 1}` } : undefined
+  const r = await axiosInstance.get(previewFileUrl(id), { headers, responseType: 'blob', timeout: 60000 })
+  return r.data
+}
+
+/** 将经过认证请求拿到的 Blob 交给浏览器保存，并及时回收临时 URL。 */
+export function saveBlob(blob: Blob, filename: string): void {
+  const objectURL = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = objectURL
+  anchor.download = filename
+  anchor.style.display = 'none'
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+  window.setTimeout(() => URL.revokeObjectURL(objectURL), 0)
+}
+
 export async function renameFile(id: string, name: string): Promise<void> {
   // v0.7.0：迁到 SDK
   await sdkClient.rename(id, name)
@@ -248,6 +300,7 @@ export async function createShare(fileId: string, options: CreateShareOptions = 
     file_id: fileId,
     expires_in: options.expires_in || 0,
     max_downloads: options.max_downloads || 0,
+    password: options.password || '',
   })
   return r.data
 }
@@ -259,6 +312,11 @@ export async function listShares(fileId?: string): Promise<ShareEntry[]> {
 
 export async function getNamespaceUsage(): Promise<NamespaceUsage> {
   const r = await axiosInstance.get('/v1/usage')
+  return r.data
+}
+
+export async function listAuditLogs(page: number = 1, perPage: number = 50): Promise<AuditLogResult> {
+  const r = await axiosInstance.get('/v1/admin/audit', { params: { page, per_page: perPage } })
   return r.data
 }
 
@@ -288,7 +346,8 @@ export async function batchDelete(ids: string[]): Promise<BatchDeleteResult> {
 }
 
 export async function batchDownload(ids: string[], format: string = 'zip'): Promise<Blob> {
-  const r = await axiosInstance.post('/v1/batch/download', { ids, format }, {
+  const r = await axiosInstance.get('/v1/batch/download', {
+    params: { ids: ids.join(','), format },
     responseType: 'blob',
   })
   return r.data

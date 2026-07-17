@@ -11,11 +11,18 @@ import (
 // DownloadHandler 下载处理器
 type DownloadHandler struct {
 	downloadSvc *domain.DownloadService
+	audit       auditLogger
 }
 
 // NewDownloadHandler 创建下载处理器
 func NewDownloadHandler(downloadSvc *domain.DownloadService) *DownloadHandler {
 	return &DownloadHandler{downloadSvc: downloadSvc}
+}
+
+// WithAuditLogger 为下载、预览操作补充非阻塞审计记录。
+func (h *DownloadHandler) WithAuditLogger(logger auditLogger) *DownloadHandler {
+	h.audit = logger
+	return h
 }
 
 // GetFile GET /v1/files/{id} — 单文件下载
@@ -40,6 +47,7 @@ func (h *DownloadHandler) GetFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer fileReader.Reader.Close()
+	writeAudit(h.audit, r.Context(), "download", "file", fileReader.File.FileID, namespace, "single file download")
 
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Accept-Ranges", "bytes")
@@ -81,6 +89,7 @@ func (h *DownloadHandler) GetPreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer fileReader.Reader.Close()
+	writeAudit(h.audit, r.Context(), "preview", "file", fileReader.File.FileID, namespace, "inline file preview")
 
 	mimeType := guessMimeType(fileReader.File.Name)
 
@@ -132,6 +141,7 @@ func (h *DownloadHandler) GetDir(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer reader.Close()
+	writeAudit(h.audit, r.Context(), "download", "directory", dirID, namespace, "directory archive download")
 
 	w.Header().Set("X-Tree-SHA256", dw.TreeSHA256)
 	w.Header().Set("Content-Disposition", contentDisposition("attachment", "dir."+formatStr))

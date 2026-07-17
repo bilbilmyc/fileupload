@@ -79,14 +79,14 @@ func Build(d Deps) (*Server, error) {
 
 	tusHandler := transport.NewTusHandler(uploadSvc)
 	restHandler := transport.NewRESTHandler(uploadSvc, downloadSvc).WithNamespaceQuota(d.UploadCfg.NamespaceQuotaBytes)
-	downloadHandler := transport.NewDownloadHandler(downloadSvc)
+	downloadHandler := transport.NewDownloadHandler(downloadSvc).WithAuditLogger(d.Metadata)
 	batchHandler := transport.NewBatchHandler(batchSvc)
 	var authHandler *transport.AuthHandler
 	if d.Auth != nil {
 		authHandler = transport.NewAuthHandler(d.Auth)
 	}
 	adminHandler := transport.NewAdminHandler(d.Metadata, d.WorkerPool, d.ServerCfg.Addr, d.ServerCfg.Addr, "", "")
-	shareHandler := transport.NewShareHandler(shareSvc, downloadSvc)
+	shareHandler := transport.NewShareHandler(shareSvc, downloadSvc).WithAuditLogger(d.Metadata)
 	wsHub := transport.NewWSHub()
 
 	// 后台任务

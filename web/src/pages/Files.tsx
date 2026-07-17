@@ -240,10 +240,12 @@ export default function Files() {
             onCancel={() => setSelectedRowKeys([])}
             onBatchDelete={handleBatchDelete}
             onBatchDownload={(fmt) => {
-              const ids = selectedRowKeys.join(',')
-              const a = document.createElement('a')
-              a.href = `${api.batchDownloadUrl()}?ids=${ids}&format=${fmt}`
-              a.click()
+              void api.batchDownload(selectedRowKeys as string[], fmt)
+                .then(blob => {
+                  api.saveBlob(blob, `fileupload-${new Date().toISOString().slice(0, 10)}.${fmt === 'tar.gz' ? 'tar.gz' : fmt}`)
+                  addRecord({ type: 'download', fileCount: selectedRowKeys.length, status: 'success', detail: `已打包为 ${fmt}` })
+                })
+                .catch((error: any) => message.error(`打包下载失败：${error.message || '请稍后重试'}`))
             }}
             onBatchMove={handleBatchMove}
             onBatchCopy={handleBatchCopy}
