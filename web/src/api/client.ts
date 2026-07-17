@@ -132,6 +132,7 @@ export interface ListFilesParams {
   per_page?: number
   sort_by?: string
   sort_order?: string
+  type?: 'dir' | 'file'
 }
 
 /**
@@ -145,6 +146,7 @@ export async function listFiles(opts: ListFilesParams = {}): Promise<ListResult>
   if (opts.per_page) params.per_page = String(opts.per_page)
   if (opts.sort_by) params.sort_by = opts.sort_by
   if (opts.sort_order) params.sort_order = opts.sort_order
+  if (opts.type) params.type = opts.type
   const r = await axiosInstance.get('/v1/ls', { params })
   return r.data
 }

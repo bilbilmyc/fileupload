@@ -31,9 +31,9 @@ type FileStore interface {
 	GetFile(ctx context.Context, id string) (*FileMetadata, error)
 	GetFileByPath(ctx context.Context, namespace, path string) (*FileMetadata, error)
 	ListChildren(ctx context.Context, parentID string, search string) ([]*FileMetadata, error)
-	ListChildrenPage(ctx context.Context, parentID string, search string, page, perPage int, sortBy, sortOrder string) ([]*FileMetadata, int, error)
+	ListChildrenPage(ctx context.Context, parentID string, search, fileType string, page, perPage int, sortBy, sortOrder string) ([]*FileMetadata, int, error)
 	ListRoot(ctx context.Context, namespace string, search string) ([]*FileMetadata, error)
-	ListRootPage(ctx context.Context, namespace string, search string, page, perPage int, sortBy, sortOrder string) ([]*FileMetadata, int, error)
+	ListRootPage(ctx context.Context, namespace string, search, fileType string, page, perPage int, sortBy, sortOrder string) ([]*FileMetadata, int, error)
 	GetNamespaceUsage(ctx context.Context, namespace string) (*NamespaceUsage, error)
 	ListTrash(ctx context.Context, namespace string) ([]*FileMetadata, error)
 	MoveFileToTrash(ctx context.Context, id string, deletedAt time.Time) error

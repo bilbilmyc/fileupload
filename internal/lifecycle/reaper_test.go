@@ -138,7 +138,7 @@ func (m *mockMeta) DeleteFileTags(_ context.Context, _ string) error            
 func (m *mockMeta) ReparentFile(_ context.Context, _ string, _ *string, _ string) error { return nil }
 func (m *mockMeta) UpdateFileParent(_ context.Context, _ string, _ *string) error       { return nil }
 
-func (m *mockMeta) ListChildrenPage(_ context.Context, parentID string, search string, page, perPage int, sortBy, sortOrder string) ([]*domain.FileMetadata, int, error) {
+func (m *mockMeta) ListChildrenPage(_ context.Context, parentID string, search, fileType string, page, perPage int, sortBy, sortOrder string) ([]*domain.FileMetadata, int, error) {
 	all, _ := m.ListChildren(context.Background(), parentID, search)
 	total := len(all)
 	start := (page - 1) * perPage
@@ -155,7 +155,7 @@ func (m *mockMeta) ListChildrenPage(_ context.Context, parentID string, search s
 	return all[start:end], total, nil
 }
 
-func (m *mockMeta) ListRootPage(_ context.Context, namespace string, search string, page, perPage int, sortBy, sortOrder string) ([]*domain.FileMetadata, int, error) {
+func (m *mockMeta) ListRootPage(_ context.Context, namespace string, search, fileType string, page, perPage int, sortBy, sortOrder string) ([]*domain.FileMetadata, int, error) {
 	all, _ := m.ListRoot(context.Background(), namespace, search)
 	total := len(all)
 	start := (page - 1) * perPage
@@ -464,10 +464,10 @@ func (e *errorMeta) DeleteFileTags(_ context.Context, _ string) error           
 func (e *errorMeta) ReparentFile(_ context.Context, _ string, _ *string, _ string) error { return nil }
 func (e *errorMeta) UpdateFileParent(_ context.Context, _ string, _ *string) error       { return nil }
 
-func (e *errorMeta) ListChildrenPage(_ context.Context, _ string, _ string, _, _ int, _, _ string) ([]*domain.FileMetadata, int, error) {
+func (e *errorMeta) ListChildrenPage(_ context.Context, _ string, _ string, _ string, _, _ int, _, _ string) ([]*domain.FileMetadata, int, error) {
 	return nil, 0, fmt.Errorf("fail")
 }
-func (e *errorMeta) ListRootPage(_ context.Context, _ string, _ string, _, _ int, _, _ string) ([]*domain.FileMetadata, int, error) {
+func (e *errorMeta) ListRootPage(_ context.Context, _ string, _ string, _ string, _, _ int, _, _ string) ([]*domain.FileMetadata, int, error) {
 	return nil, 0, fmt.Errorf("fail")
 }
 func (e *errorMeta) RenameFile(_ context.Context, _, _, _ string) error { return nil }

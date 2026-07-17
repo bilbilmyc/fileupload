@@ -468,6 +468,80 @@ func TestREST_ListDir_Root(t *testing.T) {
 	}
 }
 
+func TestREST_ListDir_FiltersByType(t *testing.T) {
+	uploadSvc, _, _, restHandler, _ := newTestFixtures(t)
+	ctx := context.Background()
+
+	createFile := func(name string) *domain.FileMetadata {
+		t.Helper()
+		content := []byte(name)
+		session, err := uploadSvc.CreateSession(ctx, "", int64(len(content)), domain.CompNone, 100, "demo", name)
+		if err != nil {
+			t.Fatalf("CreateSession(%s) error = %v", name, err)
+		}
+		if err := uploadSvc.AppendChunk(ctx, session.SessionID, 0, bytes.NewReader(content), ""); err != nil {
+			t.Fatalf("AppendChunk(%s) error = %v", name, err)
+		}
+		result, err := uploadSvc.Finalize(ctx, session.SessionID)
+		if err != nil {
+			t.Fatalf("Finalize(%s) error = %v", name, err)
+		}
+		return result
+	}
+
+	createFile("plain.txt")
+	directoryEntry := createFile("inside.txt")
+	manifest, err := json.Marshal(domain.DirManifest{
+		Name:    "folder",
+		Entries: []domain.DirEntry{{Path: "inside.txt", FileID: directoryEntry.FileID}},
+	})
+	if err != nil {
+		t.Fatalf("marshal directory manifest: %v", err)
+	}
+	dirRequest := withNamespace(httptest.NewRequest(http.MethodPost, "/v1/dirs", bytes.NewReader(manifest)), "demo")
+	dirResponse := httptest.NewRecorder()
+	restHandler.SubmitDir(dirResponse, dirRequest)
+	if dirResponse.Code != http.StatusCreated {
+		t.Fatalf("SubmitDir status = %d, want 201; body = %s", dirResponse.Code, dirResponse.Body.String())
+	}
+
+	list := func(fileType string) struct {
+		Children []domain.FileMetadata `json:"children"`
+		Total    int                   `json:"total"`
+	} {
+		t.Helper()
+		req := withNamespace(httptest.NewRequest(http.MethodGet, "/v1/ls?parent=/&type="+fileType, nil), "demo")
+		response := httptest.NewRecorder()
+		restHandler.ListDir(response, req)
+		if response.Code != http.StatusOK {
+			t.Fatalf("ListDir(%s) status = %d, want 200; body = %s", fileType, response.Code, response.Body.String())
+		}
+		var payload struct {
+			Children []domain.FileMetadata `json:"children"`
+			Total    int                   `json:"total"`
+		}
+		if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode ListDir(%s) response: %v", fileType, err)
+		}
+		return payload
+	}
+
+	files := list("file")
+	if files.Total != 1 || len(files.Children) != 1 || files.Children[0].IsDir || files.Children[0].Name != "plain.txt" {
+		t.Fatalf("file filter response = %#v, want plain file only", files)
+	}
+
+	directories := list("dir")
+	if directories.Total != 1 || len(directories.Children) != 1 || !directories.Children[0].IsDir || directories.Children[0].Name != "folder" {
+		t.Fatalf("dir filter response = %#v, want folder only", directories)
+	}
+
+	all := list("unexpected")
+	if all.Total != 2 || len(all.Children) != 2 {
+		t.Fatalf("unknown type should preserve unfiltered behavior; response = %#v", all)
+	}
+}
+
 func TestREST_StatFile(t *testing.T) {
 	uploadSvc, _, _, restHandler, _ := newTestFixtures(t)
 	ctx := context.Background()

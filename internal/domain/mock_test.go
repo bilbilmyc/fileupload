@@ -272,8 +272,9 @@ func (m *mockMetadata) GetFileByPath(_ context.Context, namespace, path string) 
 	return nil, nil
 }
 
-func (m *mockMetadata) ListChildrenPage(_ context.Context, parentID string, search string, page, perPage int, sortBy, sortOrder string) ([]*FileMetadata, int, error) {
+func (m *mockMetadata) ListChildrenPage(_ context.Context, parentID string, search, fileType string, page, perPage int, sortBy, sortOrder string) ([]*FileMetadata, int, error) {
 	all, _ := m.ListChildren(context.Background(), parentID, search)
+	all = filterMockFilesByType(all, fileType)
 	total := len(all)
 	start := (page - 1) * perPage
 	if start < 0 {
@@ -289,8 +290,9 @@ func (m *mockMetadata) ListChildrenPage(_ context.Context, parentID string, sear
 	return all[start:end], total, nil
 }
 
-func (m *mockMetadata) ListRootPage(_ context.Context, namespace string, search string, page, perPage int, sortBy, sortOrder string) ([]*FileMetadata, int, error) {
+func (m *mockMetadata) ListRootPage(_ context.Context, namespace string, search, fileType string, page, perPage int, sortBy, sortOrder string) ([]*FileMetadata, int, error) {
 	all, _ := m.ListRoot(context.Background(), namespace, search)
+	all = filterMockFilesByType(all, fileType)
 	total := len(all)
 	start := (page - 1) * perPage
 	if start < 0 {
@@ -304,6 +306,20 @@ func (m *mockMetadata) ListRootPage(_ context.Context, namespace string, search 
 		end = total
 	}
 	return all[start:end], total, nil
+}
+
+func filterMockFilesByType(files []*FileMetadata, fileType string) []*FileMetadata {
+	if fileType != "dir" && fileType != "file" {
+		return files
+	}
+
+	filtered := make([]*FileMetadata, 0, len(files))
+	for _, file := range files {
+		if (fileType == "dir" && file.IsDir) || (fileType == "file" && !file.IsDir) {
+			filtered = append(filtered, file)
+		}
+	}
+	return filtered
 }
 
 func (m *mockMetadata) ListChildren(_ context.Context, parentID string, search string) ([]*FileMetadata, error) {

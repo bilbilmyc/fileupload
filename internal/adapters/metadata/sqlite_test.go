@@ -236,6 +236,62 @@ func TestSQLiteStore_ListRoot(t *testing.T) {
 	}
 }
 
+func TestSQLiteStore_ListPageFiltersByTypeAndReturnsExactTotal(t *testing.T) {
+	s := newTestSQLite(t)
+	ctx := context.Background()
+	now := time.Now()
+
+	files := []*domain.FileMetadata{
+		{FileID: "root-dir", Name: "alpha-folder", Path: "/alpha-folder", Namespace: "demo", IsDir: true, CreatedAt: now},
+		{FileID: "root-file-a", Name: "alpha.txt", Path: "alpha.txt", Namespace: "demo", CreatedAt: now},
+		{FileID: "root-file-b", Name: "beta.txt", Path: "beta.txt", Namespace: "demo", CreatedAt: now},
+		{FileID: "other-root", Name: "other.txt", Path: "other.txt", Namespace: "other", CreatedAt: now},
+		{FileID: "child-dir", Name: "nested", Path: "alpha-folder/nested", Namespace: "demo", ParentID: "root-dir", IsDir: true, CreatedAt: now},
+		{FileID: "child-file-a", Name: "archive.txt", Path: "alpha-folder/archive.txt", Namespace: "demo", ParentID: "root-dir", CreatedAt: now},
+		{FileID: "child-file-b", Name: "report.pdf", Path: "alpha-folder/report.pdf", Namespace: "demo", ParentID: "root-dir", CreatedAt: now},
+	}
+	for _, file := range files {
+		if err := s.PutFile(ctx, file); err != nil {
+			t.Fatalf("PutFile(%s) error = %v", file.FileID, err)
+		}
+	}
+
+	rootFiles, total, err := s.ListRootPage(ctx, "demo", "", "file", 2, 1, "name", "asc")
+	if err != nil {
+		t.Fatalf("ListRootPage(files) error = %v", err)
+	}
+	if total != 2 {
+		t.Fatalf("ListRootPage(files) total = %d, want 2", total)
+	}
+	if len(rootFiles) != 1 || rootFiles[0].FileID != "root-file-b" || rootFiles[0].IsDir {
+		t.Fatalf("ListRootPage(files) = %#v, want second file only", rootFiles)
+	}
+
+	rootDirs, total, err := s.ListRootPage(ctx, "demo", "", "dir", 1, 50, "name", "asc")
+	if err != nil {
+		t.Fatalf("ListRootPage(dirs) error = %v", err)
+	}
+	if total != 1 || len(rootDirs) != 1 || !rootDirs[0].IsDir || rootDirs[0].FileID != "root-dir" {
+		t.Fatalf("ListRootPage(dirs) = %#v, total = %d; want root-dir and total 1", rootDirs, total)
+	}
+
+	childFiles, total, err := s.ListChildrenPage(ctx, "root-dir", "report", "file", 1, 50, "name", "asc")
+	if err != nil {
+		t.Fatalf("ListChildrenPage(files) error = %v", err)
+	}
+	if total != 1 || len(childFiles) != 1 || childFiles[0].FileID != "child-file-b" || childFiles[0].IsDir {
+		t.Fatalf("ListChildrenPage(files) = %#v, total = %d; want report file and total 1", childFiles, total)
+	}
+
+	childDirs, total, err := s.ListChildrenPage(ctx, "root-dir", "", "dir", 1, 50, "name", "asc")
+	if err != nil {
+		t.Fatalf("ListChildrenPage(dirs) error = %v", err)
+	}
+	if total != 1 || len(childDirs) != 1 || !childDirs[0].IsDir || childDirs[0].FileID != "child-dir" {
+		t.Fatalf("ListChildrenPage(dirs) = %#v, total = %d; want nested directory and total 1", childDirs, total)
+	}
+}
+
 func TestSQLiteStore_DeleteFile(t *testing.T) {
 	s := newTestSQLite(t)
 	ctx := context.Background()

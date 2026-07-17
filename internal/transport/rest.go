@@ -160,6 +160,10 @@ func (h *RESTHandler) DeleteFile(w http.ResponseWriter, r *http.Request) {
 func (h *RESTHandler) ListDir(w http.ResponseWriter, r *http.Request) {
 	parentID := r.URL.Query().Get("parent")
 	search := r.URL.Query().Get("search")
+	fileType := r.URL.Query().Get("type")
+	if fileType != "dir" && fileType != "file" {
+		fileType = ""
+	}
 	namespace := GetNamespace(r.Context())
 
 	// 分页参数
@@ -183,7 +187,7 @@ func (h *RESTHandler) ListDir(w http.ResponseWriter, r *http.Request) {
 		sortOrder = "asc"
 	}
 
-	dir, children, total, err := h.downloadSvc.ListDirPage(r.Context(), parentID, namespace, search, page, perPage, sortBy, sortOrder)
+	dir, children, total, err := h.downloadSvc.ListDirPage(r.Context(), parentID, namespace, search, fileType, page, perPage, sortBy, sortOrder)
 	if err != nil {
 		respondError(w, domainErrorToStatus(err), err)
 		return

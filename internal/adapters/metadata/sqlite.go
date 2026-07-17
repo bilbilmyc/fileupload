@@ -207,8 +207,21 @@ func (s *SQLiteStore) GetFileByPath(_ context.Context, namespace, path string) (
 	return scanFile(row)
 }
 
+// sqliteFileTypeClause returns a fixed SQL predicate for the supported list filters.
+// It never interpolates request data into SQL.
+func sqliteFileTypeClause(fileType string) string {
+	switch fileType {
+	case "dir":
+		return " AND is_dir = 1"
+	case "file":
+		return " AND is_dir = 0"
+	default:
+		return ""
+	}
+}
+
 // ListChildren 列目录子节点，支持可选搜索
-func (s *SQLiteStore) ListChildrenPage(ctx context.Context, parentID string, search string, page, perPage int, sortBy, sortOrder string) ([]*domain.FileMetadata, int, error) {
+func (s *SQLiteStore) ListChildrenPage(ctx context.Context, parentID string, search, fileType string, page, perPage int, sortBy, sortOrder string) ([]*domain.FileMetadata, int, error) {
 	// Validate sort
 	safeSort := "name"
 	switch sortBy {
@@ -232,7 +245,10 @@ func (s *SQLiteStore) ListChildrenPage(ctx context.Context, parentID string, sea
 		countSQL += " AND name LIKE ?"
 		args = append(args, "%"+search+"%")
 	}
-	s.db.QueryRowContext(ctx, countSQL, args...).Scan(&total)
+	countSQL += sqliteFileTypeClause(fileType)
+	if err := s.db.QueryRowContext(ctx, countSQL, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
 
 	// Query with limit
 	sql := fmt.Sprintf("SELECT file_id, sha256, name, path, size, namespace, is_dir, parent_id, created_at FROM files WHERE parent_id=? AND deleted_at IS NULL")
@@ -241,7 +257,8 @@ func (s *SQLiteStore) ListChildrenPage(ctx context.Context, parentID string, sea
 		sql += " AND name LIKE ?"
 		searchArgs = append(searchArgs, "%"+search+"%")
 	}
-	sql += fmt.Sprintf(" ORDER BY %s %s LIMIT ? OFFSET ?", safeSort, order)
+	sql += sqliteFileTypeClause(fileType)
+	sql += fmt.Sprintf(" ORDER BY %s %s, file_id ASC LIMIT ? OFFSET ?", safeSort, order)
 	searchArgs = append(searchArgs, perPage, offset)
 	rows, err := s.db.QueryContext(ctx, sql, searchArgs...)
 	if err != nil {
@@ -354,7 +371,7 @@ func (s *SQLiteStore) ListFilesByBlob(_ context.Context, sha256 string) ([]*doma
 }
 
 // ListRoot 列 root 节点（parent_id IS NULL 且 namespace 匹配），支持可选搜索
-func (s *SQLiteStore) ListRootPage(ctx context.Context, namespace string, search string, page, perPage int, sortBy, sortOrder string) ([]*domain.FileMetadata, int, error) {
+func (s *SQLiteStore) ListRootPage(ctx context.Context, namespace string, search, fileType string, page, perPage int, sortBy, sortOrder string) ([]*domain.FileMetadata, int, error) {
 	safeSort := "name"
 	switch sortBy {
 	case "name", "size", "created_at":
@@ -376,7 +393,10 @@ func (s *SQLiteStore) ListRootPage(ctx context.Context, namespace string, search
 		countSQL += " AND name LIKE ?"
 		args = append(args, "%"+search+"%")
 	}
-	s.db.QueryRowContext(ctx, countSQL, args...).Scan(&total)
+	countSQL += sqliteFileTypeClause(fileType)
+	if err := s.db.QueryRowContext(ctx, countSQL, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
 
 	sql := fmt.Sprintf("SELECT file_id, sha256, name, path, size, namespace, is_dir, parent_id, created_at FROM files WHERE (parent_id IS NULL OR parent_id='') AND namespace=? AND deleted_at IS NULL")
 	searchArgs := []any{namespace}
@@ -384,7 +404,8 @@ func (s *SQLiteStore) ListRootPage(ctx context.Context, namespace string, search
 		sql += " AND name LIKE ?"
 		searchArgs = append(searchArgs, "%"+search+"%")
 	}
-	sql += fmt.Sprintf(" ORDER BY %s %s LIMIT ? OFFSET ?", safeSort, order)
+	sql += sqliteFileTypeClause(fileType)
+	sql += fmt.Sprintf(" ORDER BY %s %s, file_id ASC LIMIT ? OFFSET ?", safeSort, order)
 	searchArgs = append(searchArgs, perPage, offset)
 	rows, err := s.db.QueryContext(ctx, sql, searchArgs...)
 	if err != nil {

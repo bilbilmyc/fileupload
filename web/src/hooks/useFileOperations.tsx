@@ -29,7 +29,7 @@ function useDebouncedValue<T>(value: T, delay: number) {
 }
 
 export function useFileOperations(_namespace?: string) {
-  const [listedFiles, setListedFiles] = useState<FileItem[]>([])
+  const [files, setFiles] = useState<FileItem[]>([])
   const [loading, setLoading] = useState(false)
   const requestIdRef = useRef(0)
   const [parentName, setParentName] = useState<string>('')
@@ -43,12 +43,6 @@ export function useFileOperations(_namespace?: string) {
   const { directory: currentDir, search, typeFilter, page, sortBy, sortOrder } = query
   const debouncedSearch = useDebouncedValue(search, 300)
   const searchPending = search !== debouncedSearch
-
-  const files = useMemo(() => {
-    if (typeFilter === 'dir') return listedFiles.filter(file => file.is_dir)
-    if (typeFilter === 'file') return listedFiles.filter(file => !file.is_dir)
-    return listedFiles
-  }, [listedFiles, typeFilter])
 
   const updateQuery = useCallback((patch: Partial<FileListQuery>, replace = false) => {
     setSelectedRowKeys([])
@@ -68,11 +62,12 @@ export function useFileOperations(_namespace?: string) {
         per_page: perPage,
         sort_by: sortBy,
         sort_order: sortOrder,
+        type: typeFilter || undefined,
       })
       if (requestId !== requestIdRef.current) return
 
       const items = res.children || []
-      setListedFiles(items)
+      setFiles(items)
       setTotal(res.total || items.length)
       if (res.dir && typeof res.dir === 'object' && 'name' in res.dir) {
         const dir = res.dir as { name: string; parent_id?: string | null }
@@ -93,7 +88,7 @@ export function useFileOperations(_namespace?: string) {
         setLoading(false)
       }
     }
-  }, [currentDir, page, sortBy, sortOrder])
+  }, [currentDir, page, sortBy, sortOrder, typeFilter])
 
   // The normal query path waits for the current text to settle, so sorting or paging
   // while typing cannot issue a request with a stale search term.

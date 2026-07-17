@@ -264,9 +264,9 @@ func (s *DownloadService) GetNamespaceUsage(ctx context.Context, namespace strin
 }
 
 // ListDirPage 列目录，支持分页+排序
-func (s *DownloadService) ListDirPage(ctx context.Context, parentID, namespace, search string, page, perPage int, sortBy, sortOrder string) (*FileMetadata, []*FileMetadata, int, error) {
+func (s *DownloadService) ListDirPage(ctx context.Context, parentID, namespace, search, fileType string, page, perPage int, sortBy, sortOrder string) (*FileMetadata, []*FileMetadata, int, error) {
 	if parentID == "" || parentID == "/" || parentID == "root" {
-		children, total, err := s.meta.ListRootPage(ctx, namespace, search, page, perPage, sortBy, sortOrder)
+		children, total, err := s.meta.ListRootPage(ctx, namespace, search, fileType, page, perPage, sortBy, sortOrder)
 		if err != nil {
 			return nil, nil, 0, fmt.Errorf("列根目录: %w", err)
 		}
@@ -282,7 +282,7 @@ func (s *DownloadService) ListDirPage(ctx context.Context, parentID, namespace, 
 	if dir.Namespace != namespace {
 		return nil, nil, 0, ErrForbidden
 	}
-	children, total, err := s.meta.ListChildrenPage(ctx, parentID, search, page, perPage, sortBy, sortOrder)
+	children, total, err := s.meta.ListChildrenPage(ctx, parentID, search, fileType, page, perPage, sortBy, sortOrder)
 	if err != nil {
 		return nil, nil, 0, fmt.Errorf("列子节点: %w", err)
 	}
