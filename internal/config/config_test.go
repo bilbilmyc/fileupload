@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 func TestDefaultConfig(t *testing.T) {
@@ -292,5 +294,51 @@ func TestPGConfig_BuildDSN_SpecialChars(t *testing.T) {
 	expectedPW := "@#?& ="
 	if pw != expectedPW {
 		t.Errorf("password roundtrip = %s, want %s", pw, expectedPW)
+	}
+}
+
+func TestLoad_EnvOverridesAreIndependentOfStaticAuthToken(t *testing.T) {
+	t.Setenv("FILEUPLOAD_STORAGE_TYPE", "s3")
+	t.Setenv("FILEUPLOAD_REDIS_DB", "4")
+	t.Setenv("FILEUPLOAD_REDIS_PREFIX", "prod:")
+	t.Setenv("FILEUPLOAD_JWT_SECRET", "jwt-secret-from-environment")
+	t.Setenv("FILEUPLOAD_JWT_EXPIRY", "12")
+	t.Setenv("FILEUPLOAD_AUTH_ENFORCE", "true")
+
+	cfg, err := Load(t.TempDir())
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Storage.Type != "s3" || cfg.Redis.DB != 4 || cfg.Redis.Prefix != "prod:" {
+		t.Fatalf("independent env overrides were not applied: %+v", cfg)
+	}
+	if cfg.Auth.JWTSecret != "jwt-secret-from-environment" || cfg.Auth.JWTExpiry != 12 || !cfg.Auth.Enforce {
+		t.Fatalf("JWT env overrides were not applied: %+v", cfg.Auth)
+	}
+	if cfg.Auth.Enabled {
+		t.Fatal("auth.enabled should remain false without FILEUPLOAD_AUTH_TOKEN")
+	}
+}
+
+func TestValidateForRuntime_Production(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Server.Environment = "production"
+	if err := cfg.ValidateForRuntime(); err == nil {
+		t.Fatal("expected insecure production configuration to fail")
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte("not-a-real-production-password"), bcrypt.MinCost)
+	if err != nil {
+		t.Fatalf("GenerateFromPassword() error = %v", err)
+	}
+	cfg.Auth.Enforce = true
+	cfg.Auth.JWTSecret = "a-very-long-production-jwt-secret-that-is-over-32-characters"
+	cfg.Auth.Users = []AuthUserConfig{{
+		ID: "u-admin", Username: "admin", PasswordHash: string(hash), Namespace: "tenant-a", Roles: []string{"admin"},
+	}}
+	cfg.CORS.AllowedOrigins = []string{"https://files.example.com"}
+	cfg.Server.MetricsToken = "metrics-token-that-is-long-enough"
+	if err := cfg.ValidateForRuntime(); err != nil {
+		t.Fatalf("ValidateForRuntime() error = %v", err)
 	}
 }

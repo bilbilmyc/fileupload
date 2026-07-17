@@ -27,7 +27,7 @@ func TestJWTValidate_SkippedWhenNoAuthSvc(t *testing.T) {
 
 func TestJWTValidate_NoHeaderPassesThrough(t *testing.T) {
 	mw := NewMiddleware()
-	jwtSvc := auth.NewJWTService("test-secret", time.Hour, nil)
+	jwtSvc := auth.NewJWTService("test-secret", time.Hour, auth.DevelopmentUsers())
 	mw.WithJWT(jwtSvc)
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -49,7 +49,7 @@ func TestJWTValidate_NoHeaderPassesThrough(t *testing.T) {
 
 func TestJWTValidate_ValidToken(t *testing.T) {
 	mw := NewMiddleware()
-	jwtSvc := auth.NewJWTService("test-secret", time.Hour, nil)
+	jwtSvc := auth.NewJWTService("test-secret", time.Hour, auth.DevelopmentUsers())
 	mw.WithJWT(jwtSvc)
 
 	pair, _ := jwtSvc.Login(context.Background(), "admin", "admin123")
@@ -77,7 +77,7 @@ func TestJWTValidate_ValidToken(t *testing.T) {
 
 func TestJWTValidate_InvalidToken(t *testing.T) {
 	mw := NewMiddleware()
-	jwtSvc := auth.NewJWTService("test-secret", time.Hour, nil)
+	jwtSvc := auth.NewJWTService("test-secret", time.Hour, auth.DevelopmentUsers())
 	mw.WithJWT(jwtSvc)
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -96,7 +96,7 @@ func TestJWTValidate_InvalidToken(t *testing.T) {
 
 func TestJWTValidate_NonBearerHeader(t *testing.T) {
 	mw := NewMiddleware()
-	jwtSvc := auth.NewJWTService("test-secret", time.Hour, nil)
+	jwtSvc := auth.NewJWTService("test-secret", time.Hour, auth.DevelopmentUsers())
 	mw.WithJWT(jwtSvc)
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

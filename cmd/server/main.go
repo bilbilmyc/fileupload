@@ -43,6 +43,10 @@ func main() {
 		log.Fatalf("加载配置失败: %v", err)
 	}
 
+	if err := cfg.ValidateForRuntime(); err != nil {
+		log.Fatalf("配置安全校验失败: %v", err)
+	}
+
 	deps, err := buildDeps(&cfg)
 	if err != nil {
 		log.Fatalf("装配依赖: %v", err)
@@ -137,28 +141,45 @@ func buildDeps(cfg *config.Config) (Deps, error) {
 	}
 	hash := hasher.NewSHA256Hasher()
 
-	// JWT（可选）
+	// JWT（可选）。本地用户由配置显式提供；默认管理员仅可在开发环境显式启用。
 	var authSvc domain.AuthService
 	if cfg.Auth.JWTSecret != "" {
+		users := make([]domain.AuthUser, 0, len(cfg.Auth.Users))
+		for _, user := range cfg.Auth.Users {
+			users = append(users, domain.AuthUser{
+				ID:        user.ID,
+				Username:  user.Username,
+				Password:  user.PasswordHash,
+				Namespace: user.Namespace,
+				Roles:     user.Roles,
+			})
+		}
+		if cfg.Auth.DevAdminEnabled {
+			users = append(users, auth.DevelopmentUsers()...)
+		}
 		jwtExpiry := time.Duration(cfg.Auth.JWTExpiry) * time.Hour
-		authSvc = auth.NewJWTService(cfg.Auth.JWTSecret, jwtExpiry, nil)
+		authSvc = auth.NewJWTService(cfg.Auth.JWTSecret, jwtExpiry, users)
 	}
 
 	workerPool := domain.NewSimpleWorkerPool(cfg.Upload.WorkerPoolSize, cfg.Upload.WorkerQueueSize)
 
 	return Deps{
-		Storage:        localFS,
-		TempFS:         tempFS,
-		Metadata:       metaFacade,
-		Compressor:     compress,
-		Hasher:         hash,
-		WorkerPool:     workerPool,
-		Auth:           authSvc,
-		UploadCfg:      domain.UploadConfig{SessionTTL: cfg.Upload.SessionTTL(), DataDir: cfg.Storage.DataDir, DefaultChunkSize: cfg.Upload.DefaultChunkSize, NamespaceQuotaBytes: cfg.Upload.NamespaceQuotaBytes},
-		DownloadCfg:    domain.DownloadConfig{DataDir: cfg.Storage.DataDir},
-		AuthCfg:        transport.AuthConfig{Enabled: cfg.Auth.Enabled, Token: cfg.Auth.Token, Header: cfg.Auth.Header},
-		CORSOrigins:    cfg.CORS.AllowedOrigins,
-		ServerCfg:      ServerConfig{Addr: cfg.Server.Addr, ReadTimeout: time.Duration(cfg.Server.ReadTimeout) * time.Second, WriteTimeout: time.Duration(cfg.Server.WriteTimeout) * time.Second, IdleTimeout: time.Duration(cfg.Server.IdleTimeout) * time.Second},
+		Storage:     localFS,
+		TempFS:      tempFS,
+		Metadata:    metaFacade,
+		Compressor:  compress,
+		Hasher:      hash,
+		WorkerPool:  workerPool,
+		Auth:        authSvc,
+		UploadCfg:   domain.UploadConfig{SessionTTL: cfg.Upload.SessionTTL(), DataDir: cfg.Storage.DataDir, DefaultChunkSize: cfg.Upload.DefaultChunkSize, NamespaceQuotaBytes: cfg.Upload.NamespaceQuotaBytes},
+		DownloadCfg: domain.DownloadConfig{DataDir: cfg.Storage.DataDir},
+		AuthCfg:     transport.AuthConfig{Enabled: cfg.Auth.Enabled, Enforce: cfg.Auth.Enforce, Token: cfg.Auth.Token, Header: cfg.Auth.Header},
+		CORSOrigins: cfg.CORS.AllowedOrigins,
+		ServerCfg: ServerConfig{
+			Addr: cfg.Server.Addr, ReadTimeout: time.Duration(cfg.Server.ReadTimeout) * time.Second,
+			WriteTimeout: time.Duration(cfg.Server.WriteTimeout) * time.Second, IdleTimeout: time.Duration(cfg.Server.IdleTimeout) * time.Second,
+			DebugEndpoints: cfg.Server.DebugEndpoints, MetricsToken: cfg.Server.MetricsToken,
+		},
 		ReaperInterval: time.Minute,
 		TrashRetention: time.Duration(cfg.Upload.TrashRetentionHours) * time.Hour,
 	}, nil

@@ -23,6 +23,7 @@ import (
 	"github.com/klauspost/compress/zstd"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/bilbilmyc/fileupload/internal/adapters/auth"
 	"github.com/bilbilmyc/fileupload/internal/adapters/compressor"
 	"github.com/bilbilmyc/fileupload/internal/adapters/hasher"
 	"github.com/bilbilmyc/fileupload/internal/adapters/metadata"
@@ -33,12 +34,13 @@ import (
 
 // e2eFixture 全链路集成测试的测试夹具
 type e2eFixture struct {
-	t       *testing.T
-	baseURL string
-	client  *http.Client
-	dataDir string
-	tempDir string
-	srv     *httptest.Server
+	t          *testing.T
+	baseURL    string
+	client     *http.Client
+	dataDir    string
+	tempDir    string
+	adminToken string
+	srv        *httptest.Server
 
 	// 直接访问，用于断言
 	meta domain.Metadata
@@ -62,7 +64,6 @@ func newE2EFixture(t *testing.T) *e2eFixture {
 	if err != nil {
 		t.Fatalf("NewLocalFS(tempDir): %v", err)
 	}
-
 
 	// 3. miniredis（无需外部 Redis 进程）
 	mr, err := miniredis.Run()
@@ -107,7 +108,14 @@ func newE2EFixture(t *testing.T) *e2eFixture {
 	scanner := lifecycle.NewConsistencyScanner(metaFacade, localFS, dataDir, tempDir)
 
 	// 10. 传输层
-	mw := NewMiddleware().WithAuth(AuthConfig{Enabled: false})
+	jwtSvc := auth.NewJWTService("e2e-test-secret", time.Hour, []domain.AuthUser{{
+		ID: "admin", Username: "admin", Password: "password", Namespace: "default", Roles: []string{"admin"},
+	}})
+	adminPair, err := jwtSvc.Login(context.Background(), "admin", "password")
+	if err != nil {
+		t.Fatalf("JWT login: %v", err)
+	}
+	mw := NewMiddleware().WithAuth(AuthConfig{Enabled: false}).WithJWT(jwtSvc)
 	tusHandler := NewTusHandler(uploadSvc)
 	restHandler := NewRESTHandler(uploadSvc, downloadSvc)
 	downloadHandler := NewDownloadHandler(downloadSvc)
@@ -118,13 +126,14 @@ func newE2EFixture(t *testing.T) *e2eFixture {
 	t.Cleanup(srv.Close)
 
 	return &e2eFixture{
-		t:       t,
-		baseURL: srv.URL,
-		client:  srv.Client(),
-		srv:     srv,
-		dataDir: dataDir,
-		tempDir: tempDir,
-		meta:    metaFacade,
+		t:          t,
+		baseURL:    srv.URL,
+		client:     srv.Client(),
+		srv:        srv,
+		dataDir:    dataDir,
+		tempDir:    tempDir,
+		adminToken: adminPair.AccessToken,
+		meta:       metaFacade,
 	}
 }
 
@@ -184,9 +193,9 @@ func TestE2E_UploadAndDownload(t *testing.T) {
 
 	// === 1. Init upload ===
 	initResp := f.doReq("POST", "/v1/uploads/init?size="+fmt.Sprint(len(content)), nil, map[string]string{
-		"X-SHA256":     contentSHA,
-		"X-File-Name":  "e2e-test.txt",
-		"X-Namespace":  namespace,
+		"X-SHA256":      contentSHA,
+		"X-File-Name":   "e2e-test.txt",
+		"X-Namespace":   namespace,
 		"X-Compression": "none",
 	})
 	if initResp.StatusCode != http.StatusCreated {
@@ -206,8 +215,8 @@ func TestE2E_UploadAndDownload(t *testing.T) {
 	// === 2. Upload chunk ===
 	chunkResp := f.doReq("PUT", "/v1/uploads/"+sessionID+"/chunks/0",
 		bytes.NewReader(content), map[string]string{
-			"X-Namespace":    namespace,
-			"Content-Type":   "application/octet-stream",
+			"X-Namespace":  namespace,
+			"Content-Type": "application/octet-stream",
 		})
 	if chunkResp.StatusCode != http.StatusOK {
 		t.Fatalf("UploadChunk status = %d, body=%s", chunkResp.StatusCode, readBody(chunkResp))
@@ -352,9 +361,9 @@ func TestE2E_DirUploadAndDownload(t *testing.T) {
 	for i, c := range [][]byte{contentA, contentB} {
 		// Init
 		initResp := f.doReq("POST", "/v1/uploads/init?size="+fmt.Sprint(len(c)), nil, map[string]string{
-			"X-SHA256":     sha256Hex(c),
-			"X-File-Name":  fmt.Sprintf("file_%d.txt", i),
-			"X-Namespace":  namespace,
+			"X-SHA256":      sha256Hex(c),
+			"X-File-Name":   fmt.Sprintf("file_%d.txt", i),
+			"X-Namespace":   namespace,
 			"X-Compression": "none",
 		})
 		if initResp.StatusCode != http.StatusCreated {
@@ -394,7 +403,7 @@ func TestE2E_DirUploadAndDownload(t *testing.T) {
 	}
 	manifestBody, _ := json.Marshal(manifest)
 	dirResp := f.doReq("POST", "/v1/dirs", bytes.NewReader(manifestBody), map[string]string{
-		"X-Namespace": namespace,
+		"X-Namespace":  namespace,
 		"Content-Type": "application/json",
 	})
 	if dirResp.StatusCode != http.StatusCreated {
@@ -425,29 +434,29 @@ func TestE2E_DirUploadAndDownload(t *testing.T) {
 	json.NewDecoder(lsResp.Body).Decode(&lsResult)
 	lsResp.Body.Close()
 	children := lsResult["children"].([]any)
-		if len(children) != 1 {
-			t.Errorf("ListDir children = %d, want 1 (subdir dir node)", len(children))
-		}
-		firstChild := children[0].(map[string]any)
-		subdirID, ok := firstChild["file_id"].(string)
-		if !ok || !firstChild["is_dir"].(bool) {
-			t.Fatal("expected subdir directory node")
-		}
+	if len(children) != 1 {
+		t.Errorf("ListDir children = %d, want 1 (subdir dir node)", len(children))
+	}
+	firstChild := children[0].(map[string]any)
+	subdirID, ok := firstChild["file_id"].(string)
+	if !ok || !firstChild["is_dir"].(bool) {
+		t.Fatal("expected subdir directory node")
+	}
 
-		// List subdir
-		subResp := f.doReq("GET", "/v1/ls?parent="+subdirID, nil, map[string]string{
-			"X-Namespace": namespace,
-		})
-		if subResp.StatusCode != http.StatusOK {
-			t.Fatalf("ListSubdir status = %d", subResp.StatusCode)
-		}
-		var subResult map[string]any
-		json.NewDecoder(subResp.Body).Decode(&subResult)
-		subResp.Body.Close()
-		subChildren := subResult["children"].([]any)
-		if len(subChildren) != 2 {
-			t.Errorf("Subdir children = %d, want 2 (a.txt, b.txt)", len(subChildren))
-		}
+	// List subdir
+	subResp := f.doReq("GET", "/v1/ls?parent="+subdirID, nil, map[string]string{
+		"X-Namespace": namespace,
+	})
+	if subResp.StatusCode != http.StatusOK {
+		t.Fatalf("ListSubdir status = %d", subResp.StatusCode)
+	}
+	var subResult map[string]any
+	json.NewDecoder(subResp.Body).Decode(&subResult)
+	subResp.Body.Close()
+	subChildren := subResult["children"].([]any)
+	if len(subChildren) != 2 {
+		t.Errorf("Subdir children = %d, want 2 (a.txt, b.txt)", len(subChildren))
+	}
 
 	// === 5. Download dir (just verify it starts streaming) ===
 	dlResp := f.doReq("GET", "/v1/dirs/"+dirID+"?format=tar.gz", nil, map[string]string{
@@ -781,7 +790,7 @@ func TestE2E_AdminScan(t *testing.T) {
 	os.WriteFile(orphanPart, []byte("orphan"), 0644)
 
 	// Run scan
-	scanResp := f.doReq("POST", "/v1/admin/scan", nil, nil)
+	scanResp := f.doReq("POST", "/v1/admin/scan", nil, map[string]string{"Authorization": "Bearer " + f.adminToken})
 	if scanResp.StatusCode != http.StatusOK {
 		t.Fatalf("Admin scan status = %d, want 200; body=%s", scanResp.StatusCode, readBody(scanResp))
 	}
@@ -808,9 +817,9 @@ func TestE2E_SecPassDedup(t *testing.T) {
 
 	// 第一次上传完整流程
 	initResp1 := f.doReq("POST", "/v1/uploads/init?size="+fmt.Sprint(len(content)), nil, map[string]string{
-		"X-SHA256":     sameSHA,
-		"X-File-Name":  "original.txt",
-		"X-Namespace":  namespace,
+		"X-SHA256":      sameSHA,
+		"X-File-Name":   "original.txt",
+		"X-Namespace":   namespace,
 		"X-Compression": "none",
 	})
 	if initResp1.StatusCode != http.StatusCreated {
@@ -849,12 +858,12 @@ func TestE2E_ErrorCases(t *testing.T) {
 	f := newE2EFixture(t)
 
 	tests := []struct {
-		name   string
-		method string
-		path   string
+		name    string
+		method  string
+		path    string
 		headers map[string]string
-		body   io.Reader
-		want   int
+		body    io.Reader
+		want    int
 	}{
 		{
 			name:   "Init without size",
@@ -863,32 +872,32 @@ func TestE2E_ErrorCases(t *testing.T) {
 			want:   http.StatusBadRequest,
 		},
 		{
-			name:   "Finalize nonexistent session",
-			method: "POST",
-			path:   "/v1/uploads/nonexistent-session-id/finalize",
+			name:    "Finalize nonexistent session",
+			method:  "POST",
+			path:    "/v1/uploads/nonexistent-session-id/finalize",
 			headers: map[string]string{"X-Namespace": "ns"},
-			want:   http.StatusNotFound,
+			want:    http.StatusNotFound,
 		},
 		{
-			name:   "Download nonexistent file",
-			method: "GET",
-			path:   "/v1/files/nonexistent-file-id",
+			name:    "Download nonexistent file",
+			method:  "GET",
+			path:    "/v1/files/nonexistent-file-id",
 			headers: map[string]string{"X-Namespace": "ns"},
-			want:   http.StatusNotFound,
+			want:    http.StatusNotFound,
 		},
 		{
-			name:   "Stat nonexistent file",
-			method: "GET",
-			path:   "/v1/stat/nonexistent-id",
+			name:    "Stat nonexistent file",
+			method:  "GET",
+			path:    "/v1/stat/nonexistent-id",
 			headers: map[string]string{"X-Namespace": "ns"},
-			want:   http.StatusNotFound,
+			want:    http.StatusNotFound,
 		},
 		{
-			name:   "Delete nonexistent file",
-			method: "DELETE",
-			path:   "/v1/files/nonexistent",
+			name:    "Delete nonexistent file",
+			method:  "DELETE",
+			path:    "/v1/files/nonexistent",
 			headers: map[string]string{"X-Namespace": "ns"},
-			want:   http.StatusNotFound,
+			want:    http.StatusNotFound,
 		},
 		{
 			name:   "CheckExists no sha256",
@@ -897,11 +906,11 @@ func TestE2E_ErrorCases(t *testing.T) {
 			want:   http.StatusBadRequest,
 		},
 		{
-			name:   "Upload chunk nonexistent session",
-			method: "PUT",
-			path:   "/v1/uploads/x/chunks/0",
+			name:    "Upload chunk nonexistent session",
+			method:  "PUT",
+			path:    "/v1/uploads/x/chunks/0",
 			headers: map[string]string{"X-Namespace": "ns"},
-			want:   http.StatusNotFound,
+			want:    http.StatusNotFound,
 		},
 	}
 

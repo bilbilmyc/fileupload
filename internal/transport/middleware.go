@@ -5,6 +5,7 @@ package transport
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -22,17 +23,20 @@ import (
 type ctxKey string
 
 const (
-	ctxKeyRequestID  ctxKey = "request_id"
-	ctxKeyNamespace  ctxKey = "namespace"
-	ctxKeyAuthClaims ctxKey = "auth_claims"
+	ctxKeyRequestID        ctxKey = "request_id"
+	ctxKeyNamespace        ctxKey = "namespace"
+	ctxKeyAuthClaims       ctxKey = "auth_claims"
+	ctxKeyStaticAuthorized ctxKey = "static_authorized"
 )
 
 // Middleware 中间件集合
 type Middleware struct {
-	rateLimiter *RateLimiterGroup
-	authCfg     AuthConfig
-	authSvc     domain.AuthService // JWT 鉴权服务
-	corsOrigins []string           // CORS 允许的源
+	rateLimiter    *RateLimiterGroup
+	authCfg        AuthConfig
+	authSvc        domain.AuthService // JWT 鉴权服务
+	corsOrigins    []string           // CORS 允许的源
+	debugEndpoints bool
+	metricsToken   string
 }
 
 // AuthConfig 认证中间件配置
@@ -67,6 +71,16 @@ func (m *Middleware) WithCORS(origins []string) *Middleware {
 	m.corsOrigins = origins
 	return m
 }
+
+// WithObservability 配置调试与指标端点。Debug 端点默认不注册；MetricsToken 为空时仅适合本地开发。
+func (m *Middleware) WithObservability(debugEndpoints bool, metricsToken string) *Middleware {
+	m.debugEndpoints = debugEndpoints
+	m.metricsToken = metricsToken
+	return m
+}
+
+// DebugEndpointsEnabled 返回是否应注册 pprof / expvar 端点。
+func (m *Middleware) DebugEndpointsEnabled() bool { return m.debugEndpoints }
 
 // CORS CORS 跨域中间件
 func (m *Middleware) CORS(next http.Handler) http.Handler {
@@ -137,15 +151,18 @@ func (m *Middleware) RequestID(next http.Handler) http.Handler {
 	})
 }
 
-// Namespace 从请求头读取 namespace（由上游网关注入）
+// Namespace 注入请求命名空间。JWT 用户只能使用 token 内声明的 namespace；
+// 只有 admin 可以显式切换 namespace。未使用 JWT 时保留上游网关注入头的兼容行为。
 func (m *Middleware) Namespace(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ns := r.Header.Get("X-User-ID")
-		if ns == "" {
-			ns = r.Header.Get("X-Namespace")
-		}
-		if ns == "" {
-			ns = r.URL.Query().Get("namespace")
+		requested := requestedNamespace(r)
+		claims := GetAuthClaims(r.Context())
+		ns := requested
+		if claims != nil {
+			ns = claims.Namespace
+			if hasRole(claims, "admin") && requested != "" {
+				ns = requested
+			}
 		}
 		if ns == "" {
 			ns = "default"
@@ -153,6 +170,16 @@ func (m *Middleware) Namespace(next http.Handler) http.Handler {
 		ctx := context.WithValue(r.Context(), ctxKeyNamespace, ns)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+func requestedNamespace(r *http.Request) string {
+	if ns := r.Header.Get("X-User-ID"); ns != "" {
+		return ns
+	}
+	if ns := r.Header.Get("X-Namespace"); ns != "" {
+		return ns
+	}
+	return r.URL.Query().Get("namespace")
 }
 
 // RateLimit 令牌桶限流（按 namespace / IP 隔离）
@@ -307,9 +334,7 @@ func (m *Middleware) Auth(next http.Handler) http.Handler {
 			return
 		}
 
-		// 健康检查和前端静态资源免认证
-		path := r.URL.Path
-		if path == "/health" || path == "/" || strings.HasPrefix(path, "/s/") {
+		if isPublicPath(r.URL.Path) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -322,14 +347,15 @@ func (m *Middleware) Auth(next http.Handler) http.Handler {
 			})
 			return
 		}
-		if token != m.authCfg.Token {
+		if subtle.ConstantTimeCompare([]byte(token), []byte(m.authCfg.Token)) != 1 {
 			respondJSON(w, http.StatusForbidden, map[string]string{
 				"error": "认证令牌无效",
 				"code":  "auth_invalid",
 			})
 			return
 		}
-		next.ServeHTTP(w, r)
+		ctx := context.WithValue(r.Context(), ctxKeyStaticAuthorized, true)
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
@@ -361,14 +387,21 @@ func (m *Middleware) JWTValidate(next http.Handler) http.Handler {
 
 		authHeader := r.Header.Get("Authorization")
 		if authHeader == "" {
-			// 允许未认证请求通过（namespace 从 X-Namespace 头获取）
+			if m.authCfg.Enforce && !isPublicPath(r.URL.Path) {
+				respondJSON(w, http.StatusUnauthorized, map[string]string{"error": "缺少 Bearer token", "code": "token_required"})
+				return
+			}
 			next.ServeHTTP(w, r)
 			return
 		}
 
 		// 解析 Bearer token
 		tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
-		if tokenStr == authHeader {
+		if tokenStr == authHeader || strings.TrimSpace(tokenStr) == "" {
+			if m.authCfg.Enforce && !isPublicPath(r.URL.Path) {
+				respondJSON(w, http.StatusUnauthorized, map[string]string{"error": "Bearer token 格式无效", "code": "token_invalid"})
+				return
+			}
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -390,6 +423,65 @@ func (m *Middleware) JWTValidate(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// RequireRole 限制路由仅允许拥有指定 JWT role 的用户访问。
+// 静态服务令牌验证成功后也视为单租户管理员，以兼容已有单令牌部署；
+// 生产多租户应始终启用 JWT，namespace 会以 JWT claim 为准。
+func (m *Middleware) RequireRole(role string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if authorized, _ := r.Context().Value(ctxKeyStaticAuthorized).(bool); authorized {
+			next.ServeHTTP(w, r)
+			return
+		}
+		claims := GetAuthClaims(r.Context())
+		if claims == nil {
+			respondJSON(w, http.StatusUnauthorized, map[string]string{"error": "需要认证", "code": "auth_required"})
+			return
+		}
+		if !hasRole(claims, role) {
+			respondJSON(w, http.StatusForbidden, map[string]string{"error": "权限不足", "code": "forbidden"})
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// MetricsAuth 使用独立的 Bearer token 保护 Prometheus 指标端点。
+func (m *Middleware) MetricsAuth(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if m.metricsToken == "" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		authHeader := r.Header.Get("Authorization")
+		if !strings.HasPrefix(authHeader, "Bearer ") {
+			respondJSON(w, http.StatusUnauthorized, map[string]string{"error": "指标端点认证失败", "code": "metrics_auth_required"})
+			return
+		}
+		token := strings.TrimPrefix(authHeader, "Bearer ")
+		if subtle.ConstantTimeCompare([]byte(token), []byte(m.metricsToken)) != 1 {
+			respondJSON(w, http.StatusUnauthorized, map[string]string{"error": "指标端点认证失败", "code": "metrics_auth_required"})
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func hasRole(claims *domain.AuthClaims, role string) bool {
+	for _, candidate := range claims.Roles {
+		if candidate == role {
+			return true
+		}
+	}
+	return false
+}
+
+func isPublicPath(path string) bool {
+	return path == "/health" || path == "/" || path == "/metrics" ||
+		path == "/v1/auth/login" || path == "/v1/auth/refresh" ||
+		strings.HasPrefix(path, "/s/") || strings.HasPrefix(path, "/assets/") ||
+		path == "/favicon.ico"
 }
 
 // ---- JWT Claims Context Helpers ----

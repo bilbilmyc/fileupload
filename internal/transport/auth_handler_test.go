@@ -14,7 +14,7 @@ import (
 )
 
 func TestAuthHandler_Login_Success(t *testing.T) {
-	jwtSvc := auth.NewJWTService("test-secret", time.Hour, nil)
+	jwtSvc := auth.NewJWTService("test-secret", time.Hour, auth.DevelopmentUsers())
 	handler := NewAuthHandler(jwtSvc)
 
 	body, _ := json.Marshal(domain.LoginRequest{Username: "admin", Password: "admin123"})
@@ -38,7 +38,7 @@ func TestAuthHandler_Login_Success(t *testing.T) {
 }
 
 func TestAuthHandler_Login_WrongPassword(t *testing.T) {
-	jwtSvc := auth.NewJWTService("test-secret", time.Hour, nil)
+	jwtSvc := auth.NewJWTService("test-secret", time.Hour, auth.DevelopmentUsers())
 	handler := NewAuthHandler(jwtSvc)
 
 	body, _ := json.Marshal(domain.LoginRequest{Username: "admin", Password: "wrong"})
@@ -53,7 +53,7 @@ func TestAuthHandler_Login_WrongPassword(t *testing.T) {
 }
 
 func TestAuthHandler_Login_EmptyFields(t *testing.T) {
-	jwtSvc := auth.NewJWTService("test-secret", time.Hour, nil)
+	jwtSvc := auth.NewJWTService("test-secret", time.Hour, auth.DevelopmentUsers())
 	handler := NewAuthHandler(jwtSvc)
 
 	tests := []domain.LoginRequest{
@@ -73,7 +73,7 @@ func TestAuthHandler_Login_EmptyFields(t *testing.T) {
 }
 
 func TestAuthHandler_Refresh(t *testing.T) {
-	jwtSvc := auth.NewJWTService("test-secret", time.Hour, nil)
+	jwtSvc := auth.NewJWTService("test-secret", time.Hour, auth.DevelopmentUsers())
 	handler := NewAuthHandler(jwtSvc)
 
 	// 先登录获取 refresh token
@@ -97,7 +97,7 @@ func TestAuthHandler_Refresh(t *testing.T) {
 }
 
 func TestAuthHandler_Refresh_Invalid(t *testing.T) {
-	jwtSvc := auth.NewJWTService("test-secret", time.Hour, nil)
+	jwtSvc := auth.NewJWTService("test-secret", time.Hour, auth.DevelopmentUsers())
 	handler := NewAuthHandler(jwtSvc)
 
 	body, _ := json.Marshal(domain.RefreshRequest{RefreshToken: "invalid-token"})
@@ -111,7 +111,7 @@ func TestAuthHandler_Refresh_Invalid(t *testing.T) {
 }
 
 func TestAuthHandler_Me_WithClaims(t *testing.T) {
-	jwtSvc := auth.NewJWTService("test-secret", time.Hour, nil)
+	jwtSvc := auth.NewJWTService("test-secret", time.Hour, auth.DevelopmentUsers())
 	handler := NewAuthHandler(jwtSvc)
 
 	// 先登录获取 token
@@ -138,7 +138,7 @@ func TestAuthHandler_Me_WithClaims(t *testing.T) {
 }
 
 func TestAuthHandler_Me_NoClaims(t *testing.T) {
-	jwtSvc := auth.NewJWTService("test-secret", time.Hour, nil)
+	jwtSvc := auth.NewJWTService("test-secret", time.Hour, auth.DevelopmentUsers())
 	handler := NewAuthHandler(jwtSvc)
 
 	req := httptest.NewRequest("GET", "/v1/auth/me", nil)

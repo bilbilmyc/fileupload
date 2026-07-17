@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/crypto/bcrypt"
 	"gopkg.in/yaml.v3"
 )
 
@@ -27,10 +28,13 @@ type Config struct {
 
 // ServerConfig HTTP 服务配置
 type ServerConfig struct {
-	Addr         string `json:"addr" yaml:"addr"`
-	ReadTimeout  int    `json:"read_timeout" yaml:"read_timeout"`
-	WriteTimeout int    `json:"write_timeout" yaml:"write_timeout"`
-	IdleTimeout  int    `json:"idle_timeout" yaml:"idle_timeout"`
+	Addr           string `json:"addr" yaml:"addr"`
+	ReadTimeout    int    `json:"read_timeout" yaml:"read_timeout"`
+	WriteTimeout   int    `json:"write_timeout" yaml:"write_timeout"`
+	IdleTimeout    int    `json:"idle_timeout" yaml:"idle_timeout"`
+	Environment    string `json:"environment" yaml:"environment"` // development / production
+	DebugEndpoints bool   `json:"debug_endpoints" yaml:"debug_endpoints"`
+	MetricsToken   string `json:"metrics_token" yaml:"metrics_token"`
 }
 
 // StorageConfig 存储配置
@@ -121,24 +125,38 @@ type CORSConfig struct {
 	AllowedOrigins []string `json:"allowed_origins" yaml:"allowed_origins"` // 允许的源，* 表示全部
 }
 
+// AuthUserConfig JWT 本地用户配置。PasswordHash 必须是 bcrypt 哈希，避免把明文密码写入生产配置。
+type AuthUserConfig struct {
+	ID           string   `json:"id" yaml:"id"`
+	Username     string   `json:"username" yaml:"username"`
+	PasswordHash string   `json:"password_hash" yaml:"password_hash"`
+	Namespace    string   `json:"namespace" yaml:"namespace"`
+	Roles        []string `json:"roles" yaml:"roles"`
+}
+
 // AuthConfig 认证配置
 type AuthConfig struct {
-	Enabled   bool   `json:"enabled" yaml:"enabled"`
-	Enforce   bool   `json:"enforce" yaml:"enforce"` // JWT 强制认证（true=未认证请求返回 401）
-	Token     string `json:"token" yaml:"token"`
-	Header    string `json:"header" yaml:"header"`
-	JWTSecret string `json:"jwt_secret" yaml:"jwt_secret"`
-	JWTExpiry int    `json:"jwt_expiry" yaml:"jwt_expiry"` // token 过期小时数
+	Enabled         bool             `json:"enabled" yaml:"enabled"`
+	Enforce         bool             `json:"enforce" yaml:"enforce"` // JWT 强制认证（true=未认证请求返回 401）
+	Token           string           `json:"token" yaml:"token"`
+	Header          string           `json:"header" yaml:"header"`
+	JWTSecret       string           `json:"jwt_secret" yaml:"jwt_secret"`
+	JWTExpiry       int              `json:"jwt_expiry" yaml:"jwt_expiry"` // token 过期小时数
+	Users           []AuthUserConfig `json:"users" yaml:"users"`
+	DevAdminEnabled bool             `json:"dev_admin_enabled" yaml:"dev_admin_enabled"`
 }
 
 // DefaultConfig 返回默认配置
 func DefaultConfig() Config {
 	return Config{
 		Server: ServerConfig{
-			Addr:         ":8080",
-			ReadTimeout:  30,
-			WriteTimeout: 300,
-			IdleTimeout:  60,
+			Addr:           ":8080",
+			ReadTimeout:    30,
+			WriteTimeout:   300,
+			IdleTimeout:    60,
+			Environment:    "development",
+			DebugEndpoints: false,
+			MetricsToken:   "",
 		},
 		Storage: StorageConfig{
 			Type:    "local",
@@ -177,7 +195,7 @@ func DefaultConfig() Config {
 			Enabled:   false,
 			Token:     "",
 			Header:    "X-Auth-Token",
-			JWTSecret: "fileupload-dev-secret-change-in-production",
+			JWTSecret: "",
 			JWTExpiry: 72,
 		},
 		CORS: CORSConfig{
@@ -317,37 +335,116 @@ func loadEnv(cfg *Config) {
 			cfg.Upload.WorkerPoolSize = n
 		}
 	}
+	if v := os.Getenv("FILEUPLOAD_STORAGE_TYPE"); v != "" {
+		cfg.Storage.Type = v
+	}
+	if v := os.Getenv("FILEUPLOAD_REDIS_DB"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.Redis.DB = n
+		}
+	}
+	if v := os.Getenv("FILEUPLOAD_REDIS_PREFIX"); v != "" {
+		cfg.Redis.Prefix = v
+	}
+	if v := os.Getenv("FILEUPLOAD_ENV"); v != "" {
+		cfg.Server.Environment = strings.ToLower(v)
+	}
+	if v := os.Getenv("FILEUPLOAD_DEBUG_ENDPOINTS"); v != "" {
+		if enabled, err := strconv.ParseBool(v); err == nil {
+			cfg.Server.DebugEndpoints = enabled
+		}
+	}
+	if v := os.Getenv("FILEUPLOAD_METRICS_TOKEN"); v != "" {
+		cfg.Server.MetricsToken = v
+	}
+	if v := os.Getenv("FILEUPLOAD_CORS_ALLOWED_ORIGINS"); v != "" {
+		cfg.CORS.AllowedOrigins = splitCSV(v)
+	}
+	if v := os.Getenv("FILEUPLOAD_JWT_SECRET"); v != "" {
+		cfg.Auth.JWTSecret = v
+	}
+	if v := os.Getenv("FILEUPLOAD_JWT_EXPIRY"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.Auth.JWTExpiry = n
+		}
+	}
+	if v := os.Getenv("FILEUPLOAD_AUTH_ENFORCE"); v != "" {
+		if enabled, err := strconv.ParseBool(v); err == nil {
+			cfg.Auth.Enforce = enabled
+		}
+	}
+	if v := os.Getenv("FILEUPLOAD_DEV_ADMIN_ENABLED"); v != "" {
+		if enabled, err := strconv.ParseBool(v); err == nil {
+			cfg.Auth.DevAdminEnabled = enabled
+		}
+	}
 	if v := os.Getenv("FILEUPLOAD_AUTH_TOKEN"); v != "" {
-		if v := os.Getenv("FILEUPLOAD_JWT_SECRET"); v != "" {
-			cfg.Auth.JWTSecret = v
-		}
-		if v := os.Getenv("FILEUPLOAD_JWT_EXPIRY"); v != "" {
-			if n, err := strconv.Atoi(v); err == nil {
-				cfg.Auth.JWTExpiry = n
-			}
-		}
-		if v := os.Getenv("FILEUPLOAD_STORAGE_TYPE"); v != "" {
-			cfg.Storage.Type = v
-		}
-		if v := os.Getenv("FILEUPLOAD_REDIS_DB"); v != "" {
-			if n, err := strconv.Atoi(v); err == nil {
-				cfg.Redis.DB = n
-			}
-		}
-		if v := os.Getenv("FILEUPLOAD_REDIS_PREFIX"); v != "" {
-			cfg.Redis.Prefix = v
-		}
-		if v := os.Getenv("FILEUPLOAD_AUTH_ENFORCE"); v != "" {
-			if v == "true" || v == "1" {
-				cfg.Auth.Enforce = true
-			}
-		}
 		cfg.Auth.Token = v
 		cfg.Auth.Enabled = true
 	}
 	if v := os.Getenv("FILEUPLOAD_AUTH_HEADER"); v != "" {
 		cfg.Auth.Header = v
 	}
+
+}
+
+// ValidateForRuntime 校验在当前环境中会造成安全风险或无法工作的配置。
+// development 环境保持零配置体验；production 环境必须显式配置身份、CORS 和运维端点保护。
+func (c Config) ValidateForRuntime() error {
+	env := strings.ToLower(strings.TrimSpace(c.Server.Environment))
+	if env == "" || env == "development" || env == "dev" || env == "test" {
+		return nil
+	}
+	if env != "production" && env != "prod" {
+		return fmt.Errorf("server.environment 必须为 development 或 production，当前为 %q", c.Server.Environment)
+	}
+
+	if !c.Auth.Enforce || strings.TrimSpace(c.Auth.JWTSecret) == "" {
+		return fmt.Errorf("生产环境必须启用 auth.enforce 并设置 auth.jwt_secret")
+	}
+	if len(strings.TrimSpace(c.Auth.JWTSecret)) < 32 {
+		return fmt.Errorf("生产环境 auth.jwt_secret 长度至少为 32 个字符")
+	}
+	if c.Auth.DevAdminEnabled {
+		return fmt.Errorf("生产环境禁止启用 auth.dev_admin_enabled")
+	}
+	if len(c.Auth.Users) == 0 {
+		return fmt.Errorf("生产环境至少需要配置一个 auth.users 用户")
+	}
+	for _, user := range c.Auth.Users {
+		if strings.TrimSpace(user.ID) == "" || strings.TrimSpace(user.Username) == "" || strings.TrimSpace(user.Namespace) == "" {
+			return fmt.Errorf("auth.users 必须配置 id、username 和 namespace")
+		}
+		if _, err := bcrypt.Cost([]byte(user.PasswordHash)); err != nil {
+			return fmt.Errorf("用户 %q 的 password_hash 必须是有效的 bcrypt 哈希", user.Username)
+		}
+		if len(user.Roles) == 0 {
+			return fmt.Errorf("用户 %q 至少需要一个 role", user.Username)
+		}
+	}
+	for _, origin := range c.CORS.AllowedOrigins {
+		if strings.TrimSpace(origin) == "*" {
+			return fmt.Errorf("生产环境 cors.allowed_origins 不允许使用通配符 *")
+		}
+	}
+	if c.Server.DebugEndpoints {
+		return fmt.Errorf("生产环境禁止启用 server.debug_endpoints")
+	}
+	if len(c.Server.MetricsToken) < 24 {
+		return fmt.Errorf("生产环境 server.metrics_token 至少需要 24 个字符")
+	}
+	return nil
+}
+
+func splitCSV(value string) []string {
+	parts := strings.Split(value, ",")
+	origins := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if origin := strings.TrimSpace(part); origin != "" {
+			origins = append(origins, origin)
+		}
+	}
+	return origins
 }
 
 // SessionTTL 返回会话超时持续时间

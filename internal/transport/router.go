@@ -64,8 +64,8 @@ func NewRouter(mw *Middleware, tus *TusHandler, rest *RESTHandler, download *Dow
 // Handler 返回经过中间件包装的最终 handler
 func (r *Router) Handler() http.Handler {
 	var h http.Handler = r.mux
+	h = r.middleware.Namespace(h)   // 命名空间注入（读取已验证的 JWT claims）
 	h = r.middleware.JWTValidate(h) // JWT 验证（Bearer token）
-	h = r.middleware.Namespace(h)   // 命名空间注入
 	h = r.middleware.Auth(h)        // X-Auth-Token 认证
 	h = r.middleware.RateLimit(h)
 	h = r.middleware.Logging(h) // 请求日志
@@ -122,10 +122,10 @@ func (r *Router) registerRoutes() {
 
 	// === 管理 ===
 	if r.admin != nil {
-		r.mux.HandleFunc("GET /v1/admin/status", r.admin.Status)
-		r.mux.HandleFunc("GET /v1/admin/audit", r.admin.AuditLog)
+		r.mux.Handle("GET /v1/admin/status", r.middleware.RequireRole("admin", http.HandlerFunc(r.admin.Status)))
+		r.mux.Handle("GET /v1/admin/audit", r.middleware.RequireRole("admin", http.HandlerFunc(r.admin.AuditLog)))
 	}
-	r.mux.HandleFunc("POST /v1/admin/scan", r.handleAdminScan)
+	r.mux.Handle("POST /v1/admin/scan", r.middleware.RequireRole("admin", http.HandlerFunc(r.handleAdminScan)))
 
 	if r.share != nil {
 		r.mux.HandleFunc("POST /v1/share", r.share.CreateShare)
@@ -167,20 +167,23 @@ func (r *Router) registerRoutes() {
 	})
 
 	// === 调试（pprof + expvar）===
-	r.mux.HandleFunc("GET /debug/pprof/", pprof.Index)
-	r.mux.HandleFunc("GET /debug/pprof/cmdline", pprof.Cmdline)
-	r.mux.HandleFunc("GET /debug/pprof/profile", pprof.Profile)
-	r.mux.HandleFunc("GET /debug/pprof/symbol", pprof.Symbol)
-	r.mux.HandleFunc("GET /debug/pprof/trace", pprof.Trace)
-	r.mux.Handle("GET /debug/pprof/goroutine", pprof.Handler("goroutine"))
-	r.mux.Handle("GET /debug/pprof/heap", pprof.Handler("heap"))
-	r.mux.Handle("GET /debug/pprof/threadcreate", pprof.Handler("threadcreate"))
-	r.mux.Handle("GET /debug/pprof/block", pprof.Handler("block"))
-	r.mux.Handle("GET /debug/pprof/mutex", pprof.Handler("mutex"))
-	r.mux.Handle("GET /debug/vars", expvar.Handler())
+	// 默认不注册，避免在生产环境泄露运行时和内存信息；显式打开时也要求 admin role。
+	if r.middleware.DebugEndpointsEnabled() {
+		r.mux.Handle("GET /debug/pprof/", r.middleware.RequireRole("admin", http.HandlerFunc(pprof.Index)))
+		r.mux.Handle("GET /debug/pprof/cmdline", r.middleware.RequireRole("admin", http.HandlerFunc(pprof.Cmdline)))
+		r.mux.Handle("GET /debug/pprof/profile", r.middleware.RequireRole("admin", http.HandlerFunc(pprof.Profile)))
+		r.mux.Handle("GET /debug/pprof/symbol", r.middleware.RequireRole("admin", http.HandlerFunc(pprof.Symbol)))
+		r.mux.Handle("GET /debug/pprof/trace", r.middleware.RequireRole("admin", http.HandlerFunc(pprof.Trace)))
+		r.mux.Handle("GET /debug/pprof/goroutine", r.middleware.RequireRole("admin", pprof.Handler("goroutine")))
+		r.mux.Handle("GET /debug/pprof/heap", r.middleware.RequireRole("admin", pprof.Handler("heap")))
+		r.mux.Handle("GET /debug/pprof/threadcreate", r.middleware.RequireRole("admin", pprof.Handler("threadcreate")))
+		r.mux.Handle("GET /debug/pprof/block", r.middleware.RequireRole("admin", pprof.Handler("block")))
+		r.mux.Handle("GET /debug/pprof/mutex", r.middleware.RequireRole("admin", pprof.Handler("mutex")))
+		r.mux.Handle("GET /debug/vars", r.middleware.RequireRole("admin", expvar.Handler()))
+	}
 
 	// === Prometheus 指标（v0.2.0+） ===
-	r.mux.Handle("GET /metrics", promhttp.Handler())
+	r.mux.Handle("GET /metrics", r.middleware.MetricsAuth(promhttp.Handler()))
 }
 
 // handleCheckExists 秒传预检

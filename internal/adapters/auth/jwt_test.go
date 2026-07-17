@@ -9,7 +9,7 @@ import (
 )
 
 func TestJWTService_Login_Success(t *testing.T) {
-	svc := NewJWTService("test-secret", time.Hour, nil)
+	svc := NewJWTService("test-secret", time.Hour, DevelopmentUsers())
 
 	pair, err := svc.Login(context.Background(), "admin", "admin123")
 	if err != nil {
@@ -27,7 +27,7 @@ func TestJWTService_Login_Success(t *testing.T) {
 }
 
 func TestJWTService_Login_WrongPassword(t *testing.T) {
-	svc := NewJWTService("test-secret", time.Hour, nil)
+	svc := NewJWTService("test-secret", time.Hour, DevelopmentUsers())
 
 	_, err := svc.Login(context.Background(), "admin", "wrong")
 	if err == nil {
@@ -36,7 +36,7 @@ func TestJWTService_Login_WrongPassword(t *testing.T) {
 }
 
 func TestJWTService_Login_UnknownUser(t *testing.T) {
-	svc := NewJWTService("test-secret", time.Hour, nil)
+	svc := NewJWTService("test-secret", time.Hour, DevelopmentUsers())
 
 	_, err := svc.Login(context.Background(), "nobody", "pw")
 	if err == nil {
@@ -45,7 +45,7 @@ func TestJWTService_Login_UnknownUser(t *testing.T) {
 }
 
 func TestJWTService_ValidateToken_Valid(t *testing.T) {
-	svc := NewJWTService("test-secret", time.Hour, nil)
+	svc := NewJWTService("test-secret", time.Hour, DevelopmentUsers())
 
 	pair, _ := svc.Login(context.Background(), "admin", "admin123")
 	claims, err := svc.ValidateToken(pair.AccessToken)
@@ -64,7 +64,7 @@ func TestJWTService_ValidateToken_Valid(t *testing.T) {
 }
 
 func TestJWTService_ValidateToken_Invalid(t *testing.T) {
-	svc := NewJWTService("test-secret", time.Hour, nil)
+	svc := NewJWTService("test-secret", time.Hour, DevelopmentUsers())
 
 	_, err := svc.ValidateToken("invalid-token")
 	if err == nil {
@@ -73,8 +73,8 @@ func TestJWTService_ValidateToken_Invalid(t *testing.T) {
 }
 
 func TestJWTService_ValidateToken_WrongKey(t *testing.T) {
-	svc1 := NewJWTService("secret1", time.Hour, nil)
-	svc2 := NewJWTService("secret2", time.Hour, nil)
+	svc1 := NewJWTService("secret1", time.Hour, DevelopmentUsers())
+	svc2 := NewJWTService("secret2", time.Hour, DevelopmentUsers())
 
 	pair, _ := svc1.Login(context.Background(), "admin", "admin123")
 	_, err := svc2.ValidateToken(pair.AccessToken)
@@ -84,7 +84,7 @@ func TestJWTService_ValidateToken_WrongKey(t *testing.T) {
 }
 
 func TestJWTService_RefreshToken(t *testing.T) {
-	svc := NewJWTService("test-secret", time.Hour, nil)
+	svc := NewJWTService("test-secret", time.Hour, DevelopmentUsers())
 
 	original, _ := svc.Login(context.Background(), "admin", "admin123")
 
@@ -104,7 +104,7 @@ func TestJWTService_RefreshToken(t *testing.T) {
 }
 
 func TestJWTService_RefreshToken_Invalid(t *testing.T) {
-	svc := NewJWTService("test-secret", time.Hour, nil)
+	svc := NewJWTService("test-secret", time.Hour, DevelopmentUsers())
 
 	_, err := svc.RefreshToken(context.Background(), "invalid")
 	if err == nil {
@@ -131,7 +131,7 @@ func TestJWTService_CustomUser(t *testing.T) {
 
 func TestJWTService_TokenExpiry(t *testing.T) {
 	// 使用极短的过期时间（1秒），然后等待过期
-	svc := NewJWTService("test-secret", time.Second, nil)
+	svc := NewJWTService("test-secret", time.Second, DevelopmentUsers())
 	pair, _ := svc.Login(context.Background(), "admin", "admin123")
 
 	// 立刻验证应该成功

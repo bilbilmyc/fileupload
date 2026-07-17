@@ -36,10 +36,12 @@ type Deps struct {
 
 // ServerConfig HTTP 服务端配置。
 type ServerConfig struct {
-	Addr         string
-	ReadTimeout  time.Duration
-	WriteTimeout time.Duration
-	IdleTimeout  time.Duration
+	Addr           string
+	ReadTimeout    time.Duration
+	WriteTimeout   time.Duration
+	IdleTimeout    time.Duration
+	DebugEndpoints bool
+	MetricsToken   string
 }
 
 // Server 已装配的服务端，含 HTTP handler 与后台任务句柄。
@@ -71,7 +73,8 @@ func Build(d Deps) (*Server, error) {
 	shareSvc := domain.NewShareService(d.Metadata)
 
 	// 传输层
-	mw := transport.NewMiddleware().WithCORS(d.CORSOrigins).WithAuth(d.AuthCfg)
+	mw := transport.NewMiddleware().WithCORS(d.CORSOrigins).WithAuth(d.AuthCfg).
+		WithObservability(d.ServerCfg.DebugEndpoints, d.ServerCfg.MetricsToken)
 	if d.Auth != nil {
 		mw.WithJWT(d.Auth)
 	}

@@ -7,23 +7,25 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"strings"
 	"time"
 
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/bilbilmyc/fileupload/internal/domain"
+	"github.com/golang-jwt/jwt/v5"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // JWTService JWT 鉴权实现
 type JWTService struct {
-	secret     []byte
-	expiry     time.Duration
-	users      map[string]*domain.AuthUser // 内存用户表（生产环境应从 DB 加载）
+	secret []byte
+	expiry time.Duration
+	users  map[string]*domain.AuthUser // 内存用户表（生产环境应从 DB 加载）
 }
 
 // NewJWTService 创建 JWT 鉴权服务
 // secret: JWT 签名密钥
 // expiry: access token 过期时间
-// users: 预置用户列表（nil 则使用默认 admin 用户）
+// users: 预置用户列表。空列表不会隐式创建用户，避免生产环境暴露默认凭据。
 func NewJWTService(secret string, expiry time.Duration, users []domain.AuthUser) *JWTService {
 	s := &JWTService{
 		secret: []byte(secret),
@@ -31,23 +33,23 @@ func NewJWTService(secret string, expiry time.Duration, users []domain.AuthUser)
 		users:  make(map[string]*domain.AuthUser),
 	}
 
-	// 添加预置用户
-	if len(users) > 0 {
-		for i := range users {
-			s.users[users[i].Username] = &users[i]
-		}
-	} else {
-		// 默认 admin 用户（开发/演示用）
-		s.users["admin"] = &domain.AuthUser{
-			ID:        "u-admin",
-			Username:  "admin",
-			Password:  "admin123", // 明文，生产环境用 bcrypt
-			Namespace: "default",
-			Roles:     []string{"admin", "user"},
-		}
+	for i := range users {
+		s.users[users[i].Username] = &users[i]
 	}
 
 	return s
+}
+
+// DevelopmentUsers 返回仅供本地开发和测试使用的演示管理员。
+// 调用方必须显式选择使用它；生产配置校验会拒绝 dev_admin_enabled。
+func DevelopmentUsers() []domain.AuthUser {
+	return []domain.AuthUser{{
+		ID:        "u-admin",
+		Username:  "admin",
+		Password:  "admin123",
+		Namespace: "default",
+		Roles:     []string{"admin", "user"},
+	}}
 }
 
 // Login 验证用户名密码并返回 JWT 令牌对
@@ -56,7 +58,12 @@ func (s *JWTService) Login(_ context.Context, username, password string) (*domai
 	if !ok {
 		return nil, fmt.Errorf("用户名或密码错误")
 	}
-	if user.Password != password {
+	if strings.HasPrefix(user.Password, "$2") {
+		if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(password)); err != nil {
+			return nil, fmt.Errorf("用户名或密码错误")
+		}
+	} else if user.Password != password {
+		// 兼容仅供开发/测试的显式明文用户；生产配置只能传入 bcrypt 哈希。
 		return nil, fmt.Errorf("用户名或密码错误")
 	}
 

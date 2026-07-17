@@ -97,11 +97,19 @@ upload:
   worker_queue_size: 100     # 排队上限
 
 auth:
-  enabled: false             # 是否启用 X-Auth-Token 认证
-  token: ""                  # 静态令牌
-  header: "X-Auth-Token"     # 令牌请求头
-  jwt_secret: ""             # JWT 签名密钥（非空时启用 JWT 鉴权）
+  enabled: false             # 可选：是否启用 X-Auth-Token 兼容认证
+  token: ""                  # 可选静态令牌
+  header: "X-Auth-Token"     # 静态令牌请求头
+  enforce: false             # true 时，除公开端点外必须携带 JWT
+  jwt_secret: ""             # JWT 签名密钥；生产环境至少 32 个字符
   jwt_expiry: 72             # JWT token 过期时间（小时）
+  dev_admin_enabled: false   # 仅本地开发可显式开启 admin/admin123；生产环境禁止
+  users:                     # 生产环境至少一个用户，密码必须是 bcrypt hash
+    - id: "admin-1"
+      username: "admin"
+      password_hash: "REPLACE_WITH_BCRYPT_HASH"
+      namespace: "default"
+      roles: ["admin", "user"]
 
 download:
   max_archive_size: 0        # 目录打包大小上限（0 = 不限）
@@ -142,6 +150,14 @@ pg:
 | `FILEUPLOAD_WORKER_POOL` | upload.worker_pool_size | `20` |
 | `FILEUPLOAD_AUTH_TOKEN` | auth.token（同时启用 auth） | `my-token` |
 | `FILEUPLOAD_AUTH_HEADER` | auth.header | `X-Api-Key` |
+| `FILEUPLOAD_ENV` | server.environment | `production` |
+| `FILEUPLOAD_DEBUG_ENDPOINTS` | server.debug_endpoints | `false` |
+| `FILEUPLOAD_METRICS_TOKEN` | server.metrics_token | `long-random-token` |
+| `FILEUPLOAD_CORS_ALLOWED_ORIGINS` | cors.allowed_origins（逗号分隔） | `https://files.example.com` |
+| `FILEUPLOAD_JWT_SECRET` | auth.jwt_secret | `at-least-32-char-secret` |
+| `FILEUPLOAD_JWT_EXPIRY` | auth.jwt_expiry | `24` |
+| `FILEUPLOAD_AUTH_ENFORCE` | auth.enforce | `true` |
+| `FILEUPLOAD_DEV_ADMIN_ENABLED` | auth.dev_admin_enabled | `false` |
 
 ---
 
@@ -262,9 +278,10 @@ fileupload completion fish | source     # fish
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| `GET` | `/v1/admin/status` | 系统状态 |
-| `GET` | `/v1/admin/audit` | 审计日志（分页） |
-| `POST` | `/v1/admin/scan` | 触发一致性巡检 |
+| `GET` | `/v1/admin/status` | 系统状态（需要 `admin` role） |
+| `GET` | `/v1/admin/audit` | 审计日志（分页，需要 `admin` role） |
+| `POST` | `/v1/admin/scan` | 触发一致性巡检（需要 `admin` role） |
+| `GET` | `/metrics` | Prometheus 指标（设置 `server.metrics_token` 后需 Bearer token） |
 | `GET` | `/health` | 健康检查 |
 | `GET` / `POST` | `/ws` | WebSocket 实时推送 |
 
@@ -295,12 +312,13 @@ cd deploy/docker && docker compose up -d
 
 ### 生产建议
 
-- **前端**放 Gateway/Nginx 做 TLS 终结、域名绑定
-- **Redis**启用 AOF 持久化，配置密码
-- **数据库**PostgreSQL 生产环境推荐，SQLite 适合开发/小规模
-- **备份**定期备份数据目录 + SQLite 数据库文件
-- **巡检**定期执行 `fileupload scan` 或配置定时任务
-- **调优**根据机器配置调整 `worker_pool_size`、`write_timeout`
+- **启动安全校验**：设置 `server.environment: production` 后，服务会拒绝未启用 JWT 强制认证、缺少本地用户、CORS 使用 `*`、启用调试端点或未保护 metrics 的配置。
+- **身份与租户**：普通 JWT 用户的 namespace 以 token claim 为准，不能用 `X-Namespace` 越权；仅 `admin` role 可以跨 namespace 操作。请使用 bcrypt hash 配置本地用户，绝不要启用 `dev_admin_enabled`。
+- **运维端点**：`/debug/pprof/*` 和 `/debug/vars` 默认不注册；需要排障时短时开启并使用 admin JWT。Prometheus 请为 `/metrics` 配置独立的长随机 Bearer token。
+- **前端**放 Gateway/Nginx 做 TLS 终结、域名绑定，并将 `cors.allowed_origins` 限制为实际前端域名。
+- **Redis**启用 AOF 持久化，配置密码；**数据库**生产环境推荐 PostgreSQL，SQLite 适合开发/小规模。
+- **备份**定期备份对象数据、数据库和配置密钥，并周期性恢复演练。
+- **巡检**定期执行 `fileupload scan` 或配置定时任务；**调优**根据机器配置调整 `worker_pool_size`、`write_timeout`。
 
 ---
 
