@@ -1,8 +1,15 @@
-import { useState, useMemo, useCallback, useRef } from 'react'
+import { useState, useMemo, useCallback, useRef, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { message } from 'antd'
 import * as api from '../api/client'
 import type { FileItem } from '../api/client'
-
+import {
+  createFileListSearchParams,
+  parseFileListQuery,
+  toFileSortBy,
+  toFileTypeFilter,
+  type FileListQuery,
+} from '../lib/file-list-query'
 
 export interface FileStats {
   dirs: number
@@ -10,30 +17,53 @@ export interface FileStats {
   totalSize: number
 }
 
+function useDebouncedValue<T>(value: T, delay: number) {
+  const [debouncedValue, setDebouncedValue] = useState(value)
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => setDebouncedValue(value), delay)
+    return () => window.clearTimeout(timeout)
+  }, [delay, value])
+
+  return debouncedValue
+}
+
 export function useFileOperations(_namespace?: string) {
-  const [files, setFiles] = useState<FileItem[]>([])
+  const [listedFiles, setListedFiles] = useState<FileItem[]>([])
   const [loading, setLoading] = useState(false)
-  const [currentDir, setCurrentDir] = useState<string>('/')
   const requestIdRef = useRef(0)
   const [parentName, setParentName] = useState<string>('')
   const [parentID, setParentID] = useState<string | null>(null)
   const [ancestors, setAncestors] = useState<FileItem[]>([])
-  const [search, setSearch] = useState('')
-  const [page, setPage] = useState(1)
   const [total, setTotal] = useState(0)
-  const [sortBy, setSortBy] = useState('name')
-  const [sortOrder, setSortOrder] = useState('asc')
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([])
-  const [typeFilter, setTypeFilter] = useState<string>('')
+  const [searchParams, setSearchParams] = useSearchParams()
 
-  const loadFiles = useCallback(async () => {
+  const query = useMemo(() => parseFileListQuery(searchParams), [searchParams])
+  const { directory: currentDir, search, typeFilter, page, sortBy, sortOrder } = query
+  const debouncedSearch = useDebouncedValue(search, 300)
+  const searchPending = search !== debouncedSearch
+
+  const files = useMemo(() => {
+    if (typeFilter === 'dir') return listedFiles.filter(file => file.is_dir)
+    if (typeFilter === 'file') return listedFiles.filter(file => !file.is_dir)
+    return listedFiles
+  }, [listedFiles, typeFilter])
+
+  const updateQuery = useCallback((patch: Partial<FileListQuery>, replace = false) => {
+    setSelectedRowKeys([])
+    setSearchParams(createFileListSearchParams({ ...query, ...patch }), { replace })
+  }, [query, setSearchParams])
+
+  const fetchFiles = useCallback(async (searchTerm: string) => {
     const requestId = ++requestIdRef.current
     const perPage = 50
     setLoading(true)
+
     try {
       const res = await api.listFiles({
         parent: currentDir,
-        search: search || undefined,
+        search: searchTerm.trim() || undefined,
         page,
         per_page: perPage,
         sort_by: sortBy,
@@ -41,74 +71,98 @@ export function useFileOperations(_namespace?: string) {
       })
       if (requestId !== requestIdRef.current) return
 
-      let items = res.children || []
-      // 客户端类型筛选（可选）
-      if (typeFilter === 'dir') items = items.filter(f => f.is_dir)
-      else if (typeFilter === 'file') items = items.filter(f => !f.is_dir)
-
-      setFiles(items)
+      const items = res.children || []
+      setListedFiles(items)
       setTotal(res.total || items.length)
       if (res.dir && typeof res.dir === 'object' && 'name' in res.dir) {
-        const d = res.dir as any
-        setParentName(d.name as string)
-        setParentID(d.parent_id || (currentDir !== '/' ? '/' : null))
+        const dir = res.dir as { name: string; parent_id?: string | null }
+        setParentName(dir.name)
+        setParentID(dir.parent_id || (currentDir !== '/' ? '/' : null))
       } else {
         setParentName('')
         setParentID(null)
       }
       setAncestors(res.ancestors || [])
-    } catch (e: any) {
-      message.error(`加载失败: ${e.message}`)
+      setSelectedRowKeys([])
+    } catch (error: any) {
+      if (requestId === requestIdRef.current) {
+        message.error(`加载失败: ${error.message || '请稍后重试'}`)
+      }
     } finally {
-      setLoading(false)
+      if (requestId === requestIdRef.current) {
+        setLoading(false)
+      }
     }
-    setSelectedRowKeys([])
-  }, [currentDir, search, page, sortBy, sortOrder, typeFilter])
+  }, [currentDir, page, sortBy, sortOrder])
+
+  // The normal query path waits for the current text to settle, so sorting or paging
+  // while typing cannot issue a request with a stale search term.
+  const loadFiles = useCallback(() => {
+    if (searchPending) return
+    return fetchFiles(debouncedSearch)
+  }, [debouncedSearch, fetchFiles, searchPending])
+  // Explicit user actions always refresh the exact text currently shown in the search field.
+  const refreshFiles = useCallback(() => fetchFiles(search), [fetchFiles, search])
+
+  const setSearch = useCallback((value: string) => {
+    updateQuery({ search: value, page: 1 }, true)
+  }, [updateQuery])
+
+  const setPage = useCallback((value: number) => {
+    updateQuery({ page: Number.isSafeInteger(value) && value > 0 ? value : 1 })
+  }, [updateQuery])
+
+  const setTypeFilter = useCallback((value: string) => {
+    updateQuery({ typeFilter: toFileTypeFilter(value), page: 1 })
+  }, [updateQuery])
 
   const navigateToDir = useCallback((dirId: string) => {
-    setCurrentDir(dirId)
-    setPage(1)
-  }, [])
+    updateQuery({ directory: dirId || '/', page: 1 })
+  }, [updateQuery])
 
   const navigateUp = useCallback(() => {
-    if (parentID) {
-      setCurrentDir(parentID)
-    } else {
-      setCurrentDir('/')
-    }
-    setPage(1)
-  }, [parentID])
+    updateQuery({ directory: parentID || '/', page: 1 })
+  }, [parentID, updateQuery])
 
   const navigateToRoot = useCallback(() => {
-    setCurrentDir('/')
-    setPage(1)
-  }, [])
+    updateQuery({ directory: '/', page: 1 })
+  }, [updateQuery])
 
   const stats = useMemo<FileStats>(() => {
-    let d = 0, f = 0, totalSize = 0
-    const allFiles = files
-    for (const item of allFiles) {
-      if (item.is_dir) d++
-      else { f++; totalSize += item.size }
+    let dirs = 0
+    let fileCount = 0
+    let totalSize = 0
+
+    for (const item of files) {
+      if (item.is_dir) dirs += 1
+      else {
+        fileCount += 1
+        totalSize += item.size
+      }
     }
-    return { dirs: d, files: f, totalSize }
+
+    return { dirs, files: fileCount, totalSize }
   }, [files])
 
   const breadcrumbItems = useMemo(() => {
     const items: any[] = []
     if (ancestors && ancestors.length > 0) {
-      for (let i = 0; i < ancestors.length; i++) {
-        const a = ancestors[i]
+      for (let i = 0; i < ancestors.length; i += 1) {
+        const ancestor = ancestors[i]
         const isLast = i === ancestors.length - 1
         items.push({
           title: isLast ? (
             <span className="text-gray-700 font-medium">
-              <span role="img" aria-label="folder">📁</span> {a.name}
+              <span role="img" aria-label="folder">📁</span> {ancestor.name}
             </span>
           ) : (
-            <a onClick={() => navigateToDir(a.file_id)} className="text-gray-500 hover:text-blue-500">
-              <span role="img" aria-label="folder">📁</span> {a.name}
-            </a>
+            <button
+              type="button"
+              onClick={() => navigateToDir(ancestor.file_id)}
+              className="text-gray-500 hover:text-blue-500"
+            >
+              <span role="img" aria-label="folder">📁</span> {ancestor.name}
+            </button>
           ),
         })
       }
@@ -130,61 +184,59 @@ export function useFileOperations(_namespace?: string) {
         ? await api.downloadDir(record.file_id)
         : await api.downloadFile(record.file_id)
       api.saveBlob(blob, record.is_dir ? `${record.name}.tar.gz` : record.name)
-    } catch (e: any) {
-      message.error(`下载失败: ${e.message || '请稍后重试'}`)
+    } catch (error: any) {
+      message.error(`下载失败: ${error.message || '请稍后重试'}`)
     }
   }, [])
 
   const handleDelete = useCallback(async (record: FileItem) => {
     try {
-      if (record.is_dir) {
-        await api.deleteDir(record.file_id)
-      } else {
-        await api.deleteFile(record.file_id)
-      }
+      if (record.is_dir) await api.deleteDir(record.file_id)
+      else await api.deleteFile(record.file_id)
       message.success('已删除')
-      loadFiles()
-    } catch (e: any) {
-      message.error(`删除失败: ${e.message}`)
+      void refreshFiles()
+    } catch (error: any) {
+      message.error(`删除失败: ${error.message || '请稍后重试'}`)
     }
-  }, [loadFiles])
+  }, [refreshFiles])
 
   const handleBatchDelete = useCallback(async () => {
-    const items = files.filter(f => selectedRowKeys.includes(f.file_id))
+    const items = files.filter(file => selectedRowKeys.includes(file.file_id))
     if (items.length === 0) return
-    let ok = 0, fail = 0
+
+    let ok = 0
+    let fail = 0
     for (const item of items) {
       try {
-        if (item.is_dir) {
-          await api.deleteDir(item.file_id)
-        } else {
-          await api.deleteFile(item.file_id)
-        }
-        ok++
+        if (item.is_dir) await api.deleteDir(item.file_id)
+        else await api.deleteFile(item.file_id)
+        ok += 1
       } catch {
-        fail++
+        fail += 1
       }
     }
     setSelectedRowKeys([])
     message.success(`删除完成: ${ok} 成功${fail ? `, ${fail} 失败` : ''}`)
-    loadFiles()
-  }, [files, selectedRowKeys, loadFiles])
+    void refreshFiles()
+  }, [files, refreshFiles, selectedRowKeys])
 
   const handleRename = useCallback(async (record: FileItem, newName: string) => {
     try {
       await api.renameFile(record.file_id, newName)
       message.success('已重命名')
-      loadFiles()
-    } catch (e: any) {
-      message.error(`重命名失败: ${e.message}`)
+      void refreshFiles()
+    } catch (error: any) {
+      message.error(`重命名失败: ${error.message || '请稍后重试'}`)
     }
-  }, [loadFiles])
+  }, [refreshFiles])
 
   const handleSortChange = useCallback((field: string, order: string) => {
-    setSortBy(field)
-    setSortOrder(order === 'ascend' ? 'asc' : order === 'descend' ? 'desc' : 'asc')
-    setPage(1)
-  }, [])
+    updateQuery({
+      sortBy: toFileSortBy(field),
+      sortOrder: order === 'descend' ? 'desc' : 'asc',
+      page: 1,
+    })
+  }, [updateQuery])
 
   return {
     files,
@@ -201,13 +253,13 @@ export function useFileOperations(_namespace?: string) {
     selectedRowKeys,
     stats,
     breadcrumbItems,
+    searchPending,
     setSearch,
     setPage,
-    setSortBy,
-    setSortOrder,
     setTypeFilter,
     setSelectedRowKeys,
     loadFiles,
+    refreshFiles,
     navigateToDir,
     navigateUp,
     navigateToRoot,

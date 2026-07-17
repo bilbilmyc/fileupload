@@ -4,13 +4,14 @@ import { AuthProvider } from '../context/AuthContext'
 import { ThemeProvider } from '../context/ThemeContext'
 import TopBar from './TopBar'
 
-function renderTopBar() {
+function renderTopBar(searching = false) {
   return render(
     <AuthProvider>
       <ThemeProvider>
         <TopBar
           search=""
           typeFilter=""
+          searching={searching}
           onSearchChange={vi.fn()}
           onTypeFilterChange={vi.fn()}
           onRefresh={vi.fn()}
@@ -33,6 +34,12 @@ describe('TopBar', () => {
   it('renders type filter', () => {
     renderTopBar()
     expect(screen.getByText('全部')).toBeInTheDocument()
+  })
+
+  it('announces when the debounced search is updating', () => {
+    renderTopBar(true)
+    expect(screen.getByLabelText('搜索文件')).toHaveAttribute('aria-busy', 'true')
+    expect(screen.getByLabelText('正在更新搜索结果')).toBeInTheDocument()
   })
 
   it('renders refresh button (存在 RefreshOutlined icon)', () => {

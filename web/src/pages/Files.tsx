@@ -26,9 +26,9 @@ export default function Files() {
 
   const {
     loading, search, page, total, parentID, selectedRowKeys, stats,
-    breadcrumbItems, files, typeFilter,
+    breadcrumbItems, files, typeFilter, searchPending,
     setSearch, setPage, setTypeFilter, setSelectedRowKeys,
-    loadFiles, navigateToDir, navigateUp, handleDownload, handleDelete,
+    loadFiles, refreshFiles, navigateToDir, navigateUp, handleDownload, handleDelete,
     handleRename, handleSortChange,
   } = useFileOperations()
 
@@ -39,13 +39,12 @@ export default function Files() {
   const [previewFile, setPreviewFile] = useState<{ id: string; name: string; size: number } | null>(null)
   const [propertiesFile, setPropertiesFile] = useState<any | null>(null)
 
-  useEffect(() => { loadFiles() }, [loadFiles])
-  useEffect(() => { loadFiles() }, [namespace]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { void loadFiles() }, [loadFiles, namespace])
   useEffect(() => {
-    const refresh = () => { void loadFiles() }
+    const refresh = () => { void refreshFiles() }
     window.addEventListener(UPLOAD_COMPLETED_EVENT, refresh)
     return () => window.removeEventListener(UPLOAD_COMPLETED_EVENT, refresh)
-  }, [loadFiles])
+  }, [refreshFiles])
 
   const handlePreview = useCallback((record: { file_id: string; name: string; size: number }) => {
     setPreviewFile({ id: record.file_id, name: record.name, size: record.size })
@@ -68,10 +67,10 @@ export default function Files() {
         setSelectedRowKeys([])
         if (fail) message.warning(`已移入回收站: ${ok} 成功, ${fail} 失败`)
         else message.success(`已移入回收站: ${ok} 项`)
-        loadFiles()
+        refreshFiles()
       },
     })
-  }, [selectedRowKeys, selectedFiles, loadFiles, addRecord])
+  }, [selectedRowKeys, selectedFiles, refreshFiles, addRecord])
 
   const handleBatchMove = useCallback(() => {
     setDirPickerMode('move')
@@ -96,24 +95,24 @@ export default function Files() {
       }
       message.success(`${dirPickerMode === 'move' ? '移动' : '复制'}完成`)
       setSelectedRowKeys([])
-      loadFiles()
+      refreshFiles()
     } catch (e: any) {
       message.error(`${dirPickerMode === 'move' ? '移动' : '复制'}失败: ${e.message}`)
     }
     setDirPickerOpen(false)
-  }, [dirPickerMode, selectedRowKeys, loadFiles])
+  }, [dirPickerMode, selectedRowKeys, refreshFiles])
 
   const handleTagEditorConfirm = useCallback(async (tags: string[]) => {
     try {
       await api.batchSetTags(selectedRowKeys as string[], tags)
       message.success('标记完成')
       setSelectedRowKeys([])
-      loadFiles()
+      refreshFiles()
     } catch (e: any) {
       message.error(`标记失败: ${e.message}`)
     }
     setTagEditorOpen(false)
-  }, [selectedRowKeys, loadFiles])
+  }, [selectedRowKeys, refreshFiles])
 
   // ---- New folder ----
   const handleNewFolder = useCallback(() => {
@@ -123,11 +122,11 @@ export default function Files() {
     const manifest = { entries: [] }
     api.submitDir(name.trim(), manifest.entries).then(() => {
       message.success('目录创建成功')
-      loadFiles()
+      refreshFiles()
     }).catch((e: any) => {
       message.error(`创建目录失败: ${e.message}`)
     })
-  }, [loadFiles])
+  }, [refreshFiles])
 
   // ---- Upload ----
   const handleUploadFile = useCallback((file: File) => {
@@ -158,9 +157,10 @@ export default function Files() {
       <TopBar
         search={search}
         typeFilter={typeFilter}
+        searching={searchPending}
         onSearchChange={setSearch}
         onTypeFilterChange={setTypeFilter}
-        onRefresh={loadFiles}
+        onRefresh={refreshFiles}
       />
 
       <main className="workspace-page">
@@ -189,7 +189,7 @@ export default function Files() {
               onNewFolder={handleNewFolder}
               onDownload={handleSingleDownload}
               onDelete={handleSingleDelete}
-              onRefresh={loadFiles}
+              onRefresh={refreshFiles}
               hasSelection={selectedRowKeys.length > 0}
               hasSingleSelection={selectedFiles.length === 1}
             />

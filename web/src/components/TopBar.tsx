@@ -1,17 +1,18 @@
-import { Input, Button, Space, Tooltip, Select, Dropdown } from 'antd'
+import { Input, Button, Space, Tooltip, Select, Dropdown, Spin } from 'antd'
 import { ReloadOutlined, SearchOutlined, UserOutlined, GlobalOutlined, LogoutOutlined } from '@ant-design/icons'
 import { useAuth } from '../context/AuthContext'
 
 interface TopBarProps {
   search: string
   typeFilter: string
+  searching?: boolean
   onSearchChange: (value: string) => void
   onTypeFilterChange: (value: string) => void
   onRefresh: () => void
 }
 
 export default function TopBar({
-  search, typeFilter, onSearchChange, onTypeFilterChange, onRefresh,
+  search, typeFilter, searching = false, onSearchChange, onTypeFilterChange, onRefresh,
 }: TopBarProps) {
   const { namespace, setNamespace, logout } = useAuth()
 
@@ -26,30 +27,33 @@ export default function TopBar({
           <strong>文件中心</strong>
         </div>
         <Space size="small" wrap>
-        <Input
-          size="small"
-          prefix={<SearchOutlined className="text-gray-400" />}
-          placeholder="搜索文件..."
-          value={search}
-          onChange={(e) => onSearchChange(e.target.value)}
-          className="!w-[160px] sm:!w-[240px]"
-          allowClear
-        />
-        <Select
-          size="small"
-          value={typeFilter}
-          onChange={onTypeFilterChange}
-          className="!w-[80px]"
-          options={[
-            { value: '', label: '全部' },
-            { value: 'dir', label: '目录' },
-            { value: 'file', label: '文件' },
-          ]}
-        />
+          <Input
+            size="small"
+            prefix={<SearchOutlined className="text-gray-400" />}
+            suffix={searching ? <Spin size="small" aria-label="正在更新搜索结果" /> : undefined}
+            placeholder="搜索文件..."
+            value={search}
+            onChange={(event) => onSearchChange(event.target.value)}
+            className="!w-[160px] sm:!w-[240px]"
+            allowClear
+            aria-busy={searching}
+            aria-label="搜索文件"
+          />
+          <Select
+            size="small"
+            value={typeFilter}
+            onChange={onTypeFilterChange}
+            className="!w-[80px]"
+            aria-label="按类型筛选"
+            options={[
+              { value: '', label: '全部' },
+              { value: 'dir', label: '目录' },
+              { value: 'file', label: '文件' },
+            ]}
+          />
         </Space>
       </div>
 
-      {/* 右：namespace 选择 + 刷新 + 用户菜单（v0.11.2+） */}
       <Space size="middle">
         <Tooltip title="命名空间（不同用户/空间数据隔离）">
           <Select
@@ -59,6 +63,7 @@ export default function TopBar({
             suffixIcon={<GlobalOutlined />}
             className="!w-[100px] sm:!w-[140px]"
             showSearch
+            aria-label="选择命名空间"
             options={[
               { value: 'default', label: '默认 (default)' },
               { value: 'demo', label: '演示 (demo)' },
@@ -67,7 +72,7 @@ export default function TopBar({
           />
         </Tooltip>
         <Tooltip title="刷新">
-          <Button type="text" size="small" icon={<ReloadOutlined />} onClick={onRefresh} />
+          <Button type="text" size="small" icon={<ReloadOutlined />} onClick={onRefresh} aria-label="刷新文件列表" />
         </Tooltip>
         <Dropdown
           menu={{
