@@ -32,6 +32,11 @@ type CreateShareRequest struct {
 }
 
 // ShareStore 分享存储接口
+// ShareDownloadConsumer 可选的原子下载额度消耗接口。
+type ShareDownloadConsumer interface {
+	TryConsumeDownload(ctx context.Context, token string) (bool, error)
+}
+
 type ShareStore interface {
 	CreateShare(ctx context.Context, token string, entry *ShareEntry) error
 	GetShare(ctx context.Context, token string) (*ShareEntry, error)
@@ -124,7 +129,9 @@ func (s *ShareService) AccessShare(ctx context.Context, token, password string) 
 	if err != nil {
 		return nil, err
 	}
-	_ = s.store.IncrDownloads(ctx, token)
+	if err := s.consumeDownload(ctx, token); err != nil {
+		return nil, err
+	}
 	return entry, nil
 }
 
@@ -135,8 +142,27 @@ func (s *ShareService) AccessAuthorizedShare(ctx context.Context, token string) 
 	if err != nil {
 		return nil, err
 	}
-	_ = s.store.IncrDownloads(ctx, token)
+	if err := s.consumeDownload(ctx, token); err != nil {
+		return nil, err
+	}
 	return entry, nil
+}
+
+func (s *ShareService) consumeDownload(ctx context.Context, token string) error {
+	if consumer, ok := s.store.(ShareDownloadConsumer); ok {
+		ok, err := consumer.TryConsumeDownload(ctx, token)
+		if err != nil {
+			return fmt.Errorf("记录分享下载: %w", err)
+		}
+		if !ok {
+			return ErrShareExhausted
+		}
+		return nil
+	}
+	if err := s.store.IncrDownloads(ctx, token); err != nil {
+		return fmt.Errorf("记录分享下载: %w", err)
+	}
+	return nil
 }
 
 func (s *ShareService) authorizeShare(ctx context.Context, token, password string, passwordVerified bool) (*ShareEntry, error) {

@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/bilbilmyc/fileupload/internal/domain"
@@ -20,6 +21,13 @@ type JWTService struct {
 	secret []byte
 	expiry time.Duration
 	users  map[string]*domain.AuthUser // 内存用户表（生产环境应从 DB 加载）
+
+	refreshStore domain.RefreshTokenStore
+
+	// usedRefresh is the single-process fallback for tests and standalone use.
+	// Production wiring provides refreshStore so rotation is shared by instances.
+	refreshMu   sync.Mutex
+	usedRefresh map[string]time.Time
 }
 
 // NewJWTService 创建 JWT 鉴权服务
@@ -27,10 +35,18 @@ type JWTService struct {
 // expiry: access token 过期时间
 // users: 预置用户列表。空列表不会隐式创建用户，避免生产环境暴露默认凭据。
 func NewJWTService(secret string, expiry time.Duration, users []domain.AuthUser) *JWTService {
+	return NewJWTServiceWithRefreshStore(secret, expiry, users, nil)
+}
+
+// NewJWTServiceWithRefreshStore 创建带共享 refresh token 消费存储的 JWT 服务。
+// store 为空时保留单进程内存回退，便于独立运行和单元测试。
+func NewJWTServiceWithRefreshStore(secret string, expiry time.Duration, users []domain.AuthUser, store domain.RefreshTokenStore) *JWTService {
 	s := &JWTService{
-		secret: []byte(secret),
-		expiry: expiry,
-		users:  make(map[string]*domain.AuthUser),
+		secret:       []byte(secret),
+		expiry:       expiry,
+		users:        make(map[string]*domain.AuthUser),
+		refreshStore: store,
+		usedRefresh:  make(map[string]time.Time),
 	}
 
 	for i := range users {
@@ -73,7 +89,7 @@ func (s *JWTService) Login(_ context.Context, username, password string) (*domai
 // ValidateToken 验证 access token 并返回 claims
 func (s *JWTService) ValidateToken(tokenStr string) (*domain.AuthClaims, error) {
 	token, err := jwt.Parse(tokenStr, func(token *jwt.Token) (any, error) {
-		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+		if token.Method != jwt.SigningMethodHS256 {
 			return nil, fmt.Errorf("非预期的签名方法: %v", token.Header["alg"])
 		}
 		return s.secret, nil
@@ -87,11 +103,22 @@ func (s *JWTService) ValidateToken(tokenStr string) (*domain.AuthClaims, error) 
 		return nil, fmt.Errorf("token claims 无效")
 	}
 
+	tokenType, _ := claims["type"].(string)
+	if tokenType != "access" {
+		return nil, fmt.Errorf("非 access token")
+	}
+
 	userID, _ := claims["user_id"].(string)
 	namespace, _ := claims["namespace"].(string)
 	tokenID, _ := claims["token_id"].(string)
+	if userID == "" || namespace == "" || tokenID == "" {
+		return nil, fmt.Errorf("access token claims 缺少必需字段")
+	}
 
-	rolesRaw, _ := claims["roles"].([]any)
+	rolesRaw, ok := claims["roles"].([]any)
+	if !ok {
+		return nil, fmt.Errorf("access token roles 无效")
+	}
 	var roles []string
 	for _, r := range rolesRaw {
 		if s, ok := r.(string); ok {
@@ -108,11 +135,11 @@ func (s *JWTService) ValidateToken(tokenStr string) (*domain.AuthClaims, error) 
 }
 
 // RefreshToken 使用 refresh token 获取新的令牌对
-func (s *JWTService) RefreshToken(_ context.Context, refreshToken string) (*domain.TokenPair, error) {
+func (s *JWTService) RefreshToken(ctx context.Context, refreshToken string) (*domain.TokenPair, error) {
 	// refresh token 也用 JWT 但不同 key 签发
 	token, err := jwt.Parse(refreshToken, func(token *jwt.Token) (any, error) {
-		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, fmt.Errorf("非预期的签名方法")
+		if token.Method != jwt.SigningMethodHS256 {
+			return nil, fmt.Errorf("非预期的签名方法: %v", token.Header["alg"])
 		}
 		return s.secret, nil
 	})
@@ -131,14 +158,64 @@ func (s *JWTService) RefreshToken(_ context.Context, refreshToken string) (*doma
 	}
 
 	userID, _ := claims["user_id"].(string)
+	tokenID, _ := claims["token_id"].(string)
+	if userID == "" || tokenID == "" {
+		return nil, fmt.Errorf("refresh token 缺少必需字段")
+	}
+	expiresAt, ok := refreshExpiry(claims["exp"])
+	if !ok {
+		return nil, fmt.Errorf("refresh token 缺少有效 exp")
+	}
 	// 查找用户
 	for _, user := range s.users {
 		if user.ID == userID {
-			return s.generateTokenPair(user)
+			if err := s.consumeRefreshToken(ctx, tokenID, expiresAt); err != nil {
+				return nil, err
+			}
+			pair, err := s.generateTokenPair(user)
+			if err != nil {
+				return nil, err
+			}
+			return pair, nil
 		}
 	}
 
 	return nil, fmt.Errorf("用户不存在")
+}
+
+func (s *JWTService) consumeRefreshToken(ctx context.Context, tokenID string, expiresAt time.Time) error {
+	if s.refreshStore != nil {
+		claimed, err := s.refreshStore.ClaimRefreshToken(ctx, tokenID, expiresAt)
+		if err != nil {
+			return fmt.Errorf("claim refresh token: %w", err)
+		}
+		if !claimed {
+			return fmt.Errorf("refresh token 已被使用")
+		}
+		return nil
+	}
+
+	s.refreshMu.Lock()
+	defer s.refreshMu.Unlock()
+	now := time.Now()
+	for id, expiry := range s.usedRefresh {
+		if !expiry.After(now) {
+			delete(s.usedRefresh, id)
+		}
+	}
+	if _, used := s.usedRefresh[tokenID]; used {
+		return fmt.Errorf("refresh token 已被使用")
+	}
+	s.usedRefresh[tokenID] = expiresAt
+	return nil
+}
+
+func refreshExpiry(value any) (time.Time, bool) {
+	seconds, ok := value.(float64)
+	if !ok || seconds <= 0 {
+		return time.Time{}, false
+	}
+	return time.Unix(int64(seconds), 0), true
 }
 
 // generateTokenPair 生成 access + refresh token 对

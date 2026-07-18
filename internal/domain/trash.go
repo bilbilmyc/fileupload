@@ -81,9 +81,21 @@ func (s *UploadService) PurgeFromTrash(ctx context.Context, id, namespace string
 		}
 	}
 	if root.IsDir {
-		return s.deleteDir(ctx, root, namespace)
+		return s.deleteDirDeferred(ctx, root, namespace)
 	}
-	return s.deleteFile(ctx, root)
+	var undo []undoOp
+	var pending []string
+	if err := s.deleteFileWithUndoDeferred(ctx, root, &undo, &pending); err != nil {
+		s.rollbackDeleteUndo(ctx, undo)
+		return err
+	}
+	for _, storagePath := range pending {
+		if err := s.storage.Delete(ctx, storagePath); err != nil {
+			// 元数据已经提交，删除失败只造成可重试的孤儿物理对象，不回滚引用。
+			return fmt.Errorf("删除物理内容: %w", err)
+		}
+	}
+	return nil
 }
 
 func trashTreeByID(items []*FileMetadata, id string) (*FileMetadata, []*FileMetadata) {

@@ -38,6 +38,20 @@ func (m *MockMetadata) CreateSession(_ context.Context, s *domain.UploadSession)
 	return nil
 }
 
+func (m *MockMetadata) ClaimSessionFinalizing(_ context.Context, id string) (*domain.UploadSession, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s, ok := m.Sessions[id]
+	if !ok || s.ExpireAt.Before(time.Now()) {
+		return nil, domain.ErrSessionNotFound
+	}
+	if s.Status != domain.SessionActive {
+		return nil, domain.ErrSessionState
+	}
+	s.Status = domain.SessionFinalizing
+	return s, nil
+}
+
 func (m *MockMetadata) GetSession(_ context.Context, id string) (*domain.UploadSession, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -109,6 +123,17 @@ func (m *MockMetadata) GetBlobBySha(_ context.Context, sha256 string) (*domain.C
 		return nil, nil
 	}
 	return b, nil
+}
+
+func (m *MockMetadata) AcquireBlob(_ context.Context, b *domain.ContentBlob) (string, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if existing, ok := m.Blobs[b.SHA256]; ok {
+		existing.RefCount++
+		return existing.StoragePath, false, nil
+	}
+	m.Blobs[b.SHA256] = b
+	return b.StoragePath, true, nil
 }
 
 func (m *MockMetadata) PutBlob(_ context.Context, b *domain.ContentBlob) error {
@@ -427,3 +452,6 @@ func (m *MockMetadata) ListShares(_ context.Context, _, _ string) ([]*domain.Sha
 }
 func (m *MockMetadata) DeleteShare(_ context.Context, _, _ string) error { return nil }
 func (m *MockMetadata) IncrDownloads(_ context.Context, _ string) error  { return nil }
+func (m *MockMetadata) TryConsumeDownload(_ context.Context, _ string) (bool, error) {
+	return true, nil
+}

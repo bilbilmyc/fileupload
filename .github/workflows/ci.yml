@@ -37,8 +37,22 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: fileupload
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d fileupload"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     env:
       FILEUPLOAD_REDIS_ADDR: localhost:6379
+      FILEUPLOAD_PG_DSN: postgres://postgres:postgres@localhost:5432/fileupload?sslmode=disable
     steps:
       - uses: actions/checkout@v6
 

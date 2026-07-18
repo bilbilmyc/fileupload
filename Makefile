@@ -205,6 +205,7 @@ tidy:
 
 .PHONY: check
 check: web-deps
+	@pnpm web:build
 	@echo "▸ 检查 Go 格式"
 	@test -z "$$(gofmt -l $$(git ls-files '*.go'))"
 	@echo "▸ 检查 Go module 文件"
@@ -214,7 +215,6 @@ check: web-deps
 	@go test -race -count=1 ./...
 	@pnpm web:lint
 	@pnpm web:test:coverage
-	@pnpm web:build
 
 # ---- 清理 ----
 

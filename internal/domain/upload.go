@@ -73,8 +73,17 @@ func (s *UploadService) CheckExists(ctx context.Context, sha256, namespace, name
 		return nil, nil
 	}
 
-	if err := s.ensureNamespaceCapacity(ctx, namespace, blob.Size); err != nil {
+	fileID := NewID()
+	reserved, err := s.reserveNamespace(ctx, fileID, namespace, blob.Size)
+	if err != nil {
 		return nil, err
+	}
+	if reserved {
+		defer func() {
+			if err := s.releaseNamespace(ctx, fileID); err != nil {
+				log.Printf("[upload] 释放秒传配额预留失败 id=%s: %v", fileID, err)
+			}
+		}()
 	}
 
 	log.Printf("[upload] 秒传命中 sha256=%s (%s)", shaPrefix(sha256), name)
@@ -85,7 +94,6 @@ func (s *UploadService) CheckExists(ctx context.Context, sha256, namespace, name
 	}
 
 	// 创建逻辑文件记录
-	fileID := NewID()
 	now := time.Now()
 	f := &FileMetadata{
 		FileID:    fileID,
@@ -112,9 +120,6 @@ func (s *UploadService) CreateSession(ctx context.Context, sha256 string, length
 	if length < 0 {
 		return nil, ErrInvalidArgument
 	}
-	if err := s.ensureNamespaceCapacity(ctx, namespace, length); err != nil {
-		return nil, err
-	}
 	if chunkSize <= 0 {
 		chunkSize = s.cfg.DefaultChunkSize
 	}
@@ -138,7 +143,14 @@ func (s *UploadService) CreateSession(ctx context.Context, sha256 string, length
 		Status:       SessionActive,
 	}
 
+	reserved, err := s.reserveNamespace(ctx, sessionID, namespace, length)
+	if err != nil {
+		return nil, err
+	}
 	if err := s.meta.CreateSession(ctx, session); err != nil {
+		if reserved {
+			_ = s.releaseNamespace(ctx, sessionID)
+		}
 		return nil, fmt.Errorf("创建会话: %w", err)
 	}
 	log.Printf("[upload] 创建会话 %s: %s %d 字节 (ns=%s)", sessionID, fileName, length, namespace)
@@ -159,6 +171,26 @@ func (s *UploadService) ensureNamespaceCapacity(ctx context.Context, namespace s
 	}
 	if usage != nil && incomingBytes > s.cfg.NamespaceQuotaBytes-usage.TotalSize {
 		return ErrQuotaExceeded
+	}
+	return nil
+}
+
+func (s *UploadService) reserveNamespace(ctx context.Context, reservationID, namespace string, bytes int64) (bool, error) {
+	if s.cfg.NamespaceQuotaBytes <= 0 || bytes <= 0 {
+		return false, nil
+	}
+	if reservoir, ok := s.meta.(NamespaceQuotaReservoir); ok {
+		if err := reservoir.ReserveNamespaceBytes(ctx, namespace, reservationID, bytes, s.cfg.NamespaceQuotaBytes); err != nil {
+			return true, err
+		}
+		return true, nil
+	}
+	return false, s.ensureNamespaceCapacity(ctx, namespace, bytes)
+}
+
+func (s *UploadService) releaseNamespace(ctx context.Context, reservationID string) error {
+	if reservoir, ok := s.meta.(NamespaceQuotaReservoir); ok {
+		return reservoir.ReleaseNamespaceReservation(ctx, reservationID)
 	}
 	return nil
 }
@@ -467,20 +499,38 @@ func safeStorageName(name string) string {
 // 使用三阶段流水线：mergeChunks → verifyStream → commitStream
 // 各阶段可独立测试（见 finalize_test.go）。
 func (s *UploadService) Finalize(ctx context.Context, sessionID string) (*FileMetadata, error) {
-	session, err := s.meta.GetSession(ctx, sessionID)
-	if err != nil {
-		return nil, fmt.Errorf("获取会话: %w", err)
-	}
-	if session == nil {
-		return nil, ErrSessionNotFound
-	}
-	if session.Status != SessionActive {
-		return nil, ErrSessionState
+	var session *UploadSession
+	if finalizer, ok := s.meta.(SessionFinalizer); ok {
+		var claimErr error
+		session, claimErr = finalizer.ClaimSessionFinalizing(ctx, sessionID)
+		if claimErr != nil {
+			return nil, claimErr
+		}
+	} else {
+		var getErr error
+		session, getErr = s.meta.GetSession(ctx, sessionID)
+		if getErr != nil {
+			return nil, fmt.Errorf("获取会话: %w", getErr)
+		}
+		if session == nil {
+			return nil, ErrSessionNotFound
+		}
+		if session.Status != SessionActive {
+			return nil, ErrSessionState
+		}
+		session.Status = SessionFinalizing
 	}
 
-	// 标记 finalizing
-	session.Status = SessionFinalizing
+	// 标记 finalizing 后延长 TTL，给合并和写入阶段留出时间。
 	_ = s.meta.TouchSession(ctx, sessionID, s.cfg.SessionTTL)
+	reservationActive := s.cfg.NamespaceQuotaBytes > 0
+	if reservationActive {
+		defer func() {
+			if err := s.releaseNamespace(ctx, sessionID); err != nil {
+				log.Printf("[upload] 释放 finalize 配额预留失败 id=%s: %v", sessionID, err)
+			}
+		}()
+	}
 
 	// 获取已落盘分片列表
 	chunks, err := s.meta.ListChunks(ctx, sessionID)
@@ -520,8 +570,12 @@ func (s *UploadService) Finalize(ctx context.Context, sessionID string) (*FileMe
 	// 分隔符、保留设备名等带入底层存储。
 	storagePath := s.layout.FlatPath(session.Namespace, sessionID+"-"+safeStorageName(fileName))
 
-	// Phase 3: 写入存储 + 创建去重和文件记录
-	fileMeta, err := commitStream(ctx, verifiedReader, storagePath, session, s.storage, s.meta, s.meta, hashRes)
+	// Phase 3: 写入存储 + 创建去重和文件记录。实际解压大小可能不同于
+	// 会话声明长度，因此先把原子配额预留调整到最终大小。
+	fileMeta, err := commitStreamWithGuard(ctx, verifiedReader, storagePath, session, s.storage, s.meta, s.meta, hashRes, func(size int64) error {
+		_, err := s.reserveNamespace(ctx, sessionID, session.Namespace, size)
+		return err
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -777,14 +831,47 @@ func (s *UploadService) MoveFile(ctx context.Context, fileID, targetDirID, names
 		return err
 	}
 	if file == nil {
-		return nil
+		return ErrNotFound
 	}
 	if file.Namespace != namespace {
-		return nil
+		return ErrForbidden
 	}
 
 	var parentID *string
 	if targetDirID != "" {
+		if targetDirID == fileID {
+			return ErrInvalidArgument
+		}
+		target, err := s.meta.GetFile(ctx, targetDirID)
+		if err != nil {
+			return err
+		}
+		if target == nil {
+			return ErrNotFound
+		}
+		if target.Namespace != namespace {
+			return ErrForbidden
+		}
+		if !target.IsDir || target.DeletedAt != nil {
+			return ErrInvalidArgument
+		}
+
+		// 目录不能移动到自己的后代，否则会形成不可遍历的环。
+		seen := map[string]bool{}
+		current := target
+		for current != nil && current.FileID != "" && !seen[current.FileID] {
+			seen[current.FileID] = true
+			if current.FileID == fileID {
+				return ErrInvalidArgument
+			}
+			if current.ParentID == "" {
+				break
+			}
+			current, err = s.meta.GetFile(ctx, current.ParentID)
+			if err != nil {
+				return err
+			}
+		}
 		parentID = &targetDirID
 	}
 	return s.meta.UpdateFileParent(ctx, fileID, parentID)
@@ -926,6 +1013,87 @@ func (s *UploadService) deleteFileWithUndo(ctx context.Context, file *FileMetada
 	return nil
 }
 
+// deleteDirDeferred 删除元数据和引用后再统一清理物理对象。数据库阶段失败时，
+// 只回滚数据库，不会留下“引用已恢复但物理内容已被提前删除”的数据损坏。
+func (s *UploadService) deleteDirDeferred(ctx context.Context, dir *FileMetadata, namespace string) error {
+	var undo []undoOp
+	var pending []string
+	if err := s.deleteDirDeferredWithUndo(ctx, dir, namespace, &undo, &pending); err != nil {
+		s.rollbackDeleteUndo(ctx, undo)
+		return err
+	}
+	for _, storagePath := range pending {
+		if err := s.storage.Delete(ctx, storagePath); err != nil {
+			log.Printf("[upload] 延迟删除物理内容失败 path=%s: %v", storagePath, err)
+		}
+	}
+	return nil
+}
+
+func (s *UploadService) deleteDirDeferredWithUndo(ctx context.Context, dir *FileMetadata, namespace string, undo *[]undoOp, pending *[]string) error {
+	if dir.Namespace != namespace {
+		return ErrForbidden
+	}
+	children, err := s.meta.ListChildren(ctx, dir.FileID, "")
+	if err != nil {
+		return fmt.Errorf("列举子节点: %w", err)
+	}
+	for _, child := range children {
+		if child.IsDir {
+			if err := s.deleteDirDeferredWithUndo(ctx, child, namespace, undo, pending); err != nil {
+				return err
+			}
+		} else if err := s.deleteFileWithUndoDeferred(ctx, child, undo, pending); err != nil {
+			return err
+		}
+	}
+	if err := s.meta.DeleteFile(ctx, dir.FileID); err != nil {
+		return err
+	}
+	*undo = append(*undo, undoOp{kind: undoDeleteFile, file: dir.Clone()})
+	return nil
+}
+
+func (s *UploadService) deleteFileWithUndoDeferred(ctx context.Context, file *FileMetadata, undo *[]undoOp, pending *[]string) error {
+	if err := s.meta.DeleteFile(ctx, file.FileID); err != nil {
+		return fmt.Errorf("删除文件记录: %w", err)
+	}
+	*undo = append(*undo, undoOp{kind: undoDeleteFile, file: file.Clone()})
+	if file.SHA256 == "" {
+		return nil
+	}
+	newCount, err := s.meta.DecrBlobRef(ctx, file.SHA256)
+	if err != nil {
+		return fmt.Errorf("减少引用: %w", err)
+	}
+	*undo = append(*undo, undoOp{kind: undoDecrRef, sha: file.SHA256})
+	if newCount <= 0 {
+		blob, err := s.meta.GetBlobBySha(ctx, file.SHA256)
+		if err == nil && blob != nil && blob.StoragePath != "" {
+			*pending = append(*pending, blob.StoragePath)
+		}
+	}
+	return nil
+}
+
+func (s *UploadService) rollbackDeleteUndo(ctx context.Context, undo []undoOp) {
+	for i := len(undo) - 1; i >= 0; i-- {
+		op := undo[i]
+		switch op.kind {
+		case undoDeleteFile:
+			if op.file != nil {
+				if err := s.meta.PutFile(ctx, op.file); err != nil {
+					log.Printf("[upload] 回滚 PutFile 失败 id=%s: %v", op.file.FileID, err)
+				}
+			}
+		case undoDecrRef:
+			if err := s.meta.IncrBlobRef(ctx, op.sha); err != nil {
+				log.Printf("[upload] 回滚 IncrBlobRef 失败 sha=%s: %v", op.sha, err)
+			}
+		}
+	}
+}
+
 // Abort 取消上传会话
 func (s *UploadService) Abort(ctx context.Context, sessionID string) error {
 	session, err := s.meta.GetSession(ctx, sessionID)
@@ -942,7 +1110,13 @@ func (s *UploadService) Abort(ctx context.Context, sessionID string) error {
 
 	// 删除会话
 	log.Printf("[upload] 取消上传 %s (%s)", sessionID, session.FileName)
-	return s.meta.DeleteSession(ctx, sessionID)
+	if err := s.meta.DeleteSession(ctx, sessionID); err != nil {
+		return err
+	}
+	if err := s.releaseNamespace(ctx, sessionID); err != nil {
+		return fmt.Errorf("释放配额预留: %w", err)
+	}
+	return nil
 }
 
 // shaPrefix 安全截取 SHA-256 前 12 位用于日志，不足时显示全部。

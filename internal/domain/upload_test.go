@@ -724,3 +724,30 @@ func TestCreateSession_RejectsNamespaceQuotaExceeded(t *testing.T) {
 		t.Fatalf("CreateSession quota error = %v, want %v", err, ErrQuotaExceeded)
 	}
 }
+
+func TestMoveFile_ValidatesTargetNamespaceAndCycles(t *testing.T) {
+	svc, meta, _ := newTestUploadService(t)
+	ctx := context.Background()
+	meta.PutFile(ctx, &FileMetadata{FileID: "root", Name: "root", Path: "root", Namespace: "demo", IsDir: true, CreatedAt: time.Now()})
+	meta.PutFile(ctx, &FileMetadata{FileID: "child", Name: "child", Path: "root/child", Namespace: "demo", IsDir: true, ParentID: "root", CreatedAt: time.Now()})
+	meta.PutFile(ctx, &FileMetadata{FileID: "file", Name: "file.txt", Path: "file.txt", Namespace: "demo", CreatedAt: time.Now()})
+	meta.PutFile(ctx, &FileMetadata{FileID: "other", Name: "other", Path: "other", Namespace: "other", IsDir: true, CreatedAt: time.Now()})
+	meta.PutFile(ctx, &FileMetadata{FileID: "not-dir", Name: "not-dir", Path: "not-dir", Namespace: "demo", CreatedAt: time.Now()})
+
+	if err := svc.MoveFile(ctx, "file", "other", "demo"); err != ErrForbidden {
+		t.Fatalf("cross-namespace target error = %v, want %v", err, ErrForbidden)
+	}
+	if err := svc.MoveFile(ctx, "file", "not-dir", "demo"); err != ErrInvalidArgument {
+		t.Fatalf("file target error = %v, want %v", err, ErrInvalidArgument)
+	}
+	if err := svc.MoveFile(ctx, "root", "child", "demo"); err != ErrInvalidArgument {
+		t.Fatalf("directory cycle error = %v, want %v", err, ErrInvalidArgument)
+	}
+	if err := svc.MoveFile(ctx, "file", "root", "demo"); err != nil {
+		t.Fatalf("valid move error = %v", err)
+	}
+	moved, _ := meta.GetFile(ctx, "file")
+	if moved.ParentID != "root" {
+		t.Fatalf("ParentID = %q, want root", moved.ParentID)
+	}
+}

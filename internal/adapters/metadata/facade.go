@@ -114,6 +114,25 @@ func (f *Facade) ListExpiredSessions(ctx context.Context) ([]string, error) {
 	return f.hot.ListExpiredSessions(ctx)
 }
 
+// ClaimSessionFinalizing 将可选的原子 finalize 抢占能力透传给热存储。
+func (f *Facade) ClaimSessionFinalizing(ctx context.Context, id string) (*domain.UploadSession, error) {
+	if finalizer, ok := f.hot.(domain.SessionFinalizer); ok {
+		return finalizer.ClaimSessionFinalizing(ctx, id)
+	}
+	s, err := f.hot.GetSession(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if s == nil {
+		return nil, domain.ErrSessionNotFound
+	}
+	if s.Status != domain.SessionActive {
+		return nil, domain.ErrSessionState
+	}
+	s.Status = domain.SessionFinalizing
+	return s, nil
+}
+
 // ========== 冷数据：blob + file ==========
 
 func (f *Facade) GetBlobBySha(ctx context.Context, sha256 string) (*domain.ContentBlob, error) {
@@ -188,6 +207,32 @@ func (f *Facade) UpdateBlobStorage(ctx context.Context, sha256 string, storagePa
 	return f.cold.UpdateBlobStorage(ctx, sha256, storagePath)
 }
 
+// AcquireBlob 将可选的原子 blob 获取能力透传给冷存储。
+// ReserveNamespaceBytes 将可选的原子配额预留能力透传给冷存储。
+func (f *Facade) ReserveNamespaceBytes(ctx context.Context, namespace, reservationID string, bytes, quota int64) error {
+	if reservoir, ok := f.cold.(domain.NamespaceQuotaReservoir); ok {
+		return reservoir.ReserveNamespaceBytes(ctx, namespace, reservationID, bytes, quota)
+	}
+	return nil
+}
+
+func (f *Facade) ReleaseNamespaceReservation(ctx context.Context, reservationID string) error {
+	if reservoir, ok := f.cold.(domain.NamespaceQuotaReservoir); ok {
+		return reservoir.ReleaseNamespaceReservation(ctx, reservationID)
+	}
+	return nil
+}
+
+func (f *Facade) AcquireBlob(ctx context.Context, b *domain.ContentBlob) (string, bool, error) {
+	if committer, ok := f.cold.(domain.BlobCommitter); ok {
+		return committer.AcquireBlob(ctx, b)
+	}
+	if err := f.cold.PutBlob(ctx, b); err != nil {
+		return "", false, err
+	}
+	return b.StoragePath, true, nil
+}
+
 func (f *Facade) RenameFile(ctx context.Context, fileID, newName, newPath string) error {
 	return f.cold.RenameFile(ctx, fileID, newName, newPath)
 }
@@ -240,6 +285,17 @@ func (f *Facade) DeleteShare(ctx context.Context, token, namespace string) error
 
 func (f *Facade) IncrDownloads(ctx context.Context, token string) error {
 	return f.cold.IncrDownloads(ctx, token)
+}
+
+// TryConsumeDownload 将可选的原子分享额度消耗能力透传给冷存储。
+func (f *Facade) TryConsumeDownload(ctx context.Context, token string) (bool, error) {
+	if consumer, ok := f.cold.(domain.ShareDownloadConsumer); ok {
+		return consumer.TryConsumeDownload(ctx, token)
+	}
+	if err := f.cold.IncrDownloads(ctx, token); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // ========== 管理后台 ==========

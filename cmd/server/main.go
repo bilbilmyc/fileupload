@@ -159,7 +159,7 @@ func buildDeps(cfg *config.Config) (Deps, error) {
 			users = append(users, auth.DevelopmentUsers()...)
 		}
 		jwtExpiry := time.Duration(cfg.Auth.JWTExpiry) * time.Hour
-		authSvc = auth.NewJWTService(cfg.Auth.JWTSecret, jwtExpiry, users)
+		authSvc = auth.NewJWTServiceWithRefreshStore(cfg.Auth.JWTSecret, jwtExpiry, users, redisStore)
 	}
 
 	workerPool := domain.NewSimpleWorkerPool(cfg.Upload.WorkerPoolSize, cfg.Upload.WorkerQueueSize)

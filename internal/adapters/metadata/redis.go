@@ -44,6 +44,26 @@ func (r *RedisStore) offsetKey(id string) string {
 	return r.prefix + "offset:" + id
 }
 
+func (r *RedisStore) refreshKey(tokenID string) string {
+	return r.prefix + "refresh:" + tokenID
+}
+
+// ClaimRefreshToken 原子消费 refresh token，确保多实例部署下只能成功一次。
+func (r *RedisStore) ClaimRefreshToken(ctx context.Context, tokenID string, expiresAt time.Time) (bool, error) {
+	if tokenID == "" {
+		return false, domain.ErrInvalidArgument
+	}
+	ttl := time.Until(expiresAt)
+	if ttl <= 0 {
+		return false, nil
+	}
+	claimed, err := r.client.SetNX(ctx, r.refreshKey(tokenID), "1", ttl).Result()
+	if err != nil {
+		return false, fmt.Errorf("claim refresh token: %w", err)
+	}
+	return claimed, nil
+}
+
 // CreateSession 创建上传会话
 func (r *RedisStore) CreateSession(ctx context.Context, s *domain.UploadSession) error {
 	data, err := json.Marshal(s)
@@ -60,6 +80,52 @@ func (r *RedisStore) CreateSession(ctx context.Context, s *domain.UploadSession)
 }
 
 // GetSession 获取上传会话
+// ClaimSessionFinalizing 使用 WATCH 原子抢占会话，确保同一上传只允许一个 finalize worker。
+func (r *RedisStore) ClaimSessionFinalizing(ctx context.Context, id string) (*domain.UploadSession, error) {
+	key := r.sessionKey(id)
+	var claimed *domain.UploadSession
+	err := r.client.Watch(ctx, func(tx *redis.Tx) error {
+		data, err := tx.Get(ctx, key).Bytes()
+		if err == redis.Nil {
+			return domain.ErrSessionNotFound
+		}
+		if err != nil {
+			return err
+		}
+		var session domain.UploadSession
+		if err := json.Unmarshal(data, &session); err != nil {
+			return fmt.Errorf("反序列化会话: %w", err)
+		}
+		if session.Status != domain.SessionActive {
+			return domain.ErrSessionState
+		}
+		session.Status = domain.SessionFinalizing
+		encoded, err := json.Marshal(&session)
+		if err != nil {
+			return err
+		}
+		ttl := time.Until(session.ExpireAt)
+		if ttl <= 0 {
+			ttl = time.Hour
+		}
+		if _, err := tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+			pipe.Set(ctx, key, encoded, ttl)
+			return nil
+		}); err != nil {
+			return err
+		}
+		claimed = &session
+		return nil
+	}, key)
+	if err == redis.TxFailedErr {
+		return nil, domain.ErrSessionState
+	}
+	if err != nil {
+		return nil, err
+	}
+	return claimed, nil
+}
+
 func (r *RedisStore) GetSession(ctx context.Context, id string) (*domain.UploadSession, error) {
 	data, err := r.client.Get(ctx, r.sessionKey(id)).Bytes()
 	if err == redis.Nil {

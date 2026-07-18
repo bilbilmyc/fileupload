@@ -87,6 +87,7 @@ func (m *Middleware) CORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
 		if len(m.corsOrigins) > 0 && origin != "" {
+			w.Header().Add("Vary", "Origin")
 			allowed := false
 			for _, o := range m.corsOrigins {
 				if o == "*" || o == origin {
@@ -140,7 +141,7 @@ func (m *Middleware) Recover(next http.Handler) http.Handler {
 func (m *Middleware) RequestID(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		id := r.Header.Get("X-Request-ID")
-		if id == "" {
+		if !validRequestID(id) {
 			b := make([]byte, 8)
 			_, _ = rand.Read(b)
 			id = hex.EncodeToString(b)
@@ -149,6 +150,23 @@ func (m *Middleware) RequestID(next http.Handler) http.Handler {
 		ctx := context.WithValue(r.Context(), ctxKeyRequestID, id)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+func validRequestID(id string) bool {
+	if id == "" || len(id) > 128 {
+		return false
+	}
+	for _, r := range id {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			continue
+		}
+		switch r {
+		case '.', '_', ':', '-':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // Namespace 注入请求命名空间。JWT 用户只能使用 token 内声明的 namespace；

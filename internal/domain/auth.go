@@ -1,10 +1,19 @@
 package domain
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // ============================================================
 // 鉴权领域模型和端口接口
 // ============================================================
+
+// RefreshTokenStore 提供跨进程的一次性 refresh token 消费语义。
+// tokenID 应在 expiresAt 到期后自动失效，ClaimRefreshToken 必须具备原子性。
+type RefreshTokenStore interface {
+	ClaimRefreshToken(ctx context.Context, tokenID string, expiresAt time.Time) (bool, error)
+}
 
 // AuthService 鉴权服务接口
 type AuthService interface {

@@ -217,3 +217,44 @@ func TestRedisStore_ListChunks_Empty(t *testing.T) {
 		t.Errorf("empty chunks count = %d, want 0", len(chunks))
 	}
 }
+
+func TestRedisStore_ClaimSessionFinalizingIsAtomic(t *testing.T) {
+	s, _ := newTestRedis(t)
+	ctx := context.Background()
+	session := &domain.UploadSession{SessionID: "claim-001", Namespace: "demo", ExpireAt: time.Now().Add(time.Hour), Status: domain.SessionActive}
+	if err := s.CreateSession(ctx, session); err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := s.ClaimSessionFinalizing(ctx, session.SessionID)
+	if err != nil {
+		t.Fatalf("ClaimSessionFinalizing error = %v", err)
+	}
+	if claimed.Status != domain.SessionFinalizing {
+		t.Fatalf("claimed status = %s, want finalizing", claimed.Status)
+	}
+	if _, err := s.ClaimSessionFinalizing(ctx, session.SessionID); err != domain.ErrSessionState {
+		t.Fatalf("second claim error = %v, want %v", err, domain.ErrSessionState)
+	}
+}
+
+func TestRedisStore_ClaimRefreshTokenIsAtomic(t *testing.T) {
+	s, _ := newTestRedis(t)
+	ctx := context.Background()
+	expiresAt := time.Now().Add(time.Hour)
+
+	claimed, err := s.ClaimRefreshToken(ctx, "refresh-001", expiresAt)
+	if err != nil {
+		t.Fatalf("first ClaimRefreshToken error = %v", err)
+	}
+	if !claimed {
+		t.Fatal("first ClaimRefreshToken = false, want true")
+	}
+
+	claimed, err = s.ClaimRefreshToken(ctx, "refresh-001", expiresAt)
+	if err != nil {
+		t.Fatalf("second ClaimRefreshToken error = %v", err)
+	}
+	if claimed {
+		t.Fatal("second ClaimRefreshToken = true, want false")
+	}
+}

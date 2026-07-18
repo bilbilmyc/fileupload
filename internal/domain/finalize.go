@@ -95,6 +95,10 @@ func verifyStream(ctx context.Context, r io.Reader, compression CompressionForma
 // hashRes 来自 verifyStream，在 reader 被消耗后（storage.Write 完成后）可获取实际哈希和大小。
 // 验证写入后的实际哈希是否匹配声明的 SHA-256，不匹配则回滚。
 func commitStream(ctx context.Context, r io.Reader, storagePath string, session *UploadSession, storage Storage, blobStore BlobStore, fileStore FileStore, hashRes func() (string, int64)) (*FileMetadata, error) {
+	return commitStreamWithGuard(ctx, r, storagePath, session, storage, blobStore, fileStore, hashRes, nil)
+}
+
+func commitStreamWithGuard(ctx context.Context, r io.Reader, storagePath string, session *UploadSession, storage Storage, blobStore BlobStore, fileStore FileStore, hashRes func() (string, int64), beforeCommit func(size int64) error) (*FileMetadata, error) {
 	// 1. 写入最终存储（同时消耗 reader）
 	written, err := storage.Write(ctx, storagePath, r)
 	if err != nil {
@@ -115,6 +119,12 @@ func commitStream(ctx context.Context, r io.Reader, storagePath string, session 
 	if actualN > size {
 		size = actualN
 	}
+	if beforeCommit != nil {
+		if err := beforeCommit(size); err != nil {
+			_ = storage.Delete(ctx, storagePath)
+			return nil, err
+		}
+	}
 
 	fileID := NewID()
 	now := time.Now()
@@ -123,7 +133,8 @@ func commitStream(ctx context.Context, r io.Reader, storagePath string, session 
 		fileName = fileID
 	}
 
-	// 4. 创建 content_blob
+	// 4. 原子获取 content_blob。相同 SHA 的并发提交必须只创建一个 blob，
+	// 后续提交只递增引用并复用已有物理路径。
 	blob := &ContentBlob{
 		SHA256:      actualSha,
 		StoragePath: storagePath,
@@ -131,9 +142,24 @@ func commitStream(ctx context.Context, r io.Reader, storagePath string, session 
 		RefCount:    1,
 		CreatedAt:   now,
 	}
-	if err := blobStore.PutBlob(ctx, blob); err != nil {
+	blobAcquired := false
+	if committer, ok := blobStore.(BlobCommitter); ok {
+		canonicalPath, inserted, err := committer.AcquireBlob(ctx, blob)
+		if err != nil {
+			_ = storage.Delete(ctx, storagePath)
+			return nil, fmt.Errorf("获取去重记录: %w", err)
+		}
+		blobAcquired = true
+		if !inserted {
+			// 当前写入只是临时副本，逻辑文件通过 SHA 解析 canonicalPath。
+			_ = storage.Delete(ctx, storagePath)
+			blob.StoragePath = canonicalPath
+		}
+	} else if err := blobStore.PutBlob(ctx, blob); err != nil {
 		_ = storage.Delete(ctx, storagePath)
 		return nil, fmt.Errorf("写入去重记录: %w", err)
+	} else {
+		blobAcquired = true
 	}
 
 	// 5. 创建逻辑文件记录
@@ -148,7 +174,9 @@ func commitStream(ctx context.Context, r io.Reader, storagePath string, session 
 		CreatedAt: now,
 	}
 	if err := fileStore.PutFile(ctx, fileMeta); err != nil {
-		_, _ = blobStore.DecrBlobRef(ctx, actualSha)
+		if blobAcquired {
+			_, _ = blobStore.DecrBlobRef(ctx, actualSha)
+		}
 		return nil, fmt.Errorf("写入文件记录: %w", err)
 	}
 

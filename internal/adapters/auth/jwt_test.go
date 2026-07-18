@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -63,6 +64,17 @@ func TestJWTService_ValidateToken_Valid(t *testing.T) {
 	}
 }
 
+func TestJWTService_ValidateToken_RejectsRefreshToken(t *testing.T) {
+	svc := NewJWTService("test-secret", time.Hour, DevelopmentUsers())
+	pair, err := svc.Login(context.Background(), "admin", "admin123")
+	if err != nil {
+		t.Fatalf("Login failed: %v", err)
+	}
+	if _, err := svc.ValidateToken(pair.RefreshToken); err == nil {
+		t.Fatal("expected refresh token to be rejected by access-token validation")
+	}
+}
+
 func TestJWTService_ValidateToken_Invalid(t *testing.T) {
 	svc := NewJWTService("test-secret", time.Hour, DevelopmentUsers())
 
@@ -103,6 +115,20 @@ func TestJWTService_RefreshToken(t *testing.T) {
 	}
 }
 
+func TestJWTService_RefreshToken_RejectsReplay(t *testing.T) {
+	svc := NewJWTService("test-secret", time.Hour, DevelopmentUsers())
+	original, err := svc.Login(context.Background(), "admin", "admin123")
+	if err != nil {
+		t.Fatalf("Login failed: %v", err)
+	}
+	if _, err := svc.RefreshToken(context.Background(), original.RefreshToken); err != nil {
+		t.Fatalf("first RefreshToken failed: %v", err)
+	}
+	if _, err := svc.RefreshToken(context.Background(), original.RefreshToken); err == nil {
+		t.Fatal("expected replayed refresh token to be rejected")
+	}
+}
+
 func TestJWTService_RefreshToken_Invalid(t *testing.T) {
 	svc := NewJWTService("test-secret", time.Hour, DevelopmentUsers())
 
@@ -138,5 +164,38 @@ func TestJWTService_TokenExpiry(t *testing.T) {
 	_, err := svc.ValidateToken(pair.AccessToken)
 	if err != nil {
 		t.Fatalf("expected token valid immediately: %v", err)
+	}
+}
+
+type fakeRefreshStore struct {
+	mu  sync.Mutex
+	ids map[string]struct{}
+}
+
+func (s *fakeRefreshStore) ClaimRefreshToken(_ context.Context, tokenID string, _ time.Time) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.ids[tokenID]; exists {
+		return false, nil
+	}
+	s.ids[tokenID] = struct{}{}
+	return true, nil
+}
+
+func TestJWTService_RefreshToken_SharedStoreRejectsAcrossInstances(t *testing.T) {
+	store := &fakeRefreshStore{ids: make(map[string]struct{})}
+	users := DevelopmentUsers()
+	first := NewJWTServiceWithRefreshStore("test-secret", time.Hour, users, store)
+	second := NewJWTServiceWithRefreshStore("test-secret", time.Hour, users, store)
+
+	pair, err := first.Login(context.Background(), "admin", "admin123")
+	if err != nil {
+		t.Fatalf("Login failed: %v", err)
+	}
+	if _, err := first.RefreshToken(context.Background(), pair.RefreshToken); err != nil {
+		t.Fatalf("first RefreshToken failed: %v", err)
+	}
+	if _, err := second.RefreshToken(context.Background(), pair.RefreshToken); err == nil {
+		t.Fatal("expected replayed refresh token to be rejected across instances")
 	}
 }

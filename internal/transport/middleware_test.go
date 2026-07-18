@@ -319,3 +319,43 @@ func TestAuth_CustomHeader(t *testing.T) {
 		t.Errorf("custom header status = %d, want 200", w.Code)
 	}
 }
+
+func TestRequestID_InvalidIncomingIDIsReplaced(t *testing.T) {
+	mw := NewMiddleware()
+	var got string
+	handler := mw.RequestID(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = GetRequestID(r.Context())
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	req.Header.Set("X-Request-ID", "bad value\nwith-control")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	if got == "bad value\nwith-control" || !validRequestID(got) {
+		t.Fatalf("invalid request ID was not replaced: %q", got)
+	}
+}
+
+func TestCORS_SetsVaryForAllowedOrigin(t *testing.T) {
+	mw := NewMiddleware().WithCORS([]string{"https://example.test"})
+	handler := mw.CORS(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	req.Header.Set("Origin", "https://example.test")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if got := w.Header().Get("Access-Control-Allow-Origin"); got != "https://example.test" {
+		t.Fatalf("allow origin = %q", got)
+	}
+	if got := w.Header().Get("Vary"); got != "Origin" {
+		t.Fatalf("Vary = %q, want Origin", got)
+	}
+}

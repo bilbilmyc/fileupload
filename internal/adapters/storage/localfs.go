@@ -29,7 +29,9 @@ func NewLocalFS(root string) (*LocalFS, error) {
 	return &LocalFS{root: absRoot}, nil
 }
 
-// absPath 将逻辑路径转为绝对路径，含路径穿越安全检查
+// absPath 将逻辑路径转为绝对路径，含路径穿越安全检查。
+// 除了词法路径检查，还会校验已存在的路径组件，避免通过符号链接
+//（以及平台能够解析的 reparse point/junction）逃出存储根目录。
 func (s *LocalFS) absPath(path string) (string, error) {
 	if path == "" || filepath.IsAbs(path) || containsPathTraversal(path) {
 		return "", domain.ErrPathTraversal
@@ -44,11 +46,66 @@ func (s *LocalFS) absPath(path string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("校验存储路径: %w", err)
 	}
-	// Rel 结果仍以 .. 开头意味着路径已逃逸 root。这个检查也覆盖 Windows 卷路径。
 	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
 		return "", domain.ErrPathTraversal
 	}
+	if err := s.validatePathComponents(candidate); err != nil {
+		return "", err
+	}
 	return candidate, nil
+}
+
+func (s *LocalFS) validatePathComponents(candidate string) error {
+	root := filepath.Clean(s.root)
+	rootInfo, rootErr := os.Lstat(root)
+	if rootErr == nil && rootInfo.Mode()&os.ModeSymlink != 0 {
+		return domain.ErrPathTraversal
+	}
+
+	current := filepath.Clean(candidate)
+	for {
+		info, err := os.Lstat(current)
+		if err == nil {
+			if info.Mode()&os.ModeSymlink != 0 {
+				return domain.ErrPathTraversal
+			}
+			resolved, err := filepath.EvalSymlinks(current)
+			if err != nil {
+				return fmt.Errorf("解析存储路径: %w", err)
+			}
+			resolved, err = filepath.Abs(resolved)
+			if err != nil {
+				return fmt.Errorf("解析存储路径: %w", err)
+			}
+			resolvedRoot, err := filepath.Abs(root)
+			if err != nil {
+				return fmt.Errorf("解析存储根目录: %w", err)
+			}
+			if rootInfo != nil {
+				resolvedRoot, err = filepath.EvalSymlinks(root)
+				if err != nil {
+					return fmt.Errorf("解析存储根目录: %w", err)
+				}
+				resolvedRoot, err = filepath.Abs(resolvedRoot)
+				if err != nil {
+					return fmt.Errorf("解析存储根目录: %w", err)
+				}
+			}
+			rel, err := filepath.Rel(resolvedRoot, resolved)
+			if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+				return domain.ErrPathTraversal
+			}
+			return nil
+		}
+		if !os.IsNotExist(err) {
+			return fmt.Errorf("检查存储路径: %w", err)
+		}
+		parent := filepath.Dir(current)
+		if parent == current || current == root {
+			return nil
+		}
+		current = parent
+	}
 }
 
 // Write 从 reader 流式写入文件
@@ -61,6 +118,9 @@ func (s *LocalFS) Write(_ context.Context, path string, r io.Reader) (int64, err
 	// 确保父目录存在
 	if err := os.MkdirAll(filepath.Dir(absPath), 0755); err != nil {
 		return 0, fmt.Errorf("创建目录 %s: %w", filepath.Dir(absPath), err)
+	}
+	if err := s.validatePathComponents(absPath); err != nil {
+		return 0, err
 	}
 
 	// 创建文件（原子写入：先写 tmp 再重命名）
@@ -175,15 +235,26 @@ func (s *LocalFS) PathExists(path string) (bool, error) {
 
 // Walk 遍历目录（一致性巡检用）
 func (s *LocalFS) Walk(ctx context.Context, fn func(path string, info fs.FileInfo) error) error {
-	return filepath.Walk(s.root, func(path string, info fs.FileInfo, err error) error {
+	return filepath.WalkDir(s.root, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		// 跳过根目录
-		if path == s.root {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if filepath.Clean(path) == filepath.Clean(s.root) {
 			return nil
 		}
-		// 转成相对路径
+		if entry.Type()&os.ModeSymlink != 0 {
+			return domain.ErrPathTraversal
+		}
+		if err := s.validatePathComponents(path); err != nil {
+			return err
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
 		relPath, err := filepath.Rel(s.root, path)
 		if err != nil {
 			return err

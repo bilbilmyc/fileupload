@@ -16,6 +16,25 @@ type SessionStore interface {
 	ListExpiredSessions(ctx context.Context) ([]string, error)
 }
 
+// SessionFinalizer 原子地将上传会话从 active 抢占为 finalizing。
+// 具体实现可使用 Redis WATCH/Lua；未实现该可选接口的存储保留兼容路径。
+type SessionFinalizer interface {
+	ClaimSessionFinalizing(ctx context.Context, id string) (*UploadSession, error)
+}
+
+// BlobCommitter 原子获取内容 blob 的引用。若内容已存在，实现必须递增引用并返回已有存储路径。
+type BlobCommitter interface {
+	AcquireBlob(ctx context.Context, b *ContentBlob) (storagePath string, inserted bool, err error)
+}
+
+// NamespaceQuotaReservoir atomically reserves logical namespace capacity.
+// Reservations are keyed by an upload/operation ID and must be released when
+// the operation finishes or is aborted.
+type NamespaceQuotaReservoir interface {
+	ReserveNamespaceBytes(ctx context.Context, namespace, reservationID string, bytes, quota int64) error
+	ReleaseNamespaceReservation(ctx context.Context, reservationID string) error
+}
+
 // BlobStore 内容寻址去重数据接口
 type BlobStore interface {
 	GetBlobBySha(ctx context.Context, sha256 string) (*ContentBlob, error)

@@ -505,3 +505,62 @@ func TestBoolToInt(t *testing.T) {
 		t.Error("boolToInt(false) != 0")
 	}
 }
+
+func TestSQLiteStore_AcquireBlobIncrementsExistingReference(t *testing.T) {
+	s := newTestSQLite(t)
+	ctx := context.Background()
+	first := &domain.ContentBlob{SHA256: "acquire-sha", StoragePath: "data/first", Size: 10, RefCount: 1, CreatedAt: time.Now()}
+	path, inserted, err := s.AcquireBlob(ctx, first)
+	if err != nil || !inserted || path != first.StoragePath {
+		t.Fatalf("first AcquireBlob = path %q inserted %v err %v", path, inserted, err)
+	}
+	second := &domain.ContentBlob{SHA256: first.SHA256, StoragePath: "data/second", Size: 10, RefCount: 1, CreatedAt: time.Now()}
+	path, inserted, err = s.AcquireBlob(ctx, second)
+	if err != nil || inserted || path != first.StoragePath {
+		t.Fatalf("second AcquireBlob = path %q inserted %v err %v", path, inserted, err)
+	}
+	got, _ := s.GetBlobBySha(ctx, first.SHA256)
+	if got.RefCount != 2 {
+		t.Fatalf("RefCount = %d, want 2", got.RefCount)
+	}
+}
+
+func TestSQLiteStore_TryConsumeDownloadHonorsLimit(t *testing.T) {
+	s := newTestSQLite(t)
+	ctx := context.Background()
+	if err := s.CreateShare(ctx, "quota-share", &domain.ShareEntry{Token: "quota-share", FileID: "f", MaxDownloads: 1}); err != nil {
+		t.Fatal(err)
+	}
+	ok, err := s.TryConsumeDownload(ctx, "quota-share")
+	if err != nil || !ok {
+		t.Fatalf("first consume = %v, %v", ok, err)
+	}
+	ok, err = s.TryConsumeDownload(ctx, "quota-share")
+	if err != nil || ok {
+		t.Fatalf("second consume = %v, %v", ok, err)
+	}
+}
+
+func TestSQLiteStore_NamespaceQuotaReservations(t *testing.T) {
+	s := newTestSQLite(t)
+	ctx := context.Background()
+
+	if err := s.ReserveNamespaceBytes(ctx, "demo", "upload-1", 8, 10); err != nil {
+		t.Fatalf("first reservation error = %v", err)
+	}
+	if err := s.ReserveNamespaceBytes(ctx, "demo", "upload-2", 3, 10); err != domain.ErrQuotaExceeded {
+		t.Fatalf("second reservation error = %v, want ErrQuotaExceeded", err)
+	}
+	if err := s.ReserveNamespaceBytes(ctx, "demo", "upload-1", 5, 10); err != nil {
+		t.Fatalf("resize reservation error = %v", err)
+	}
+	if err := s.ReserveNamespaceBytes(ctx, "demo", "upload-2", 5, 10); err != nil {
+		t.Fatalf("reservation after resize error = %v", err)
+	}
+	if err := s.ReleaseNamespaceReservation(ctx, "upload-1"); err != nil {
+		t.Fatalf("release reservation error = %v", err)
+	}
+	if err := s.ReserveNamespaceBytes(ctx, "demo", "upload-3", 5, 10); err != nil {
+		t.Fatalf("reservation after release error = %v", err)
+	}
+}

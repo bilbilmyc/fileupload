@@ -258,3 +258,20 @@ func TestContainsPathTraversal(t *testing.T) {
 		})
 	}
 }
+
+func TestLocalFS_RejectsSymlinkEscape(t *testing.T) {
+	fs, root := newTestLocalFS(t)
+	outside := t.TempDir()
+	link := filepath.Join(root, "link")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+
+	_, err := fs.Write(context.Background(), "link/escape.txt", bytes.NewReader([]byte("secret")))
+	if err != domain.ErrPathTraversal {
+		t.Fatalf("symlink escape error = %v, want ErrPathTraversal", err)
+	}
+	if _, err := os.Stat(filepath.Join(outside, "escape.txt")); !os.IsNotExist(err) {
+		t.Fatalf("symlink escape wrote outside root: stat err = %v", err)
+	}
+}

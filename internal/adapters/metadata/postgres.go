@@ -79,6 +79,16 @@ func (s *PostgresStore) migrate() error {
 			detail     TEXT NOT NULL DEFAULT '',
 			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		)`,
+		`CREATE TABLE IF NOT EXISTS namespace_quota_locks (
+			namespace TEXT PRIMARY KEY
+		)`,
+		`CREATE TABLE IF NOT EXISTS namespace_reservations (
+			reservation_id TEXT PRIMARY KEY,
+			namespace      TEXT NOT NULL,
+			bytes          BIGINT NOT NULL,
+			created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_namespace_reservations_namespace ON namespace_reservations(namespace)`,
 		`CREATE TABLE IF NOT EXISTS shares (
 			token        TEXT PRIMARY KEY,
 			file_id      TEXT NOT NULL,
@@ -106,6 +116,55 @@ func (s *PostgresStore) migrate() error {
 	return nil
 }
 
+// ReserveNamespaceBytes atomically accounts for active files and outstanding reservations.
+func (s *PostgresStore) ReserveNamespaceBytes(ctx context.Context, namespace, reservationID string, bytes, quota int64) error {
+	if namespace == "" || reservationID == "" || bytes < 0 {
+		return domain.ErrInvalidArgument
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("开启配额事务: %w", err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `INSERT INTO namespace_quota_locks(namespace) VALUES ($1) ON CONFLICT(namespace) DO NOTHING`, namespace); err != nil {
+		return fmt.Errorf("锁定命名空间配额: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `SELECT namespace FROM namespace_quota_locks WHERE namespace = $1 FOR UPDATE`, namespace); err != nil {
+		return fmt.Errorf("锁定命名空间配额: %w", err)
+	}
+	var used, reserved, current int64
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(size), 0) FROM files WHERE namespace = $1 AND deleted_at IS NULL`, namespace).Scan(&used); err != nil {
+		return fmt.Errorf("读取命名空间用量: %w", err)
+	}
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(bytes), 0) FROM namespace_reservations WHERE namespace = $1`, namespace).Scan(&reserved); err != nil {
+		return fmt.Errorf("读取命名空间预留: %w", err)
+	}
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(bytes, 0) FROM namespace_reservations WHERE reservation_id = $1`, reservationID).Scan(&current); err != nil && err != sql.ErrNoRows {
+		return fmt.Errorf("读取当前配额预留: %w", err)
+	}
+	if quota > 0 && used+reserved-current+bytes > quota {
+		return domain.ErrQuotaExceeded
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO namespace_reservations(reservation_id, namespace, bytes) VALUES ($1, $2, $3) ON CONFLICT(reservation_id) DO UPDATE SET namespace = EXCLUDED.namespace, bytes = EXCLUDED.bytes`, reservationID, namespace, bytes); err != nil {
+		return fmt.Errorf("写入命名空间预留: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("提交配额预留: %w", err)
+	}
+	return nil
+}
+
+func (s *PostgresStore) ReleaseNamespaceReservation(ctx context.Context, reservationID string) error {
+	if reservationID == "" {
+		return domain.ErrInvalidArgument
+	}
+	_, err := s.db.ExecContext(ctx, `DELETE FROM namespace_reservations WHERE reservation_id = $1`, reservationID)
+	if err != nil {
+		return fmt.Errorf("释放命名空间预留: %w", err)
+	}
+	return nil
+}
+
 // ========== Content Blob ==========
 
 func (s *PostgresStore) GetBlobBySha(ctx context.Context, sha256 string) (*domain.ContentBlob, error) {
@@ -119,6 +178,34 @@ func (s *PostgresStore) PutBlob(ctx context.Context, b *domain.ContentBlob) erro
 		`INSERT INTO content_blobs (sha256, storage_path, size, ref_count, created_at) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (sha256) DO NOTHING`,
 		b.SHA256, b.StoragePath, b.Size, b.RefCount, b.CreatedAt)
 	return err
+}
+
+// AcquireBlob 原子创建或递增 blob 引用，避免相同 SHA 并发提交丢失引用。
+func (s *PostgresStore) AcquireBlob(ctx context.Context, b *domain.ContentBlob) (string, bool, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return "", false, err
+	}
+	defer tx.Rollback()
+	res, err := tx.ExecContext(ctx, `INSERT INTO content_blobs (sha256, storage_path, size, ref_count, created_at) VALUES ($1, $2, $3, 1, $4) ON CONFLICT (sha256) DO NOTHING`, b.SHA256, b.StoragePath, b.Size, b.CreatedAt)
+	if err != nil {
+		return "", false, err
+	}
+	affected, _ := res.RowsAffected()
+	if affected == 0 {
+		var canonicalPath string
+		if err := tx.QueryRowContext(ctx, `UPDATE content_blobs SET ref_count = ref_count + 1 WHERE sha256 = $1 RETURNING storage_path`, b.SHA256).Scan(&canonicalPath); err != nil {
+			return "", false, err
+		}
+		if err := tx.Commit(); err != nil {
+			return "", false, err
+		}
+		return canonicalPath, false, nil
+	}
+	if err := tx.Commit(); err != nil {
+		return "", false, err
+	}
+	return b.StoragePath, true, nil
 }
 
 func (s *PostgresStore) UpdateBlobStorage(ctx context.Context, sha256 string, storagePath string) error {
@@ -543,6 +630,16 @@ func (s *PostgresStore) IncrDownloads(ctx context.Context, token string) error {
 	return err
 }
 
+// TryConsumeDownload 原子检查并消耗一次分享下载额度。
+func (s *PostgresStore) TryConsumeDownload(ctx context.Context, token string) (bool, error) {
+	res, err := s.db.ExecContext(ctx, `UPDATE shares SET cur_downloads = cur_downloads + 1 WHERE token = $1 AND (max_downloads = 0 OR cur_downloads < max_downloads)`, token)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n == 1, err
+}
+
 // ========== 一致性巡检 ==========
 
 func (s *PostgresStore) ListAllBlobs(ctx context.Context) ([]*domain.ContentBlob, error) {
@@ -567,7 +664,7 @@ func (s *PostgresStore) ListAllBlobs(ctx context.Context) ([]*domain.ContentBlob
 
 func (s *PostgresStore) ListAllFiles(ctx context.Context) ([]*domain.FileMetadata, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT file_id, sha256, name, path, size, namespace, is_dir, parent_id, created_at FROM files ORDER BY file_id`)
+		`SELECT file_id, sha256, name, path, size, namespace, is_dir, parent_id, created_at, deleted_at FROM files ORDER BY file_id`)
 	if err != nil {
 		return nil, err
 	}
