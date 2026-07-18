@@ -1,7 +1,7 @@
 # fileupload Docker 镜像 — 本地完整构建
 # 前端依赖使用 lockfile 安装，确保本地与 CI 构建可复现。
 
-FROM node:24-alpine AS web-builder
+FROM node:26-alpine AS web-builder
 RUN corepack enable && corepack prepare pnpm@11.12.0 --activate
 WORKDIR /workspace
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
