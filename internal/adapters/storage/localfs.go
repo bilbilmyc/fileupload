@@ -31,7 +31,7 @@ func NewLocalFS(root string) (*LocalFS, error) {
 
 // absPath 将逻辑路径转为绝对路径，含路径穿越安全检查。
 // 除了词法路径检查，还会校验已存在的路径组件，避免通过符号链接
-//（以及平台能够解析的 reparse point/junction）逃出存储根目录。
+// （以及平台能够解析的 reparse point/junction）逃出存储根目录。
 func (s *LocalFS) absPath(path string) (string, error) {
 	if path == "" || filepath.IsAbs(path) || containsPathTraversal(path) {
 		return "", domain.ErrPathTraversal
