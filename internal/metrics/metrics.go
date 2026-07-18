@@ -4,8 +4,9 @@
 // 通过 promhttp.Handler() 自动采集。
 //
 // 指标命名约定：
-//   fileupload_<领域>_<量>_<单位>_<labels>
-//   例：fileupload_uploads_total{result="success"}
+//
+//	fileupload_<领域>_<量>_<单位>_<labels>
+//	例：fileupload_uploads_total{result="success"}
 package metrics
 
 import (

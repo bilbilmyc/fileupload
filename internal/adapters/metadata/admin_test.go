@@ -41,7 +41,7 @@ func TestAdmin_WriteAuditLog_Multiple(t *testing.T) {
 
 	for i := 0; i < 5; i++ {
 		s.WriteAuditLog(ctx, &domain.AuditLogEntry{
-			Action: "test", TargetID: string(rune('0'+i)), UserID: "u1",
+			Action: "test", TargetID: string(rune('0' + i)), UserID: "u1",
 		})
 	}
 

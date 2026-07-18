@@ -37,11 +37,11 @@ func TestPostgresStore_PutAndGetBlob(t *testing.T) {
 
 	ctx := context.Background()
 	blob := &domain.ContentBlob{
-		SHA256: "test-sha-" + time.Now().Format("150405.000"),
+		SHA256:      "test-sha-" + time.Now().Format("150405.000"),
 		StoragePath: "pg-test/data",
-		Size: 100,
-		RefCount: 1,
-		CreatedAt: time.Now(),
+		Size:        100,
+		RefCount:    1,
+		CreatedAt:   time.Now(),
 	}
 
 	err = store.PutBlob(ctx, blob)
@@ -92,11 +92,11 @@ func TestPostgresStore_PutAndGetFile(t *testing.T) {
 	store.PutBlob(ctx, &domain.ContentBlob{SHA256: sha, StoragePath: "p", Size: 50, RefCount: 1, CreatedAt: time.Now()})
 
 	file := &domain.FileMetadata{
-		FileID: "pg-file-" + time.Now().Format("150405.000"),
-		SHA256: sha,
-		Name:   "test.txt",
-		Path:   "/test.txt",
-		Size:   50,
+		FileID:    "pg-file-" + time.Now().Format("150405.000"),
+		SHA256:    sha,
+		Name:      "test.txt",
+		Path:      "/test.txt",
+		Size:      50,
 		Namespace: "pg-test",
 		CreatedAt: time.Now(),
 	}

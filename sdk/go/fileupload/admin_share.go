@@ -33,21 +33,21 @@ func (c *Client) Rename(ctx context.Context, fileID, newName string) error {
 
 // ShareEntry 分享链接记录
 type ShareEntry struct {
-	Token         string `json:"token"`
-	FileID        string `json:"file_id"`
-	PasswordHash  string `json:"-"`
-	ExpiresAt     string `json:"expires_at,omitempty"`
-	MaxDownloads  int    `json:"max_downloads"`
-	CurDownloads  int    `json:"cur_downloads"`
-	Namespace     string `json:"namespace"`
+	Token        string `json:"token"`
+	FileID       string `json:"file_id"`
+	PasswordHash string `json:"-"`
+	ExpiresAt    string `json:"expires_at,omitempty"`
+	MaxDownloads int    `json:"max_downloads"`
+	CurDownloads int    `json:"cur_downloads"`
+	Namespace    string `json:"namespace"`
 }
 
 // CreateShareRequest 创建分享请求体
 type CreateShareRequest struct {
 	FileID       string `json:"file_id"`
 	Password     string `json:"password,omitempty"`
-	ExpiresIn    int    `json:"expires_in"`     // 过期小时数，0=不限
-	MaxDownloads int    `json:"max_downloads"`  // 0=不限
+	ExpiresIn    int    `json:"expires_in"`    // 过期小时数，0=不限
+	MaxDownloads int    `json:"max_downloads"` // 0=不限
 }
 
 // CreateShare 创建分享链接（POST /v1/share）
@@ -159,7 +159,7 @@ func (c *Client) ListAuditLogs(ctx context.Context, page, perPage int) ([]AuditL
 	}
 	var out struct {
 		Entries []AuditLogEntry `json:"entries"`
-		Total   int              `json:"total"`
+		Total   int             `json:"total"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return nil, 0, err

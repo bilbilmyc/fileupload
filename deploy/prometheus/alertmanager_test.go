@@ -21,9 +21,9 @@ type alertmanagerRoute struct {
 }
 
 type alertmanagerConfig struct {
-	Global         map[string]any         `yaml:"global"`
-	Route          struct {
-		Receiver string             `yaml:"receiver"`
+	Global map[string]any `yaml:"global"`
+	Route  struct {
+		Receiver string              `yaml:"receiver"`
 		Routes   []alertmanagerRoute `yaml:"routes"`
 	} `yaml:"route"`
 	InhibitRules []struct {

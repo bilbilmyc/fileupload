@@ -15,9 +15,9 @@ type SDKChunkInfo struct {
 
 // UploadStatusResult 上传分片状态查询结果
 type UploadStatusResult struct {
-	SessionID string        `json:"session_id"`
+	SessionID string         `json:"session_id"`
 	Chunks    []SDKChunkInfo `json:"chunks"`
-	Total     int           `json:"total"`
+	Total     int            `json:"total"`
 }
 
 // GetUploadStatus 查询上传分片状态（GET /v1/uploads/{id}/status）

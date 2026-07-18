@@ -12,12 +12,12 @@ import "github.com/bilbilmyc/fileupload/internal/domain"
 
 // compile-time interface checks
 var (
-	_ domain.Metadata    = (*MockMetadata)(nil)
-	_ domain.Storage     = (*MockStorage)(nil)
-	_ domain.Compressor  = (*MockCompressor)(nil)
-	_ domain.Hasher      = (*MockHasher)(nil)
-	_ domain.WorkerPool  = (*MockWorkerPool)(nil)
-	_ domain.ArchiveWriter = (*MockArchiveWriter)(nil)
+	_ domain.Metadata        = (*MockMetadata)(nil)
+	_ domain.Storage         = (*MockStorage)(nil)
+	_ domain.Compressor      = (*MockCompressor)(nil)
+	_ domain.Hasher          = (*MockHasher)(nil)
+	_ domain.WorkerPool      = (*MockWorkerPool)(nil)
+	_ domain.ArchiveWriter   = (*MockArchiveWriter)(nil)
 	_ domain.HashAccumulator = (*MockHashAccumulator)(nil)
 )
 

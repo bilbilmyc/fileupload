@@ -14,7 +14,8 @@ import (
 
 // newUploadMockServer 创建模拟后端的 httptest.Server
 // 实现：POST /v1/uploads/init, PUT /v1/uploads/{id}/chunks/{n}, POST /v1/uploads/{id}/finalize
-//       POST /v1/dirs, POST /v1/batch/{action}, POST /v1/admin/scan, DELETE /v1/{files,dirs}/{id}
+//
+//	POST /v1/dirs, POST /v1/batch/{action}, POST /v1/admin/scan, DELETE /v1/{files,dirs}/{id}
 func newUploadMockServer(t *testing.T) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -87,7 +88,7 @@ func newUploadMockServer(t *testing.T) *httptest.Server {
 
 		case strings.HasPrefix(path, "/s/"):
 			jsonResp(w, http.StatusOK, map[string]any{
-				"token": strings.TrimPrefix(path, "/s/"),
+				"token":   strings.TrimPrefix(path, "/s/"),
 				"file_id": "file-1",
 			})
 

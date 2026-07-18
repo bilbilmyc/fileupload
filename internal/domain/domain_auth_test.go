@@ -78,35 +78,65 @@ func TestAuthService_RefreshToken(t *testing.T) {
 
 func TestAuthClaims_Fields(t *testing.T) {
 	c := &AuthClaims{UserID: "u1", Namespace: "ns1", Roles: []string{"admin", "user"}, TokenID: "t1"}
-	if c.UserID != "u1" { t.Error("UserID mismatch") }
-	if c.Namespace != "ns1" { t.Error("Namespace mismatch") }
-	if len(c.Roles) != 2 { t.Error("Roles count") }
-	if c.TokenID != "t1" { t.Error("TokenID mismatch") }
+	if c.UserID != "u1" {
+		t.Error("UserID mismatch")
+	}
+	if c.Namespace != "ns1" {
+		t.Error("Namespace mismatch")
+	}
+	if len(c.Roles) != 2 {
+		t.Error("Roles count")
+	}
+	if c.TokenID != "t1" {
+		t.Error("TokenID mismatch")
+	}
 }
 
 func TestTokenPair_Fields(t *testing.T) {
 	p := &TokenPair{AccessToken: "a", RefreshToken: "r", ExpiresIn: 3600}
-	if p.AccessToken != "a" { t.Error("AccessToken") }
-	if p.RefreshToken != "r" { t.Error("RefreshToken") }
-	if p.ExpiresIn != 3600 { t.Error("ExpiresIn") }
+	if p.AccessToken != "a" {
+		t.Error("AccessToken")
+	}
+	if p.RefreshToken != "r" {
+		t.Error("RefreshToken")
+	}
+	if p.ExpiresIn != 3600 {
+		t.Error("ExpiresIn")
+	}
 }
 
 func TestLoginRequest_Fields(t *testing.T) {
 	r := &LoginRequest{Username: "admin", Password: "pw"}
-	if r.Username != "admin" { t.Error("Username") }
-	if r.Password != "pw" { t.Error("Password") }
+	if r.Username != "admin" {
+		t.Error("Username")
+	}
+	if r.Password != "pw" {
+		t.Error("Password")
+	}
 }
 
 func TestShareEntry_Fields(t *testing.T) {
 	s := &ShareEntry{Token: "s1", FileID: "f1", Namespace: "demo", MaxDownloads: 5, CurDownloads: 1}
-	if s.Token != "s1" { t.Error("Token") }
-	if s.FileID != "f1" { t.Error("FileID") }
-	if s.CurDownloads != 1 { t.Error("CurDownloads") }
+	if s.Token != "s1" {
+		t.Error("Token")
+	}
+	if s.FileID != "f1" {
+		t.Error("FileID")
+	}
+	if s.CurDownloads != 1 {
+		t.Error("CurDownloads")
+	}
 }
 
 func TestCreateShareRequest_Fields(t *testing.T) {
 	r := &CreateShareRequest{FileID: "f1", Password: "pw", ExpiresIn: 24, MaxDownloads: 10}
-	if r.FileID != "f1" { t.Error("FileID") }
-	if r.Password != "pw" { t.Error("Password") }
-	if r.MaxDownloads != 10 { t.Error("MaxDownloads") }
+	if r.FileID != "f1" {
+		t.Error("FileID")
+	}
+	if r.Password != "pw" {
+		t.Error("Password")
+	}
+	if r.MaxDownloads != 10 {
+		t.Error("MaxDownloads")
+	}
 }

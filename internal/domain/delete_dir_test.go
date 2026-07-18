@@ -61,10 +61,11 @@ func TestUploadService_DeleteDir_TwoFiles(t *testing.T) {
 // T3：嵌套目录递归 — 子目录及其所有 blob 都应清理
 //
 // 结构：
-//   root/
-//     sub/
-//       deep.txt   (blobDeep)
-//     top.txt      (blobTop)
+//
+//	root/
+//	  sub/
+//	    deep.txt   (blobDeep)
+//	  top.txt      (blobTop)
 func TestUploadService_DeleteDir_Nested(t *testing.T) {
 	svc, meta, _ := newTestUploadService(t)
 	ctx := context.Background()

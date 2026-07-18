@@ -31,13 +31,17 @@ func (m *mockAdminMeta) ListAuditLogs(ctx context.Context, page, perPage int) ([
 	}
 	return m.auditLogs, m.auditTotal, nil
 }
-func (m *mockAdminMeta) AdminCountFiles(ctx context.Context) (int, error)  { return m.fileCount, nil }
+func (m *mockAdminMeta) AdminCountFiles(ctx context.Context) (int, error) { return m.fileCount, nil }
 func (m *mockAdminMeta) AdminCountBlobs(ctx context.Context) (int, error) { return m.blobCount, nil }
-func (m *mockAdminMeta) AdminTotalBlobSize(ctx context.Context) (int64, error) { return m.totalSize, nil }
+func (m *mockAdminMeta) AdminTotalBlobSize(ctx context.Context) (int64, error) {
+	return m.totalSize, nil
+}
 
 type mockAdminWP struct{}
 
-func (m *mockAdminWP) Stats() domain.WorkerStats { return domain.WorkerStats{Capacity: 4, Available: 3} }
+func (m *mockAdminWP) Stats() domain.WorkerStats {
+	return domain.WorkerStats{Capacity: 4, Available: 3}
+}
 
 func TestAdminHandler_Status(t *testing.T) {
 	meta := &mockAdminMeta{fileCount: 10, blobCount: 5, totalSize: 1024}

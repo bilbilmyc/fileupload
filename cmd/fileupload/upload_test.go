@@ -13,4 +13,3 @@ func TestParseSizeFlag(t *testing.T) {
 		t.Fatalf("expected default 10, got %d", got)
 	}
 }
-

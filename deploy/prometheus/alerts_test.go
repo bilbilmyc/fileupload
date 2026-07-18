@@ -15,10 +15,10 @@ import (
 )
 
 type alertRule struct {
-	Alert      string            `yaml:"alert"`
-	Expr       string            `yaml:"expr"`
-	For        string            `yaml:"for"`
-	Labels     map[string]string `yaml:"labels"`
+	Alert       string            `yaml:"alert"`
+	Expr        string            `yaml:"expr"`
+	For         string            `yaml:"for"`
+	Labels      map[string]string `yaml:"labels"`
 	Annotations map[string]string `yaml:"annotations"`
 }
 
@@ -35,13 +35,13 @@ type alertsFile struct {
 // 真实指标名（与 internal/metrics/metrics.go 中的 Name 一致）
 // 这里硬编码而非 import metrics 包是为了 deploy/ 不依赖 internal/ 包。
 var knownMetrics = map[string]bool{
-	"fileupload_uploads_total":                 true,
-	"fileupload_upload_bytes_total":             true,
-	"fileupload_downloads_total":                true,
-	"fileupload_batch_operations_total":         true,
-	"fileupload_batch_operation_items_total":   true,
-	"fileupload_reaper_cleanups_total":         true,
-	"fileupload_health_status":                 true,
+	"fileupload_uploads_total":               true,
+	"fileupload_upload_bytes_total":          true,
+	"fileupload_downloads_total":             true,
+	"fileupload_batch_operations_total":      true,
+	"fileupload_batch_operation_items_total": true,
+	"fileupload_reaper_cleanups_total":       true,
+	"fileupload_health_status":               true,
 }
 
 // 允许的非业务指标（Prometheus 标准 / 服务发现）

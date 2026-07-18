@@ -29,15 +29,15 @@ func TestRedisStore_CreateGetSession(t *testing.T) {
 	now := time.Now()
 	session := &domain.UploadSession{
 		SessionID:    "sess-001",
-		SHA256:      "abc123",
+		SHA256:       "abc123",
 		UploadLength: 10485760,
 		Compression:  domain.CompZstd,
 		ChunkSize:    1048576,
 		Namespace:    "demo",
 		FileName:     "bigfile.dat",
 		CreatedAt:    now,
-		ExpireAt:    now.Add(time.Hour),
-		Status:      domain.SessionActive,
+		ExpireAt:     now.Add(time.Hour),
+		Status:       domain.SessionActive,
 	}
 
 	if err := s.CreateSession(ctx, session); err != nil {

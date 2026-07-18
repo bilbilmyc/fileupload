@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/klauspost/compress/zstd"
 	"github.com/bilbilmyc/fileupload/internal/domain"
+	"github.com/klauspost/compress/zstd"
 )
 
 func mustNewCompressor(t *testing.T) *Compressor {
@@ -59,7 +59,7 @@ func TestCompressDecompress_Zstd_Roundtrip(t *testing.T) {
 	// 我们构造一个有效的 zstd 流。
 
 	// 用标准库方法：先写入 tar entry，模拟有效流
-	_ = zw  // 跳过
+	_ = zw // 跳过
 
 	// 真正测试：用 Decompress 解压原始数据（CompNone）
 	reader, err := c.Decompress(ctx, bytes.NewReader(original), domain.CompZstd)

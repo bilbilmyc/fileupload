@@ -18,11 +18,11 @@ type AdminService interface {
 
 // SystemStatus 系统状态
 type SystemStatus struct {
-	Uptime        string              `json:"uptime"`
-	Version       string              `json:"version"`
-	WorkerPool    *WorkerPoolStatus   `json:"worker_pool"`
-	Storage       *StorageStatus      `json:"storage"`
-	Database      *DatabaseStatus     `json:"database"`
+	Uptime     string            `json:"uptime"`
+	Version    string            `json:"version"`
+	WorkerPool *WorkerPoolStatus `json:"worker_pool"`
+	Storage    *StorageStatus    `json:"storage"`
+	Database   *DatabaseStatus   `json:"database"`
 }
 
 // WorkerPoolStatus worker 池状态
@@ -34,26 +34,26 @@ type WorkerPoolStatus struct {
 
 // StorageStatus 存储状态
 type StorageStatus struct {
-	DataDir        string `json:"data_dir"`
-	DataDirFree    string `json:"data_dir_free"`
-	TempDir        string `json:"temp_dir"`
-	TempDirFree    string `json:"temp_dir_free"`
-	TotalFiles     int    `json:"total_files"`
-	TotalBlobs     int    `json:"total_blobs"`
-	TotalSize      string `json:"total_size"`
+	DataDir     string `json:"data_dir"`
+	DataDirFree string `json:"data_dir_free"`
+	TempDir     string `json:"temp_dir"`
+	TempDirFree string `json:"temp_dir_free"`
+	TotalFiles  int    `json:"total_files"`
+	TotalBlobs  int    `json:"total_blobs"`
+	TotalSize   string `json:"total_size"`
 }
 
 // DatabaseStatus 数据库状态
 type DatabaseStatus struct {
-	Type    string `json:"type"`
-	Path    string `json:"path"`
-	Status  string `json:"status"`
+	Type   string `json:"type"`
+	Path   string `json:"path"`
+	Status string `json:"status"`
 }
 
 // AuditLogEntry 审计日志条目
 type AuditLogEntry struct {
 	ID         int64  `json:"id,omitempty"`
-	Action     string `json:"action"`     // login, delete, batch_delete, batch_move, etc.
+	Action     string `json:"action"`      // login, delete, batch_delete, batch_move, etc.
 	TargetType string `json:"target_type"` // file, dir, session, user
 	TargetID   string `json:"target_id"`
 	UserID     string `json:"user_id"`

@@ -239,8 +239,8 @@ func TestLocalFS_Root(t *testing.T) {
 
 func TestContainsPathTraversal(t *testing.T) {
 	tests := []struct {
-		path  string
-		want  bool
+		path string
+		want bool
 	}{
 		{"normal/file.txt", false},
 		{"a/b/c", false},
@@ -258,4 +258,3 @@ func TestContainsPathTraversal(t *testing.T) {
 		})
 	}
 }
-

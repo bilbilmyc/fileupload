@@ -24,8 +24,8 @@ import (
 
 // mockS3Server 内存级 S3 模拟服务器（仅实现 Put/Get/Head/Delete/ListObjectsV2）
 type mockS3Server struct {
-	mu     sync.RWMutex
-	bucket string
+	mu      sync.RWMutex
+	bucket  string
 	objects map[string][]byte // key → content
 }
 
@@ -136,11 +136,11 @@ type s3Object struct {
 }
 
 type listBucketResult struct {
-	XMLName  xml.Name    `xml:"ListBucketResult"`
-	XMLNs    string      `xml:"xmlns,attr,omitempty"`
-	Name     *string     `xml:"Name"`
-	Prefix   *string     `xml:"Prefix"`
-	Contents []s3Object  `xml:"Contents"`
+	XMLName  xml.Name   `xml:"ListBucketResult"`
+	XMLNs    string     `xml:"xmlns,attr,omitempty"`
+	Name     *string    `xml:"Name"`
+	Prefix   *string    `xml:"Prefix"`
+	Contents []s3Object `xml:"Contents"`
 }
 
 func writeS3Error(w http.ResponseWriter, code string, status int) {
@@ -178,8 +178,8 @@ func newS3StorageForTest(t *testing.T, srv *httptest.Server) *S3Storage {
 	return &S3Storage{
 		client: client,
 		cfg: S3Config{
-			Bucket:      "test-bucket",
-			Endpoint:    srv.URL,
+			Bucket:         "test-bucket",
+			Endpoint:       srv.URL,
 			ForcePathStyle: true,
 		},
 	}

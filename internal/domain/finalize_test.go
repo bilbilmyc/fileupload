@@ -490,4 +490,3 @@ func TestCommitStream_ExistingBlob(t *testing.T) {
 		t.Error("blob should exist")
 	}
 }
-

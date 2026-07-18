@@ -14,8 +14,8 @@ type panel struct {
 	Title   string `json:"title"`
 	Type    string `json:"type"`
 	Targets []struct {
-		Expr       string `json:"expr"`
-		RefID      string `json:"refId"`
+		Expr         string `json:"expr"`
+		RefID        string `json:"refId"`
 		LegendFormat string `json:"legendFormat"`
 	} `json:"targets"`
 }
@@ -28,17 +28,17 @@ type dashboard struct {
 
 // 真实指标名（与 internal/metrics/metrics.go 一致 + Prometheus 标准指标）
 var knownMetrics = map[string]bool{
-	"fileupload_uploads_total":                 true,
-	"fileupload_upload_bytes_total":             true,
-	"fileupload_downloads_total":                true,
-	"fileupload_batch_operations_total":         true,
-	"fileupload_batch_operation_items_total":   true,
-	"fileupload_reaper_cleanups_total":         true,
-	"fileupload_health_status":                 true,
-	"up":                                       true,
+	"fileupload_uploads_total":               true,
+	"fileupload_upload_bytes_total":          true,
+	"fileupload_downloads_total":             true,
+	"fileupload_batch_operations_total":      true,
+	"fileupload_batch_operation_items_total": true,
+	"fileupload_reaper_cleanups_total":       true,
+	"fileupload_health_status":               true,
+	"up":                                     true,
 	// Go runtime metrics（由 promhttp 自动暴露）
-	"go_memstats_heap_inuse_bytes":             true,
-	"go_goroutines":                            true,
+	"go_memstats_heap_inuse_bytes": true,
+	"go_goroutines":                true,
 }
 
 func TestDashboard_ValidJSON(t *testing.T) {

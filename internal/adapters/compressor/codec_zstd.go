@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/klauspost/compress/zstd"
 	"github.com/bilbilmyc/fileupload/internal/domain"
+	"github.com/klauspost/compress/zstd"
 )
 
 // zstdCodec 处理 zstd 与 tar.zst。

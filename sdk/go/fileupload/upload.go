@@ -390,7 +390,7 @@ func (c *Client) GetStatus(ctx context.Context, sessionID string) ([]ChunkStatus
 
 // CheckExists 秒传预检。
 func (c *Client) CheckExists(ctx context.Context, sha256, name string) (*FileInfo, error) {
-	u := c.url("/v1/files?sha256="+url.QueryEscape(sha256)+"&name="+url.QueryEscape(name))
+	u := c.url("/v1/files?sha256=" + url.QueryEscape(sha256) + "&name=" + url.QueryEscape(name))
 	req, err := http.NewRequestWithContext(ctx, "HEAD", u, nil)
 	if err != nil {
 		return nil, err

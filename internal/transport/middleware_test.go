@@ -95,10 +95,10 @@ func TestNamespace_Middleware(t *testing.T) {
 	}))
 
 	tests := []struct {
-		name       string
-		headerVal  string
-		queryVal   string
-		expectNS   string
+		name      string
+		headerVal string
+		queryVal  string
+		expectNS  string
 	}{
 		{"X-User-ID 头", "user-123", "", "user-123"},
 		{"X-Namespace 头", "", "ns-from-header", "ns-from-header"},

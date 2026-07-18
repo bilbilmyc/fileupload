@@ -10,7 +10,7 @@ import (
 
 // AdminHandler 管理后台 HTTP 处理器
 type AdminHandler struct {
-	meta       interface {
+	meta interface {
 		WriteAuditLog(ctx context.Context, entry *domain.AuditLogEntry) error
 		ListAuditLogs(ctx context.Context, page, perPage int) ([]*domain.AuditLogEntry, int, error)
 		AdminCountFiles(ctx context.Context) (int, error)

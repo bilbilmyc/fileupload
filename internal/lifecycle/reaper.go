@@ -26,7 +26,7 @@ type SessionReaper struct {
 	// 新版：直接持有 tempStorage 端口，cleanup 用 Walk/Delete 替代 os.*
 	tempStorage domain.Storage
 	// 旧版：保留 tempDir 用于向后兼容（cleanupOrphanParts 兼容路径）
-	tempDir string
+	tempDir  string
 	interval time.Duration
 	stopCh   chan struct{}
 	wg       sync.WaitGroup
@@ -201,11 +201,11 @@ func (r *SessionReaper) cleanupOrphanParts(ctx context.Context) {
 
 // ScannerReport 巡检报告
 type ScannerReport struct {
-	OrphanParts    int      `json:"orphan_parts"`
-	OrphanFiles    []string `json:"orphan_files"`
-	MetadataOrphans int    `json:"metadata_orphans"`
-	RefCountFixes  int      `json:"ref_count_fixes"`
-	CorruptedFiles []string `json:"corrupted_files"`
+	OrphanParts     int      `json:"orphan_parts"`
+	OrphanFiles     []string `json:"orphan_files"`
+	MetadataOrphans int      `json:"metadata_orphans"`
+	RefCountFixes   int      `json:"ref_count_fixes"`
+	CorruptedFiles  []string `json:"corrupted_files"`
 }
 
 // ConsistencyScanner 一致性巡检器

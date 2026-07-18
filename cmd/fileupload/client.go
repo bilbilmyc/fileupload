@@ -24,11 +24,11 @@ const defaultNamespace = "default"
 
 // Client 统一的文件上传下载 HTTP 客户端。
 type Client struct {
-	ServerURL  string
-	Namespace  string
-	Token      string
+	ServerURL   string
+	Namespace   string
+	Token       string
 	TokenHeader string
-	HTTPClient *http.Client
+	HTTPClient  *http.Client
 }
 
 // NewClient 创建客户端实例。

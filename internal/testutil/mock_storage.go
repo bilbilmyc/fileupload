@@ -87,7 +87,10 @@ func (m *MockStorage) Has(path string) bool {
 	return ok
 }
 
-type mockFileInfo struct{ name string; size int64 }
+type mockFileInfo struct {
+	name string
+	size int64
+}
 
 func (m mockFileInfo) Name() string       { return m.name }
 func (m mockFileInfo) Size() int64        { return m.size }

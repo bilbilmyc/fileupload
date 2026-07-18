@@ -14,9 +14,9 @@ func init() {
 	)
 
 	benchCmd := &cobra.Command{
-		Use:   "bench",
-		Short: "压测",
-		Long:  `上传压测：生成临时文件并并发上传。`,
+		Use:     "bench",
+		Short:   "压测",
+		Long:    `上传压测：生成临时文件并并发上传。`,
 		Example: `  fileupload bench --files 50 --size 100m --concurrency 16`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.Background()

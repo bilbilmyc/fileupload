@@ -42,12 +42,12 @@ import (
 
 // Defaults
 const (
-	DefaultServerURL = "http://localhost:8080"
-	DefaultNamespace = "default"
-	DefaultChunkSize = 10 * 1024 * 1024 // 10MB
+	DefaultServerURL   = "http://localhost:8080"
+	DefaultNamespace   = "default"
+	DefaultChunkSize   = 10 * 1024 * 1024 // 10MB
 	DefaultConcurrency = 4
-	DefaultTimeout    = 60 * time.Second
-	MaxRetries        = 3
+	DefaultTimeout     = 60 * time.Second
+	MaxRetries         = 3
 )
 
 // Client 文件上传下载服务的 HTTP 客户端。

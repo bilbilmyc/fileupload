@@ -21,11 +21,11 @@ import (
 
 // S3Config S3 存储后端配置
 type S3Config struct {
-	Bucket      string // S3 bucket 名称
-	Region      string // AWS region（如 us-east-1）
-	Endpoint    string // 可选：自定义 endpoint（兼容 MinIO/S3）
-	Prefix      string // 可选：key 前缀（如 "fileupload/"）
-	ForcePathStyle bool // 可选：路径式寻址（MinIO 需要）
+	Bucket         string // S3 bucket 名称
+	Region         string // AWS region（如 us-east-1）
+	Endpoint       string // 可选：自定义 endpoint（兼容 MinIO/S3）
+	Prefix         string // 可选：key 前缀（如 "fileupload/"）
+	ForcePathStyle bool   // 可选：路径式寻址（MinIO 需要）
 }
 
 // S3Storage S3 存储后端实现
@@ -159,12 +159,12 @@ type s3FileInfo struct {
 	modTime time.Time
 }
 
-func (f s3FileInfo) Name() string      { return f.name }
-func (f s3FileInfo) Size() int64       { return f.size }
-func (f s3FileInfo) Mode() fs.FileMode { return 0644 }
+func (f s3FileInfo) Name() string       { return f.name }
+func (f s3FileInfo) Size() int64        { return f.size }
+func (f s3FileInfo) Mode() fs.FileMode  { return 0644 }
 func (f s3FileInfo) ModTime() time.Time { return f.modTime }
-func (f s3FileInfo) IsDir() bool       { return f.isDir }
-func (f s3FileInfo) Sys() any          { return nil }
+func (f s3FileInfo) IsDir() bool        { return f.isDir }
+func (f s3FileInfo) Sys() any           { return nil }
 
 // Walk 遍历 S3 bucket，fn 收到相对于 prefix 的路径
 func (s *S3Storage) Walk(ctx context.Context, fn func(path string, info fs.FileInfo) error) error {

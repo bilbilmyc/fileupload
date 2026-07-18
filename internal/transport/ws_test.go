@@ -95,9 +95,9 @@ func TestWSHub_Broadcast(t *testing.T) {
 
 func TestWSHub_BroadcastTypes(t *testing.T) {
 	tests := []struct {
-		name     string
+		name      string
 		broadcast func(hub *WSHub)
-		wantType string
+		wantType  string
 	}{
 		{"upload_progress", func(h *WSHub) { h.BroadcastUploadProgress("t1", "f.txt", 50, "1MB/s", "uploading") }, "upload_progress"},
 		{"upload_complete", func(h *WSHub) { h.BroadcastUploadComplete("t1", "f.txt", "fid-1") }, "upload_complete"},
