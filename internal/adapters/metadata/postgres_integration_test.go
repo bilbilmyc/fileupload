@@ -138,8 +138,11 @@ func TestPostgresStore_NamespaceQuotaReservations(t *testing.T) {
 	if err := store.ReleaseNamespaceReservation(ctx, "r1-"+ns); err != nil {
 		t.Fatalf("ReleaseNamespaceReservation error = %v", err)
 	}
-	if err := store.ReserveNamespaceBytes(ctx, ns, "r3-"+ns, 6, 10); err != nil {
-		t.Fatalf("reservation after release error = %v", err)
+	if err := store.ReserveNamespaceBytes(ctx, ns, "r3-"+ns, 6, 10); err != domain.ErrQuotaExceeded {
+		t.Fatalf("reservation after release error = %v, want %v", err, domain.ErrQuotaExceeded)
+	}
+	if err := store.ReserveNamespaceBytes(ctx, ns, "r3-"+ns, 5, 10); err != nil {
+		t.Fatalf("reservation at remaining quota error = %v", err)
 	}
 }
 
