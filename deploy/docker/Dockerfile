@@ -13,7 +13,7 @@ COPY sdk/js/src ./sdk/js/src
 COPY web/ ./web/
 RUN pnpm web:build
 
-FROM golang:1.25-alpine AS go-builder
+FROM golang:1.26-alpine AS go-builder
 RUN apk add --no-cache git ca-certificates
 WORKDIR /src
 COPY go.mod go.sum ./
