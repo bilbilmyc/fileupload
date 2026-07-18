@@ -14,12 +14,13 @@
 ### 前提条件
 
 - Go 1.25+
-- Node.js 20+（构建前端）
+- Node.js 24+（构建前端）
+- pnpm 11.12.0（可通过 Corepack 安装；根目录统一管理 Web 与 JS SDK workspace）
 
 ### CI/CD 概览
 
 - 触发：push 到 main / PR / tag `v*`
-- 产物：4 平台 × server + CLI = 8 个二进制 + 2 架构 Docker 镜像
+- 产物：6 个 OS/架构组合 × server + CLI = 12 个二进制 + 2 架构 Docker 镜像
 - Tag push 自动创建 GitHub Release（含 release notes）
 - 详细文档：[docs/ci.md](docs/ci.md)
 - Redis（上传会话热数据）

@@ -117,10 +117,7 @@ export function useBatchHistory() {
       id: `batch-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       time: new Date(),
     }
-    setItems((prev: BatchHistoryItem[]) => [...prev, newItem])
-    if (items.length >= 100) {
-      setItems((prev: BatchHistoryItem[]) => prev.slice(-100))
-    }
+    setItems((prev: BatchHistoryItem[]) => [...prev, newItem].slice(-100))
   }, [])
 
   return { items, addRecord }

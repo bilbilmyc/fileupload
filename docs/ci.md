@@ -1,80 +1,121 @@
 # fileupload CI/CD 工作流
 
-本文档说明 fileupload 项目的持续集成与发布流程，配置位于 `.github/workflows/ci.yml`。
+本文档说明项目的持续集成、依赖检查和发布流程。核心配置：
+
+- `.github/workflows/ci.yml`：质量门禁、构建、镜像与 Release
+- `.github/workflows/dependency-review.yml`：Pull Request 依赖风险检查
+- `.github/dependabot.yml`：GitHub Actions、Go、pnpm 与 Docker 依赖更新
 
 ## 触发矩阵
 
-| 触发条件 | jobs | 产物 |
+| 触发条件 | 质量门禁 | 发布产物 |
 |---|---|---|
-| Pull Request | `test` + `web` + `build` | 8 个跨平台二进制 artifacts |
-| push 到 `main` | 上述 jobs + `docker` + `dev-release` | GHCR server 镜像 + 持续开发版 Release |
-| tag push（`v*`） | 上述 jobs + `docker` + `release` | 版本 server 镜像 + GitHub Release |
-| 手动运行 | 按选择的 workflow 事件执行 | 依触发 ref 决定是否发布 |
+| Pull Request → `main` | Backend、Web、Chromium E2E、12 个跨平台构建、Dependency Review | 临时 Actions artifacts |
+| push → `main` | 同上 | GHCR 多架构 `latest`/SHA 镜像 + `dev` prerelease |
+| tag push（`v*`） | 同上 | GHCR semver 多架构镜像 + 正式 GitHub Release |
+| 手动运行 | 执行质量门禁与构建 | 不自动发布 |
 
-所有 job 默认仅拥有 `contents: read`；只有 Docker job 获得 `packages: write`，只有 Release job 获得 `contents: write`。
+所有 job 默认只有 `contents: read`。Docker 发布 job 单独声明 `packages: write`，Release job 单独声明 `contents: write`。
 
-## Jobs 详解
+## Jobs
 
-### 1. `test` — 后端质量门禁
+### `backend` — Go 质量门禁
 
-- Redis 7-alpine 服务运行在 `localhost:6379`
-- 执行 `go test -race -count=1 -timeout 120s ./...`
-- 执行 `go vet ./...`
-- 失败后不会进入跨平台构建
+- 放置 `web/dist` 占位产物（`web/embed.go` 内嵌前端，Go 编译前必须存在该目录）
+- `gofmt` 零差异检查
+- `go mod tidy` 后验证 `go.mod` / `go.sum` 没有变化
+- `go vet ./...`
+- `go test -race -count=1 -timeout 120s ./...`
+- 额外生成 atomic coverage，并上传 `go-coverage` artifact
+- Redis 7 作为测试 service
 
-### 2. `web` — 前端生产构建
+> `web/dist` 不纳入版本控制。质量门禁只需能通过编译，因此放置占位 `index.html` 与 `assets/*` 即可；真实前端由 `build` job 注入（见下）。
 
-- 使用 Node.js 20
-- 使用 `npm ci`，严格按照 `web/package-lock.json` 安装依赖
-- 执行 `npm run build`，确保 TypeScript 与 Vite 生产构建可用
+### `web` — 前端质量与生产构建
 
-### 3. `build` — 8 个跨平台二进制
+- Node.js 24、pnpm 11.12.0
+- 根目录执行 `pnpm install --frozen-lockfile`
+- ESLint 零 warning
+- Vitest coverage
+- TypeScript + Vite production build
+- 上传 `web-dist` 与 `web-coverage` artifacts
 
-`needs: [test, web]`。矩阵为 Linux/macOS × amd64/arm64 × server/CLI：
+### `e2e` — 浏览器烟雾测试
 
-| 平台 | 组件 | 二进制 |
+- 安装 Playwright Chromium
+- Playwright 自动启动 Vite，不要求开发者预先启动服务
+- 登录接口按测试场景 mock，避免 CI 依赖固定管理员密码或常驻后端
+- 无论成功失败都尝试上传 HTML report 与 test results
+
+### `build` — 12 个跨平台二进制
+
+矩阵为 Linux、macOS、Windows × amd64/arm64 × server/CLI：
+
+| 平台 | server | CLI |
 |---|---|---|
-| linux/amd64 | server | `fileupload-server-linux-amd64` |
-| linux/arm64 | server | `fileupload-server-linux-arm64` |
-| darwin/amd64 | server | `fileupload-server-darwin-amd64` |
-| darwin/arm64 | server | `fileupload-server-darwin-arm64` |
-| linux/amd64 | CLI | `fileupload-cli-linux-amd64` |
-| linux/arm64 | CLI | `fileupload-cli-linux-arm64` |
-| darwin/amd64 | CLI | `fileupload-cli-darwin-amd64` |
-| darwin/arm64 | CLI | `fileupload-cli-darwin-arm64` |
+| linux/amd64 | `fileupload-server-linux-amd64` | `fileupload-cli-linux-amd64` |
+| linux/arm64 | `fileupload-server-linux-arm64` | `fileupload-cli-linux-arm64` |
+| darwin/amd64 | `fileupload-server-darwin-amd64` | `fileupload-cli-darwin-amd64` |
+| darwin/arm64 | `fileupload-server-darwin-arm64` | `fileupload-cli-darwin-arm64` |
+| windows/amd64 | `fileupload-server-windows-amd64.exe` | `fileupload-cli-windows-amd64.exe` |
+| windows/arm64 | `fileupload-server-windows-arm64.exe` | `fileupload-cli-windows-arm64.exe` |
 
-编译关闭 CGO，使用 `-trimpath -ldflags="-s -w"` 减少产物体积。Artifacts 保留 14 天。
+构建关闭 CGO 并启用 `-trimpath`。版本、commit 和 UTC 构建时间通过 Go linker flags 注入；CLI 可运行 `fileupload --version` 查看。
 
-### 4. `docker` — server 镜像构建与推送
+server 组件在编译前会下载 `web` job 产出的 `web-dist` artifact 到 `web/dist`，使 `web/embed.go` 内嵌**真实的管理面板**而非占位页；CLI 不引用 `web` 包，无需下载。因此 `build` 依赖 `web` job 完成。
 
-仅在 `main` push 或 `v*` tag push 时运行，使用 `build` job 的预编译 server 二进制，不需要 QEMU 模拟 Go 编译。
+### `quality-gate` — 稳定的分支保护检查
 
-- 注册表：`ghcr.io/${{ github.repository_owner }}/fileupload-server`
-- 架构：`linux/amd64`、`linux/arm64`
-- main 推送生成 `latest` 与 commit SHA tag
-- 版本 tag 生成 semver tag、`latest`（仅默认分支）与 commit SHA tag
-- 开启 BuildKit GitHub Container Registry 缓存、 provenance 与 SBOM
-- CLI 仅作为 GitHub Release 二进制发布，不制作没有运行时意义的 CLI 镜像
+`CI success` 汇总 backend、web、e2e 和 build 的结果。建议在 GitHub Branch protection / Ruleset 中把 **CI success** 和 **Dependency review** 配为必需检查，避免矩阵名称变化导致保护规则频繁调整。
 
-### 5. `dev-release` — main 持续 Release
+### `docker` — GHCR 多架构镜像
 
-仅当 `github.ref == 'refs/heads/main'` 时触发，下载 8 个二进制并生成 `checksums.txt`，更新 `dev` Release。
+仅在 `main` 或 `v*` tag push 时执行：
 
-### 6. `release` — 正式版本发布
+1. 下载 linux/amd64 与 linux/arm64 的预编译 server；
+2. 使用一个 Buildx build 生成 `linux/amd64,linux/arm64` manifest；
+3. 推送至 `ghcr.io/<owner>/fileupload-server`；
+4. 生成 provenance、SBOM，并使用 GitHub Actions cache。
 
-仅当 tag 匹配 `v*`，且所有质量门禁、构建和 server 镜像发布成功后触发。下载 8 个二进制，生成 `checksums.txt`，再创建 GitHub Release 并自动生成 release notes。
+单次多平台构建避免两个架构并发覆盖同一 Docker tag。
 
-## 本地复现构建
+### `dev-release` 与 `release`
+
+- `main`：更新 `dev` prerelease，且不会设置为 latest release。
+- `v*` tag：生成正式 Release 与自动 release notes。
+- 两类 Release 都包含 12 个二进制和 `checksums.txt`。
+- Release 只会在质量门禁和 Docker 镜像发布都成功后执行。
+
+## 依赖安全与自动更新
+
+- Pull Request 会运行 `actions/dependency-review-action`，高危及以上新增依赖会失败。
+- Dependabot 每周一（Asia/Shanghai）依次检查 GitHub Actions、Go modules、pnpm workspace 和 Dockerfile。
+- pnpm workspace 在 Dependabot 中使用 `npm` package ecosystem，这是 GitHub 对 npm/yarn/pnpm JavaScript 包管理器的统一配置入口。
+
+## 本地复现
 
 ```bash
-# 构建前端
-cd web && npm ci && npm run build
+# 安装锁定依赖
+pnpm install --frozen-lockfile
 
-# 构建多平台二进制
+# 前端静态检查、覆盖率、构建
+pnpm web:lint
+pnpm web:test:coverage
+pnpm web:build
+
+# 浏览器烟雾测试（首次先安装 Chromium）
+pnpm --dir web exec playwright install chromium
+pnpm web:e2e
+
+# Go 门禁
+gofmt -w ./cmd ./internal
+go mod tidy
+go vet ./...
+go test -race -count=1 ./...
+
+# Unix / WSL / Git Bash 下可直接运行聚合目标
+make check
 make release
-
-# 构建完整 server Docker 镜像
-make docker
 ```
 
 ## 发布版本
@@ -84,10 +125,4 @@ git tag v0.5.0
 git push origin v0.5.0
 ```
 
-CI 会执行质量门禁、构建 8 个二进制、发布两个架构的 server 镜像，并创建正式 GitHub Release。
-
-## 修改 workflow 后
-
-- PR 会执行后端质量检查、前端生产构建和跨平台编译
-- 合入 `main` 后额外发布 `latest` server 镜像与 `dev` Release
-- 推送 `v*` tag 后发布 semver server 镜像与正式 Release
+Tag workflow 会先跑完整质量门禁，再构建 12 个二进制、发布两个 CPU 架构共用的 server manifest，最后创建 GitHub Release。

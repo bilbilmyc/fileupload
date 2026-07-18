@@ -3,8 +3,7 @@
 ## 跑法
 
 ```bash
-cd web
-npm run test -- --coverage
+pnpm --dir web test:coverage
 ```
 
 输出文本报告到 stdout，HTML 报告到 `web/coverage/index.html`。

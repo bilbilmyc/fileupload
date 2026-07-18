@@ -25,6 +25,7 @@ var rootCmd = &cobra.Command{
 支持单文件/目录上传、下载、管理、秒传、断点续传、压测。`,
 	SilenceUsage:  true,
 	SilenceErrors: true,
+	Version:       versionString(),
 }
 
 func Execute() {
@@ -77,11 +78,18 @@ func tokenFilePath() string {
 
 // saveToken 保存令牌到 ~/.fileupload/token
 func saveToken(tok string) error {
-	dir := filepath.Dir(tokenFilePath())
+	return saveTokenAtPath(tokenFilePath(), tok)
+}
+
+func saveTokenAtPath(path, tok string) error {
+	if path == "" {
+		return fmt.Errorf("无法确定令牌文件路径")
+	}
+	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return err
 	}
-	return os.WriteFile(tokenFilePath(), []byte(tok), 0600)
+	return os.WriteFile(path, []byte(tok), 0600)
 }
 
 // loadToken 从 ~/.fileupload/token 读取令牌

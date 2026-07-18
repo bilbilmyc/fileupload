@@ -7,6 +7,13 @@ import { test, expect } from '@playwright/test'
  * 后续 Playwright e2e 应在 docker-compose 或 dev 环境下跑（自动启动后端）。
  */
 test.describe('冒烟测试', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.route('**/v1/ls?**', (route) => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ children: [], ancestors: [], total: 0 }),
+    }))
+  })
   test('首页加载无 JS 错误', async ({ page }) => {
     const errors: string[] = []
     page.on('pageerror', (err) => errors.push(err.message))

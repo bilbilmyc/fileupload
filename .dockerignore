@@ -5,7 +5,6 @@
 # 构建产物
 build/
 *.exe
-*.exe
 *.exe~
 
 # 编辑器
@@ -25,3 +24,10 @@ Thumbs.db
 
 # Doc
 docs/
+
+# JavaScript dependencies and local caches
+**/node_modules/
+.pnpm-store/
+web/dist/
+sdk/js/dist/
+web/coverage/

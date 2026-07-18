@@ -30,9 +30,11 @@ fileupload.yaml
 
 # 前端
 web/node_modules/
-# web/dist: 全部为构建产物（CI / 本地 make web 都重新生成）。
-# 无 Go embed 依赖（embed 检查无果），所以 index.html / placeholder
-# 占位文件不需要跟踪 — 全部由 Makefile 的 web target 生成。
+# web/dist: 全部为构建产物（本地 make web / CI 的 web job 重新生成）。
+# 服务端通过 web/embed.go 内嵌 web/dist，因此 Go 编译前必须先备好该目录：
+#   - 本地：make server 依赖 web target 先构建前端
+#   - CI backend job：放置占位产物即可通过编译
+#   - CI build job（server）：下载 web job 产出的 web-dist artifact
 web/dist/
 
 # 测试覆盖率报告（生成产物，可由 scripts/coverage.sh 重新生成）
@@ -44,8 +46,9 @@ go-coverage-report.txt
 sdk/js/node_modules/
 sdk/js/dist/
 
-# 根目录 node_modules（如果以后有顶层 npm 依赖）+ vitest 缓存
+# JS 包管理器缓存与 vitest 缓存
 node_modules/
+.pnpm-store/
 .vite/
 
 # 本地工具缓存
@@ -53,3 +56,8 @@ node_modules/
 .uv-cache/
 .test-home/
 .gocache/
+
+# 浏览器测试产物
+web/playwright-report/
+web/test-results/
+/release/

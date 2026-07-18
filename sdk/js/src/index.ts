@@ -18,7 +18,7 @@
  * ```
  */
 
-export { FileuploadClient } from './client'
+export { FileuploadClient } from './client.js'
 // React hooks（useFileList, useFileUpload）从 './hooks/react' 单独导出，
 // 不在此 barrel — 避免非 React 消费者引入 react peer dep。
-export type * from './types'
+export type * from './types.js'

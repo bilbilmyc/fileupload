@@ -1,14 +1,17 @@
 # fileupload Docker 镜像 — 本地完整构建
 # 前端依赖使用 lockfile 安装，确保本地与 CI 构建可复现。
 
-FROM node:20-alpine AS web-builder
-WORKDIR /web
-COPY sdk/js/package.json sdk/js/package-lock.json /sdk/js/
-COPY sdk/js/dist /sdk/js/dist
-COPY web/package.json web/package-lock.json ./
-RUN npm ci
-COPY web/ ./
-RUN npm run build
+FROM node:24-alpine AS web-builder
+RUN corepack enable && corepack prepare pnpm@11.12.0 --activate
+WORKDIR /workspace
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY sdk/js/package.json ./sdk/js/
+COPY web/package.json ./web/
+RUN pnpm install --frozen-lockfile
+COPY sdk/js/tsconfig.json ./sdk/js/
+COPY sdk/js/src ./sdk/js/src
+COPY web/ ./web/
+RUN pnpm web:build
 
 FROM golang:1.25-alpine AS go-builder
 RUN apk add --no-cache git ca-certificates
@@ -16,7 +19,7 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-COPY --from=web-builder /web/dist ./web/dist
+COPY --from=web-builder /workspace/web/dist ./web/dist
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/server ./cmd/server
 
 FROM alpine:3.20

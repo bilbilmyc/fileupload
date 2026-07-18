@@ -257,7 +257,7 @@ export function useUpload(onUploadComplete: () => void) {
       updateTask(taskId, { status: 'error', error: e.message })
       throw e
     }
-  }, [chunkSize, compression, updateTask, recordDirFile, onUploadComplete, showUpload])
+  }, [chunkSize, concurrency, compression, updateTask, recordDirFile, onUploadComplete, showUpload])
 
   const customRequest = useCallback(async (options: any) => {
     const { file, onSuccess, onError } = options

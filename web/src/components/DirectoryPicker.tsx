@@ -56,7 +56,6 @@ export default function DirectoryPicker({
     if (node.children || node.key === '__root__') return
     const children = await loadChildren(node.key as string)
     if (children.length > 0) {
-      // @ts-ignore - mutate tree data
       node.children = children
       setTreeData([...treeData])
     }

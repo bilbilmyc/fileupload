@@ -3,7 +3,7 @@ package main
 import (
 	"bytes"
 	"fmt"
-	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -303,10 +303,15 @@ func TestCLI_CompletionValidArgs(t *testing.T) {
 
 // TestCLI_TokenRoundtrip 验证 saveToken/loadToken
 func TestCLI_TokenRoundtrip(t *testing.T) {
-	// 用临时目录模拟 HOME
-	origHome := os.Getenv("HOME")
-	t.Setenv("HOME", t.TempDir())
-	defer os.Setenv("HOME", origHome)
+	// os.UserHomeDir 在 Unix 读取 HOME，在 Windows 读取 USERPROFILE。
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	wantPath := filepath.Join(home, ".fileupload", "token")
+	if got := tokenFilePath(); got != wantPath {
+		t.Fatalf("tokenFilePath = %q, want %q", got, wantPath)
+	}
 
 	token := "test-secret-token-123"
 	if err := saveToken(token); err != nil {
@@ -316,6 +321,12 @@ func TestCLI_TokenRoundtrip(t *testing.T) {
 	got := loadToken()
 	if got != token {
 		t.Errorf("loadToken = %q, want %q", got, token)
+	}
+}
+
+func TestSaveTokenAtPathRejectsEmptyPath(t *testing.T) {
+	if err := saveTokenAtPath("", "test-secret-token-123"); err == nil {
+		t.Fatal("saveTokenAtPath error = nil, want non-nil")
 	}
 }
 
@@ -403,4 +414,19 @@ func BenchmarkParseSizeFlag(b *testing.B) {
 // Verify fmt import used (for FormatInt and friends)
 func init() {
 	_ = fmt.Sprintf
+}
+
+func TestCLI_VersionMetadata(t *testing.T) {
+	originalVersion, originalCommit, originalBuiltAt := version, commit, builtAt
+	t.Cleanup(func() {
+		version, commit, builtAt = originalVersion, originalCommit, originalBuiltAt
+		rootCmd.Version = versionString()
+	})
+
+	version, commit, builtAt = "v1.2.3", "abc123", "2026-07-18T00:00:00Z"
+	rootCmd.Version = versionString()
+
+	if got := rootCmd.Version; got != "v1.2.3 (commit abc123, built 2026-07-18T00:00:00Z)" {
+		t.Fatalf("rootCmd.Version = %q", got)
+	}
 }

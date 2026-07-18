@@ -11,7 +11,7 @@ LDFLAGS     := -ldflags="-s -w -X main.version=$(VERSION) -X main.commit=$(COMMI
 OUTPUT_DIR  := build
 
 # 目标平台列表
-PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
+PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64
 
 # 默认目标
 .PHONY: all
@@ -23,32 +23,33 @@ WEB_DIST_PLACEHOLDER := web/dist/index.html
 
 .PHONY: web-deps
 web-deps:
-	@if [ ! -d "web/node_modules" ]; then \
-		echo "▸ 安装前端依赖"; \
-		cd web && npm ci; \
-	else \
-		echo "▸ 前端依赖已存在，跳过 npm ci"; \
-	fi
+	@echo "▸ 校验并安装前端依赖"
+	@pnpm install --frozen-lockfile
 
 .PHONY: web
 web: web-deps
 	@echo "▸ 构建前端"
-	@cd web && npm run build
+	@pnpm web:build
 
 .PHONY: web-force
 web-force:
 	@echo "▸ 强制重新安装前端依赖并构建"
-	@cd web && npm ci && npm run build
+	@pnpm install --frozen-lockfile --force && pnpm web:build
 
 .PHONY: web-placeholder
 web-placeholder:
 	@echo "▸ 恢复占位 index.html（提交前执行，避免误追踪构建产物）"
-	@printf '<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/><title>fileupload 管理面板</title></head><body><div style="padding:48px;font-family:sans-serif;text-align:center;color:#64748b;"><h1>📦 fileupload</h1><p>前端尚未构建。</p><p>请运行：<code style="background:#f1f5f9;padding:4px 8px;border-radius:4px;">cd web && npm ci && npm run build</code></p><p>然后重启服务端。</p></div></body></html>' > $(WEB_DIST_PLACEHOLDER)
+	@printf '<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/><title>fileupload 管理面板</title></head><body><div style="padding:48px;font-family:sans-serif;text-align:center;color:#64748b;"><h1>📦 fileupload</h1><p>前端尚未构建。</p><p>请运行：<code style="background:#f1f5f9;padding:4px 8px;border-radius:4px;">pnpm install --frozen-lockfile && pnpm web:build</code></p><p>然后重启服务端。</p></div></body></html>' > $(WEB_DIST_PLACEHOLDER)
 
 .PHONY: web-dev
 web-dev:
 	@echo "▸ 启动前端开发服务器"
-	@cd web && npm run dev
+	@pnpm --dir web dev
+
+.PHONY: web-e2e
+web-e2e: web-deps
+	@echo "▸ 运行 Chromium 浏览器烟雾测试"
+	@pnpm web:e2e
 
 # ---- 服务端 ----
 
@@ -86,6 +87,20 @@ server-darwin-arm64: web
 	GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build $(LDFLAGS) \
 	  -o $(OUTPUT_DIR)/$(APP_NAME)-server-darwin-arm64 ./cmd/server
 
+.PHONY: server-windows-amd64
+server-windows-amd64: web
+	@echo "▸ 编译 server (windows/amd64)"
+	@mkdir -p $(OUTPUT_DIR)
+	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build $(LDFLAGS) \
+	  -o $(OUTPUT_DIR)/$(APP_NAME)-server-windows-amd64.exe ./cmd/server
+
+.PHONY: server-windows-arm64
+server-windows-arm64: web
+	@echo "▸ 编译 server (windows/arm64)"
+	@mkdir -p $(OUTPUT_DIR)
+	GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go build $(LDFLAGS) \
+	  -o $(OUTPUT_DIR)/$(APP_NAME)-server-windows-arm64.exe ./cmd/server
+
 # ---- CLI ----
 
 .PHONY: cli
@@ -122,11 +137,27 @@ cli-darwin-arm64:
 	GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build $(LDFLAGS) \
 	  -o $(OUTPUT_DIR)/$(APP_NAME)-cli-darwin-arm64 ./cmd/fileupload
 
+.PHONY: cli-windows-amd64
+cli-windows-amd64:
+	@echo "▸ 编译 cli (windows/amd64)"
+	@mkdir -p $(OUTPUT_DIR)
+	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build $(LDFLAGS) \
+	  -o $(OUTPUT_DIR)/$(APP_NAME)-cli-windows-amd64.exe ./cmd/fileupload
+
+.PHONY: cli-windows-arm64
+cli-windows-arm64:
+	@echo "▸ 编译 cli (windows/arm64)"
+	@mkdir -p $(OUTPUT_DIR)
+	GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go build $(LDFLAGS) \
+	  -o $(OUTPUT_DIR)/$(APP_NAME)-cli-windows-arm64.exe ./cmd/fileupload
+
 # ---- 全平台编译 ----
 
 .PHONY: release
 release: clean web server-linux-amd64 server-linux-arm64 server-darwin-amd64 server-darwin-arm64 \
-  cli-linux-amd64 cli-linux-arm64 cli-darwin-amd64 cli-darwin-arm64
+  server-windows-amd64 server-windows-arm64 \
+  cli-linux-amd64 cli-linux-arm64 cli-darwin-amd64 cli-darwin-arm64 \
+  cli-windows-amd64 cli-windows-arm64
 	@echo ""
 	@echo "✓ 全平台编译完成"
 	@ls -lh $(OUTPUT_DIR)/
@@ -172,6 +203,19 @@ test:
 tidy:
 	go mod tidy
 
+.PHONY: check
+check: web-deps
+	@echo "▸ 检查 Go 格式"
+	@test -z "$$(gofmt -l $$(git ls-files '*.go'))"
+	@echo "▸ 检查 Go module 文件"
+	@go mod tidy
+	@git diff --exit-code -- go.mod go.sum
+	@go vet ./...
+	@go test -race -count=1 ./...
+	@pnpm web:lint
+	@pnpm web:test:coverage
+	@pnpm web:build
+
 # ---- 清理 ----
 
 .PHONY: clean
@@ -189,8 +233,9 @@ help:
 	@echo ""
 	@echo "编译:"
 	@echo "  all                  编译前端 + server + cli"
-	@echo "  web                  构建前端（npm ci + build）"
+	@echo "  web                  构建前端（pnpm install + build）"
 	@echo "  web-dev              启动前端开发服务器"
+	@echo "  web-e2e              运行浏览器烟雾测试"
 	@echo "  server               编译当前平台 server"
 	@echo "  cli                  编译当前平台 cli"
 	@echo "  release              编译全部平台二进制"
@@ -198,6 +243,8 @@ help:
 	@echo "  server-linux-arm64   编译 linux/arm64 server"
 	@echo "  cli-linux-amd64      编译 linux/amd64 cli"
 	@echo "  cli-linux-arm64      编译 linux/arm64 cli"
+	@echo "  server-windows-*     编译 Windows server"
+	@echo "  cli-windows-*        编译 Windows CLI"
 	@echo ""
 	@echo "Docker:"
 	@echo "  docker               构建 Docker 镜像 (linux/amd64)"
@@ -208,6 +255,7 @@ help:
 	@echo "  lint                 golangci-lint"
 	@echo "  test                 运行测试 (-race)"
 	@echo "  tidy                 go mod tidy"
+	@echo "  check                运行与 CI 对齐的本地质量门禁"
 	@echo ""
 	@echo "其他:"
 	@echo "  clean                清理构建产物"

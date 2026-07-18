@@ -38,6 +38,7 @@ import (
 )
 
 func main() {
+	log.Printf("fileupload server version=%s commit=%s built_at=%s", version, commit, builtAt)
 	cfg, err := config.Load(os.Getenv("FILEUPLOAD_CONFIG"))
 	if err != nil {
 		log.Fatalf("加载配置失败: %v", err)

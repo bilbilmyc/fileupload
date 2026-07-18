@@ -18,7 +18,7 @@ import type {
   SystemStatus,
   AuditLogEntry,
   ScanReport,
-} from './types'
+} from './types.js'
 
 /**
  * Fileupload SDK 客户端

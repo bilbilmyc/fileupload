@@ -4,7 +4,7 @@
 set -e
 echo "=== Web Coverage ==="
 cd web
-npm run test:coverage:html 2>&1 | tail -20
+pnpm test:coverage:html 2>&1 | tail -20
 echo ""
 echo "=== Go Coverage ==="
 cd ..

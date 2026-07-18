@@ -1,8 +1,6 @@
 # fileupload CI/CD — 发行版 Docker 构建
-# 使用 CI 预编译好的 server 二进制；CLI 通过 GitHub Release 发布。
+# 使用 CI 预编译好的 linux/amd64 与 linux/arm64 server 二进制。
 # 本地开发请使用 deploy/docker/Dockerfile。
-
-ARG BINARY=server
 
 FROM alpine:3.20
 
@@ -11,10 +9,8 @@ RUN apk add --no-cache ca-certificates tzdata \
     && mkdir -p /var/lib/fileupload/data /var/lib/fileupload/tmp \
     && chown -R fileupload:fileupload /var/lib/fileupload
 
-ARG BINARY
-RUN test "$BINARY" = "server"
-
-COPY fileupload-${BINARY} /usr/local/bin/fileupload-${BINARY}
+ARG TARGETARCH
+COPY --chmod=0755 release/fileupload-server-linux-${TARGETARCH} /usr/local/bin/fileupload-server
 COPY fileupload.yaml.example /etc/fileupload/fileupload.yaml
 
 USER fileupload

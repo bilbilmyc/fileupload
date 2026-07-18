@@ -1,12 +1,10 @@
 import { defineConfig, devices } from '@playwright/test'
 
 /**
- * Playwright E2E 测试配置（v0.7.0）
+ * Playwright 浏览器烟雾测试。
  *
- * 启动方式：先启后端 + web dev server，再跑测试。
- *   终端 A: cd server && ./bin/fileupload-server
- *   终端 B: cd web && npm run dev
- *   终端 C: cd web && npx playwright test
+ * `pnpm e2e` 会自动启动 Vite；登录接口由测试用例按场景 mock，
+ * 因此本地和 CI 都不依赖一套长期运行的后端或固定管理员密码。
  */
 export default defineConfig({
   testDir: './e2e',
@@ -14,9 +12,12 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
   workers: process.env.CI ? 1 : undefined,
-  reporter: 'list',
+  reporter: [
+    ['list'],
+    ['html', { outputFolder: 'playwright-report', open: 'never' }],
+  ],
   use: {
-    baseURL: 'http://localhost:5173',
+    baseURL: 'http://127.0.0.1:41783',
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
   },
@@ -26,6 +27,10 @@ export default defineConfig({
       use: { ...devices['Desktop Chrome'] },
     },
   ],
-  // 不自动启 dev server — 用户手动启（避免与已有服务冲突）
-  // webServer: { command: 'npm run dev', port: 5173, reuseExistingServer: true },
+  webServer: {
+    command: 'node node_modules/vite/bin/vite.js --host 127.0.0.1 --port 41783',
+    url: 'http://127.0.0.1:41783',
+    reuseExistingServer: !process.env.CI,
+    timeout: 120_000,
+  },
 })

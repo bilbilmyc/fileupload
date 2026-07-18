@@ -70,7 +70,7 @@ export default function Files() {
         refreshFiles()
       },
     })
-  }, [selectedRowKeys, selectedFiles, refreshFiles, addRecord])
+  }, [selectedRowKeys, selectedFiles, refreshFiles, addRecord, setSelectedRowKeys])
 
   const handleBatchMove = useCallback(() => {
     setDirPickerMode('move')
@@ -100,7 +100,7 @@ export default function Files() {
       message.error(`${dirPickerMode === 'move' ? '移动' : '复制'}失败: ${e.message}`)
     }
     setDirPickerOpen(false)
-  }, [dirPickerMode, selectedRowKeys, refreshFiles])
+  }, [dirPickerMode, selectedRowKeys, refreshFiles, setSelectedRowKeys])
 
   const handleTagEditorConfirm = useCallback(async (tags: string[]) => {
     try {
@@ -112,7 +112,7 @@ export default function Files() {
       message.error(`标记失败: ${e.message}`)
     }
     setTagEditorOpen(false)
-  }, [selectedRowKeys, refreshFiles])
+  }, [selectedRowKeys, refreshFiles, setSelectedRowKeys])
 
   // ---- New folder ----
   const handleNewFolder = useCallback(() => {

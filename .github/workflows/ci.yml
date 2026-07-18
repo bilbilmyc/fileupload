@@ -1,10 +1,4 @@
-# fileupload CI/CD — 自动构建、校验、发布
-#
-# 触发条件:
-#   - Pull Request: 后端质量检查、前端生产构建、跨平台编译
-#   - push 到 main: 上述检查 + GHCR server 镜像 + dev Release
-#   - 创建 v* tag: 上述检查 + 版本镜像 + 正式 Release
-
+# fileupload CI/CD — 质量门禁、跨平台构建、镜像和 Release
 name: CI/CD
 
 on:
@@ -19,23 +13,20 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-# 默认只读，发布 job 在自身作用域内声明写权限。
 permissions:
   contents: read
 
 env:
   GO_VERSION: "1.25.5"
-  NODE_VERSION: "20"
+  NODE_VERSION: "24"
+  PNPM_VERSION: "11.12.0"
   APP_NAME: "fileupload"
 
 jobs:
-  # ========================================
-  # 后端质量门禁
-  # ========================================
-  test:
+  backend:
     name: Backend quality
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     services:
       redis:
         image: redis:7-alpine
@@ -46,155 +37,245 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+    env:
+      FILEUPLOAD_REDIS_ADDR: localhost:6379
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
 
-      - name: Run tests with race detection
-        run: go test -race -count=1 -timeout 120s ./...
-        env:
-          FILEUPLOAD_REDIS_ADDR: localhost:6379
+      # 服务端通过 web/embed.go 内嵌 web/dist（index.html + assets/*）。
+      # web/dist 不纳入版本控制，质量门禁只需能编译，放置占位产物即可。
+      - name: Stage embedded frontend placeholder
+        shell: bash
+        run: |
+          mkdir -p web/dist/assets
+          echo '<!doctype html><title>fileupload</title>' > web/dist/index.html
+          echo '/* placeholder */' > web/dist/assets/placeholder.css
+
+      - name: Check formatting
+        shell: bash
+        run: |
+          unformatted="$(gofmt -l $(git ls-files '*.go'))"
+          if [[ -n "$unformatted" ]]; then
+            echo "The following Go files are not formatted:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Check module files
+        run: |
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
 
       - name: Run vet
         run: go vet ./...
 
-  # ========================================
-  # 前端生产构建
-  # ========================================
-  web:
-    name: Web production build
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    defaults:
-      run:
-        working-directory: web
-    steps:
-      - uses: actions/checkout@v4
+      - name: Run tests with race detection
+        run: go test -race -count=1 -timeout 120s ./...
 
-      - uses: actions/setup-node@v4
+      - name: Generate backend coverage
+        run: go test -count=1 -covermode=atomic -coverprofile=go-coverage.out ./...
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: go-coverage
+          path: go-coverage.out
+          if-no-files-found: error
+          retention-days: 14
+
+  web:
+    name: Web quality and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+          run_install: false
+
+      - uses: actions/setup-node@v6
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-          cache-dependency-path: web/package-lock.json
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
 
       - name: Install locked dependencies
-        run: npm ci
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint frontend
+        run: pnpm web:lint
+
+      - name: Run frontend tests with coverage
+        run: pnpm web:test:coverage
 
       - name: Build production assets
-        run: npm run build
+        run: pnpm web:build
 
-  # ========================================
-  # 全平台交叉编译
-  # ========================================
-  build:
-    name: Build ${{ matrix.bin_name }} (${{ matrix.goos }}/${{ matrix.goarch }})
-    needs: [test, web]
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
+          if-no-files-found: error
+          retention-days: 14
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-coverage
+          path: web/coverage
+          if-no-files-found: error
+          retention-days: 14
+
+  e2e:
+    name: Browser smoke tests
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+          run_install: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium
+        run: pnpm --dir web exec playwright install --with-deps chromium
+
+      - name: Run browser smoke tests
+        run: pnpm web:e2e
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            web/playwright-report
+            web/test-results
+          if-no-files-found: ignore
+          retention-days: 14
+
+  build:
+    name: Build ${{ matrix.asset }}
+    needs: [backend, web, e2e]
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
     strategy:
       fail-fast: false
       matrix:
         include:
-          - goos: linux
-            goarch: amd64
-            component: server
-            bin_name: server
-          - goos: linux
-            goarch: arm64
-            component: server
-            bin_name: server
-          - goos: darwin
-            goarch: amd64
-            component: server
-            bin_name: server
-          - goos: darwin
-            goarch: arm64
-            component: server
-            bin_name: server
-          - goos: linux
-            goarch: amd64
-            component: fileupload
-            bin_name: cli
-          - goos: linux
-            goarch: arm64
-            component: fileupload
-            bin_name: cli
-          - goos: darwin
-            goarch: amd64
-            component: fileupload
-            bin_name: cli
-          - goos: darwin
-            goarch: arm64
-            component: fileupload
-            bin_name: cli
+          - { goos: linux, goarch: amd64, component: server, asset: fileupload-server-linux-amd64 }
+          - { goos: linux, goarch: arm64, component: server, asset: fileupload-server-linux-arm64 }
+          - { goos: darwin, goarch: amd64, component: server, asset: fileupload-server-darwin-amd64 }
+          - { goos: darwin, goarch: arm64, component: server, asset: fileupload-server-darwin-arm64 }
+          - { goos: windows, goarch: amd64, component: server, asset: fileupload-server-windows-amd64.exe }
+          - { goos: windows, goarch: arm64, component: server, asset: fileupload-server-windows-arm64.exe }
+          - { goos: linux, goarch: amd64, component: fileupload, asset: fileupload-cli-linux-amd64 }
+          - { goos: linux, goarch: arm64, component: fileupload, asset: fileupload-cli-linux-arm64 }
+          - { goos: darwin, goarch: amd64, component: fileupload, asset: fileupload-cli-darwin-amd64 }
+          - { goos: darwin, goarch: arm64, component: fileupload, asset: fileupload-cli-darwin-arm64 }
+          - { goos: windows, goarch: amd64, component: fileupload, asset: fileupload-cli-windows-amd64.exe }
+          - { goos: windows, goarch: arm64, component: fileupload, asset: fileupload-cli-windows-arm64.exe }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
 
+      # server 通过 web/embed.go 内嵌前端；下载 web job 产出的真实构建产物，
+      # 保证发行二进制携带完整管理面板而非占位页。CLI 不引用 web 包，无需下载。
+      - name: Download web assets
+        if: matrix.component == 'server'
+        uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
+
       - name: Build binary
+        shell: bash
         run: |
           mkdir -p build
+          version="${GITHUB_REF_NAME:-dev}"
+          commit="${GITHUB_SHA::12}"
+          built_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          ldflags="-s -w -X main.version=${version} -X main.commit=${commit} -X main.builtAt=${built_at}"
           CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} \
-            go build -trimpath -ldflags="-s -w" \
-            -o build/${{ env.APP_NAME }}-${{ matrix.bin_name }}-${{ matrix.goos }}-${{ matrix.goarch }} \
-            ./cmd/${{ matrix.component }}
+            go build -trimpath -ldflags "$ldflags" \
+            -o build/${{ matrix.asset }} ./cmd/${{ matrix.component }}
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.APP_NAME }}-${{ matrix.bin_name }}-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: build/${{ env.APP_NAME }}-${{ matrix.bin_name }}-${{ matrix.goos }}-${{ matrix.goarch }}
+          name: ${{ matrix.asset }}
+          path: build/${{ matrix.asset }}
           if-no-files-found: error
           retention-days: 14
 
-  # ========================================
-  # Docker server 镜像构建与发布
-  # 使用预编译产物，无需 QEMU 模拟 Go 编译。
-  # CLI 通过 GitHub Release 发布，不制作没有运行时意义的 CLI 镜像。
-  # ========================================
+  quality-gate:
+    name: CI success
+    if: always()
+    needs: [backend, web, e2e, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Verify required jobs
+        shell: bash
+        run: |
+          for result in \
+            "${{ needs.backend.result }}" \
+            "${{ needs.web.result }}" \
+            "${{ needs.e2e.result }}" \
+            "${{ needs.build.result }}"; do
+            if [[ "$result" != "success" ]]; then
+              echo "Required job result: $result"
+              exit 1
+            fi
+          done
+
   docker:
-    name: Docker server (${{ matrix.platform }})
+    name: Publish multi-platform server image
     if: >-
       github.event_name == 'push' &&
       (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
-    needs: [build]
+    needs: [build, quality-gate]
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     permissions:
       contents: read
       packages: write
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: linux/amd64
-            goarch: amd64
-          - platform: linux/arm64
-            goarch: arm64
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: actions/download-artifact@v4
         with:
-          name: ${{ env.APP_NAME }}-server-linux-${{ matrix.goarch }}
-          path: build/
+          pattern: ${{ env.APP_NAME }}-server-linux-*
+          merge-multiple: true
+          path: release
 
-      - name: Prepare server binary
-        run: |
-          cp build/${{ env.APP_NAME }}-server-linux-${{ matrix.goarch }} ./${{ env.APP_NAME }}-server
-          chmod +x ./${{ env.APP_NAME }}-server
+      - name: Prepare server binaries
+        run: chmod +x release/${{ env.APP_NAME }}-server-linux-*
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-qemu-action@v4
+
+      - uses: docker/setup-buildx-action@v4
 
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -202,7 +283,7 @@ jobs:
 
       - name: Extract image metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ghcr.io/${{ github.repository_owner }}/${{ env.APP_NAME }}-server
           tags: |
@@ -212,27 +293,24 @@ jobs:
             type=sha,prefix=
 
       - name: Build and push server image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: deploy/docker/Dockerfile.dist
-          build-args: BINARY=server
-          platforms: ${{ matrix.platform }}
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
           provenance: mode=max
           sbom: true
-          cache-from: type=registry,ref=ghcr.io/${{ github.repository_owner }}/${{ env.APP_NAME }}-server:latest
-          cache-to: type=inline
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
-  # ========================================
-  # Dev Release: main 分支每次推送都更新持续 Release
-  # ========================================
   dev-release:
     name: Dev Release
-    if: github.ref == 'refs/heads/main' && needs.build.result == 'success'
-    needs: [build]
+    if: github.ref == 'refs/heads/main'
+    needs: [build, quality-gate, docker]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -242,11 +320,11 @@ jobs:
         with:
           pattern: ${{ env.APP_NAME }}-*
           merge-multiple: true
-          path: build/
+          path: build
 
       - name: Generate checksums
         working-directory: build
-        run: sha256sum * > checksums.txt
+        run: sha256sum fileupload-* > checksums.txt
 
       - name: Upload dev release
         uses: softprops/action-gh-release@v2
@@ -260,17 +338,13 @@ jobs:
             时间: ${{ github.event.head_commit.timestamp || 'N/A' }}
           files: build/*
           target_commitish: ${{ github.sha }}
+          prerelease: true
+          make_latest: false
 
-  # ========================================
-  # Release: tag 推送时创建正式版本 Release
-  # ========================================
   release:
     name: Release
-    if: >-
-      startsWith(github.ref, 'refs/tags/v') &&
-      needs.build.result == 'success' &&
-      needs.docker.result == 'success'
-    needs: [build, docker]
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build, quality-gate, docker]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -280,13 +354,14 @@ jobs:
         with:
           pattern: ${{ env.APP_NAME }}-*
           merge-multiple: true
-          path: build/
+          path: build
 
       - name: Generate checksums
         working-directory: build
-        run: sha256sum * > checksums.txt
+        run: sha256sum fileupload-* > checksums.txt
 
-      - uses: softprops/action-gh-release@v2
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           files: build/*
