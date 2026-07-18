@@ -17,7 +17,7 @@
     "build:sdk": "pnpm --dir ../sdk/js build"
   },
   "dependencies": {
-    "@ant-design/icons": "^5.6.1",
+    "@ant-design/icons": "^6.3.2",
     "@fileupload/sdk": "workspace:*",
     "antd": "^5.24.0",
     "axios": "^1.8.0",
