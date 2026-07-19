@@ -109,6 +109,7 @@ type DatabaseConfig struct {
 type UploadConfig struct {
 	SessionTTLMinutes   int   `json:"session_ttl_minutes" yaml:"session_ttl_minutes"`
 	DefaultChunkSize    int64 `json:"default_chunk_size" yaml:"default_chunk_size"`
+	MaxInFlightBytes    int64 `json:"max_in_flight_bytes" yaml:"max_in_flight_bytes"`
 	WorkerPoolSize      int   `json:"worker_pool_size" yaml:"worker_pool_size"`
 	WorkerQueueSize     int   `json:"worker_queue_size" yaml:"worker_queue_size"`
 	NamespaceQuotaBytes int64 `json:"namespace_quota_bytes" yaml:"namespace_quota_bytes"` // 0 = unlimited
@@ -184,9 +185,10 @@ func DefaultConfig() Config {
 		Upload: UploadConfig{
 			SessionTTLMinutes:   60,
 			DefaultChunkSize:    10 * 1024 * 1024,
-			WorkerPoolSize:      16,  // 多人并发建议 16-32
-			WorkerQueueSize:     400, // 建议 = pool_size * 25
-			NamespaceQuotaBytes: 0,   // 0 = unlimited
+			MaxInFlightBytes:    256 * 1024 * 1024, // 上传分片内存上限
+			WorkerPoolSize:      16,                // 多人并发建议 16-32
+			WorkerQueueSize:     400,               // 建议 = pool_size * 25
+			NamespaceQuotaBytes: 0,                 // 0 = unlimited
 		},
 		Download: DownloadConfig{
 			MaxArchiveSize: 0,
@@ -318,6 +320,11 @@ func loadEnv(cfg *Config) {
 	if v := os.Getenv("FILEUPLOAD_CHUNK_SIZE"); v != "" {
 		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
 			cfg.Upload.DefaultChunkSize = n
+		}
+	}
+	if v := os.Getenv("FILEUPLOAD_MAX_IN_FLIGHT_BYTES"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+			cfg.Upload.MaxInFlightBytes = n
 		}
 	}
 	if v := os.Getenv("FILEUPLOAD_TRASH_RETENTION_HOURS"); v != "" {

@@ -172,7 +172,7 @@ func buildDeps(cfg *config.Config) (Deps, error) {
 		Hasher:      hash,
 		WorkerPool:  workerPool,
 		Auth:        authSvc,
-		UploadCfg:   domain.UploadConfig{SessionTTL: cfg.Upload.SessionTTL(), DataDir: cfg.Storage.DataDir, DefaultChunkSize: cfg.Upload.DefaultChunkSize, NamespaceQuotaBytes: cfg.Upload.NamespaceQuotaBytes},
+		UploadCfg:   domain.UploadConfig{SessionTTL: cfg.Upload.SessionTTL(), DataDir: cfg.Storage.DataDir, DefaultChunkSize: cfg.Upload.DefaultChunkSize, MaxInFlightBytes: cfg.Upload.MaxInFlightBytes, NamespaceQuotaBytes: cfg.Upload.NamespaceQuotaBytes},
 		DownloadCfg: domain.DownloadConfig{DataDir: cfg.Storage.DataDir},
 		AuthCfg:     transport.AuthConfig{Enabled: cfg.Auth.Enabled, Enforce: cfg.Auth.Enforce, Token: cfg.Auth.Token, Header: cfg.Auth.Header},
 		CORSOrigins: cfg.CORS.AllowedOrigins,

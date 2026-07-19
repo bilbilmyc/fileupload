@@ -36,6 +36,13 @@ type NamespaceQuotaReservoir interface {
 }
 
 // BlobStore 内容寻址去重数据接口
+// BatchBlobStore exposes an optional bulk lookup used by batch downloads.
+// Implementations that do not provide it remain compatible; callers fall back to
+// the single-item BlobStore methods.
+type BatchBlobStore interface {
+	GetBlobsBySha(ctx context.Context, sha256s []string) (map[string]*ContentBlob, error)
+}
+
 type BlobStore interface {
 	GetBlobBySha(ctx context.Context, sha256 string) (*ContentBlob, error)
 	PutBlob(ctx context.Context, b *ContentBlob) error
@@ -65,6 +72,13 @@ type FileStore interface {
 	SetFileTags(ctx context.Context, fileID string, tags []string) error
 	GetFileTags(ctx context.Context, fileID string) ([]string, error)
 	DeleteFileTags(ctx context.Context, fileID string) error
+}
+
+// BatchFileStore exposes an optional bulk lookup used by batch downloads.
+// Implementations that do not provide it remain compatible; callers fall back to
+// the single-item FileStore methods.
+type BatchFileStore interface {
+	GetFilesByIDs(ctx context.Context, ids []string) ([]*FileMetadata, error)
 }
 
 // AdminStore 管理后台接口（审计日志 + 计数 + 巡检）

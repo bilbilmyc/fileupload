@@ -385,32 +385,43 @@ func (s *DownloadService) Stat(ctx context.Context, id, namespace string) (*File
 // StreamBatch 批量打包下载多个文件
 // 实现 DownloadPacker 接口。返回 io.ReadCloser，读取它即获得打包数据流。
 func (s *DownloadService) StreamBatch(ctx context.Context, ids []string, namespace string, format CompressionFormat) (io.ReadCloser, error) {
-	// 收集所有文件信息
-	type fileEntry struct {
-		name     string
-		fullPath string
-		size     int64
-		sha256   string
-		blob     *ContentBlob
+	filesByID, err := s.batchFiles(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("批量获取文件: %w", err)
 	}
 
-	var entries []fileEntry
-	nameCount := make(map[string]int) // 重名计数
-
+	candidates := make([]*FileMetadata, 0, len(ids))
+	sha256s := make([]string, 0, len(ids))
+	seenSHA := make(map[string]struct{}, len(ids))
 	for _, id := range ids {
-		file, err := s.meta.GetFile(ctx, id)
-		if err != nil {
+		file := filesByID[id]
+		if file == nil || file.IsDir || file.Namespace != namespace || file.SHA256 == "" {
 			continue
 		}
-		if file == nil || file.IsDir {
-			continue
+		candidates = append(candidates, file)
+		if _, seen := seenSHA[file.SHA256]; !seen {
+			seenSHA[file.SHA256] = struct{}{}
+			sha256s = append(sha256s, file.SHA256)
 		}
-		if file.Namespace != namespace {
-			continue
-		}
+	}
 
-		blob, err := s.meta.GetBlobBySha(ctx, file.SHA256)
-		if err != nil || blob == nil {
+	blobsBySHA, err := s.batchBlobs(ctx, sha256s)
+	if err != nil {
+		return nil, fmt.Errorf("批量获取 blob: %w", err)
+	}
+
+	// 收集所有文件信息
+	type fileEntry struct {
+		name string
+		size int64
+		blob *ContentBlob
+	}
+
+	entries := make([]fileEntry, 0, len(candidates))
+	nameCount := make(map[string]int) // 重名计数
+	for _, file := range candidates {
+		blob := blobsBySHA[file.SHA256]
+		if blob == nil {
 			continue
 		}
 
@@ -422,11 +433,9 @@ func (s *DownloadService) StreamBatch(ctx context.Context, ids []string, namespa
 		}
 
 		entries = append(entries, fileEntry{
-			name:     name,
-			fullPath: blob.StoragePath,
-			size:     file.Size,
-			sha256:   file.SHA256,
-			blob:     blob,
+			name: name,
+			size: file.Size,
+			blob: blob,
 		})
 	}
 
@@ -470,4 +479,58 @@ func (s *DownloadService) StreamBatch(ctx context.Context, ids []string, namespa
 	}()
 
 	return pr, nil
+}
+
+func (s *DownloadService) batchFiles(ctx context.Context, ids []string) (map[string]*FileMetadata, error) {
+	filesByID := make(map[string]*FileMetadata, len(ids))
+	if batch, ok := s.meta.(BatchFileStore); ok {
+		files, err := batch.GetFilesByIDs(ctx, ids)
+		if err != nil {
+			return nil, err
+		}
+		for _, file := range files {
+			if file != nil {
+				filesByID[file.FileID] = file
+			}
+		}
+		return filesByID, nil
+	}
+
+	// Compatibility fallback for metadata implementations that predate the
+	// optional batch lookup interface.
+	for _, id := range ids {
+		file, err := s.meta.GetFile(ctx, id)
+		if err != nil || file == nil {
+			continue
+		}
+		filesByID[id] = file
+	}
+	return filesByID, nil
+}
+
+func (s *DownloadService) batchBlobs(ctx context.Context, sha256s []string) (map[string]*ContentBlob, error) {
+	blobsBySHA := make(map[string]*ContentBlob, len(sha256s))
+	if batch, ok := s.meta.(BatchBlobStore); ok {
+		blobs, err := batch.GetBlobsBySha(ctx, sha256s)
+		if err != nil {
+			return nil, err
+		}
+		for sha256, blob := range blobs {
+			if blob != nil {
+				blobsBySHA[sha256] = blob
+			}
+		}
+		return blobsBySHA, nil
+	}
+
+	// Compatibility fallback for metadata implementations that predate the
+	// optional batch lookup interface.
+	for _, sha256 := range sha256s {
+		blob, err := s.meta.GetBlobBySha(ctx, sha256)
+		if err != nil || blob == nil {
+			continue
+		}
+		blobsBySHA[sha256] = blob
+	}
+	return blobsBySHA, nil
 }

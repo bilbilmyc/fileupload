@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"golang.org/x/sync/semaphore"
 )
 
 // UploadService 上传编排核心
@@ -21,13 +23,14 @@ type UploadService struct {
 		BlobStore
 		FileStore
 	}
-	storage     Storage
-	tempStorage Storage // 临时分片专用存储（根目录 = TempDir）
-	compress    Compressor
-	hasher      Hasher
-	pool        WorkerPool
-	cfg         UploadConfig
-	layout      *HierarchicalLayout // 路径布局（ADR-0001 扁平/层级搬移）
+	storage      Storage
+	tempStorage  Storage // 临时分片专用存储（根目录 = TempDir）
+	compress     Compressor
+	hasher       Hasher
+	pool         WorkerPool
+	cfg          UploadConfig
+	chunkLimiter *semaphore.Weighted // limits buffered upload bytes across queued chunks
+	layout       *HierarchicalLayout // 路径布局（ADR-0001 扁平/层级搬移）
 }
 
 // UploadConfig 上传服务配置
@@ -35,24 +38,31 @@ type UploadConfig struct {
 	SessionTTL          time.Duration // 会话无活动超时
 	DataDir             string        // 数据目录（data/<namespace>/<fileID>）
 	DefaultChunkSize    int64         // 默认分片大小
+	MaxInFlightBytes    int64         // 上传分片允许同时占用的最大内存；0 使用 256 MiB
 	NamespaceQuotaBytes int64         // 命名空间逻辑容量上限；0 表示不限制
 }
 
 // NewUploadService 创建上传服务
+const defaultMaxInFlightBytes = 256 << 20 // 256 MiB
+
 func NewUploadService(meta interface {
 	SessionStore
 	BlobStore
 	FileStore
 }, storage Storage, tempStorage Storage, compress Compressor, hasher Hasher, pool WorkerPool, cfg UploadConfig) *UploadService {
+	if cfg.MaxInFlightBytes <= 0 {
+		cfg.MaxInFlightBytes = defaultMaxInFlightBytes
+	}
 	return &UploadService{
-		meta:        meta,
-		storage:     storage,
-		tempStorage: tempStorage,
-		compress:    compress,
-		hasher:      hasher,
-		pool:        pool,
-		cfg:         cfg,
-		layout:      NewHierarchicalLayout(),
+		meta:         meta,
+		storage:      storage,
+		tempStorage:  tempStorage,
+		compress:     compress,
+		hasher:       hasher,
+		pool:         pool,
+		cfg:          cfg,
+		chunkLimiter: semaphore.NewWeighted(cfg.MaxInFlightBytes),
+		layout:       NewHierarchicalLayout(),
 	}
 }
 
@@ -124,8 +134,15 @@ func (s *UploadService) CreateSession(ctx context.Context, sha256 string, length
 		chunkSize = s.cfg.DefaultChunkSize
 	}
 	// Never persist a chunk size that the request path cannot safely accept.
-	if chunkSize <= 0 || chunkSize > maxUploadChunkSize {
-		chunkSize = maxUploadChunkSize
+	maxChunkSize := int64(maxUploadChunkSize)
+	if s.cfg.MaxInFlightBytes < maxChunkSize {
+		maxChunkSize = s.cfg.MaxInFlightBytes
+	}
+	if maxChunkSize <= 0 {
+		maxChunkSize = 1
+	}
+	if chunkSize <= 0 || chunkSize > maxChunkSize {
+		chunkSize = maxChunkSize
 	}
 
 	sessionID := NewID()
@@ -222,6 +239,20 @@ func (s *UploadService) appendChunkForSession(ctx context.Context, session *Uplo
 	if maxBytes <= 0 || maxBytes > maxUploadChunkSize {
 		maxBytes = maxUploadChunkSize
 	}
+	if maxBytes > s.cfg.MaxInFlightBytes {
+		maxBytes = s.cfg.MaxInFlightBytes
+	}
+	if maxBytes <= 0 {
+		return ErrInvalidArgument
+	}
+	// Acquire before reading the request body. This makes the worker queue a real
+	// memory backpressure boundary instead of allowing every queued task to hold
+	// a full chunk-sized byte slice. The reservation covers the upper bound and
+	// remains held until the worker has persisted the chunk.
+	if err := s.chunkLimiter.Acquire(ctx, maxBytes); err != nil {
+		return err
+	}
+
 	limited := io.LimitReader(body, maxBytes+1)
 	chunkData, err := io.ReadAll(limited)
 	if err != nil {
@@ -237,9 +268,11 @@ func (s *UploadService) appendChunkForSession(ctx context.Context, session *Uplo
 
 	done := make(chan error, 1)
 	task := func() {
+		defer s.chunkLimiter.Release(maxBytes)
 		done <- s.processChunkBytes(context.Background(), session.SessionID, session.Namespace, index, chunkData, declaredSha256)
 	}
 	if err := s.pool.Submit(ctx, task); err != nil {
+		s.chunkLimiter.Release(maxBytes)
 		return err
 	}
 	select {

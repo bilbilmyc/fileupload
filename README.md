@@ -94,6 +94,7 @@ database:
 upload:
   session_ttl_minutes: 60    # 会话超时（分钟）
   default_chunk_size: 10485760  # 分片大小（字节），10MB
+  max_in_flight_bytes: 268435456 # 上传分片内存上限，256MB
   worker_pool_size: 10       # worker 池大小
   worker_queue_size: 100     # 排队上限
 

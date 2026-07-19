@@ -65,6 +65,44 @@ func TestSQLiteStore_BlobCRUD(t *testing.T) {
 	}
 }
 
+func TestSQLiteStore_BatchLookups(t *testing.T) {
+	s := newTestSQLite(t)
+	ctx := context.Background()
+	now := time.Now()
+
+	for _, blob := range []*domain.ContentBlob{
+		{SHA256: "batch-sha-1", StoragePath: "data/1", Size: 10, RefCount: 1, CreatedAt: now},
+		{SHA256: "batch-sha-2", StoragePath: "data/2", Size: 20, RefCount: 2, CreatedAt: now},
+	} {
+		if err := s.PutBlob(ctx, blob); err != nil {
+			t.Fatalf("PutBlob error = %v", err)
+		}
+	}
+	blobs, err := s.GetBlobsBySha(ctx, []string{"batch-sha-2", "batch-sha-1", "batch-sha-2", "missing"})
+	if err != nil {
+		t.Fatalf("GetBlobsBySha error = %v", err)
+	}
+	if len(blobs) != 2 || blobs["batch-sha-2"].Size != 20 {
+		t.Fatalf("GetBlobsBySha = %#v, want both batch blobs", blobs)
+	}
+
+	for _, file := range []*domain.FileMetadata{
+		{FileID: "batch-file-1", SHA256: "batch-sha-1", Name: "one.txt", Path: "one.txt", Size: 10, Namespace: "ns", CreatedAt: now},
+		{FileID: "batch-file-2", SHA256: "batch-sha-2", Name: "two.txt", Path: "two.txt", Size: 20, Namespace: "ns", CreatedAt: now},
+	} {
+		if err := s.PutFile(ctx, file); err != nil {
+			t.Fatalf("PutFile error = %v", err)
+		}
+	}
+	files, err := s.GetFilesByIDs(ctx, []string{"batch-file-2", "batch-file-1", "batch-file-2", "missing"})
+	if err != nil {
+		t.Fatalf("GetFilesByIDs error = %v", err)
+	}
+	if len(files) != 2 {
+		t.Fatalf("GetFilesByIDs count = %d, want 2", len(files))
+	}
+}
+
 func TestSQLiteStore_BlobDuplicate(t *testing.T) {
 	s := newTestSQLite(t)
 	ctx := context.Background()

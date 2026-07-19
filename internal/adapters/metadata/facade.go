@@ -14,6 +14,7 @@ import (
 type ColdStore interface {
 	// Blob 操作
 	GetBlobBySha(ctx context.Context, sha256 string) (*domain.ContentBlob, error)
+	GetBlobsBySha(ctx context.Context, sha256s []string) (map[string]*domain.ContentBlob, error)
 	PutBlob(ctx context.Context, b *domain.ContentBlob) error
 	UpdateBlobStorage(ctx context.Context, sha256 string, storagePath string) error
 	IncrBlobRef(ctx context.Context, sha256 string) error
@@ -22,6 +23,7 @@ type ColdStore interface {
 	// 文件操作
 	PutFile(ctx context.Context, f *domain.FileMetadata) error
 	GetFile(ctx context.Context, id string) (*domain.FileMetadata, error)
+	GetFilesByIDs(ctx context.Context, ids []string) ([]*domain.FileMetadata, error)
 	GetFileByPath(ctx context.Context, namespace, path string) (*domain.FileMetadata, error)
 	ListChildren(ctx context.Context, parentID string, search string) ([]*domain.FileMetadata, error)
 	ListChildrenPage(ctx context.Context, parentID string, search, fileType string, page, perPage int, sortBy, sortOrder string) ([]*domain.FileMetadata, int, error)
@@ -139,6 +141,10 @@ func (f *Facade) GetBlobBySha(ctx context.Context, sha256 string) (*domain.Conte
 	return f.cold.GetBlobBySha(ctx, sha256)
 }
 
+func (f *Facade) GetBlobsBySha(ctx context.Context, sha256s []string) (map[string]*domain.ContentBlob, error) {
+	return f.cold.GetBlobsBySha(ctx, sha256s)
+}
+
 func (f *Facade) PutBlob(ctx context.Context, b *domain.ContentBlob) error {
 	return f.cold.PutBlob(ctx, b)
 }
@@ -157,6 +163,10 @@ func (f *Facade) PutFile(ctx context.Context, file *domain.FileMetadata) error {
 
 func (f *Facade) GetFile(ctx context.Context, id string) (*domain.FileMetadata, error) {
 	return f.cold.GetFile(ctx, id)
+}
+
+func (f *Facade) GetFilesByIDs(ctx context.Context, ids []string) ([]*domain.FileMetadata, error) {
+	return f.cold.GetFilesByIDs(ctx, ids)
 }
 
 func (f *Facade) GetFileByPath(ctx context.Context, namespace, path string) (*domain.FileMetadata, error) {

@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -92,6 +93,50 @@ func TestCreateSession_DefaultChunkSize(t *testing.T) {
 	}
 	if session.ChunkSize != 1024*1024 {
 		t.Errorf("DefaultChunkSize = %d, want %d", session.ChunkSize, 1024*1024)
+	}
+}
+
+func TestCreateSession_ClampsChunkSizeToInFlightLimit(t *testing.T) {
+	meta := newMockMetadata()
+	storage := newMockStorage()
+	svc := NewUploadService(meta, storage, storage, newMockCompressor(), newMockHasher(), newMockWorkerPool(), UploadConfig{
+		SessionTTL:       time.Hour,
+		DefaultChunkSize: 1024,
+		MaxInFlightBytes: 4,
+	})
+
+	session, err := svc.CreateSession(context.Background(), "sha", 8, CompNone, 8, "ns", "f.bin")
+	if err != nil {
+		t.Fatalf("CreateSession error = %v", err)
+	}
+	if session.ChunkSize != 4 {
+		t.Fatalf("ChunkSize = %d, want 4", session.ChunkSize)
+	}
+}
+
+func TestAppendChunk_RespectsInFlightMemoryLimit(t *testing.T) {
+	meta := newMockMetadata()
+	storage := newMockStorage()
+	svc := NewUploadService(meta, storage, storage, newMockCompressor(), newMockHasher(), newMockWorkerPool(), UploadConfig{
+		SessionTTL:       time.Hour,
+		DefaultChunkSize: 4,
+		MaxInFlightBytes: 4,
+	})
+	session, err := svc.CreateSession(context.Background(), "sha", 4, CompNone, 4, "ns", "f.bin")
+	if err != nil {
+		t.Fatalf("CreateSession error = %v", err)
+	}
+
+	if err := svc.chunkLimiter.Acquire(context.Background(), 4); err != nil {
+		t.Fatalf("reserve in-flight bytes: %v", err)
+	}
+	defer svc.chunkLimiter.Release(4)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	err = svc.AppendChunk(ctx, session.SessionID, 0, strings.NewReader("data"), "")
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("AppendChunk error = %v, want context deadline", err)
 	}
 }
 

@@ -181,6 +181,45 @@ func (s *SQLiteStore) GetBlobBySha(_ context.Context, sha256 string) (*domain.Co
 	return &b, nil
 }
 
+// GetBlobsBySha 批量查询去重记录，供批量下载减少数据库往返。
+func (s *SQLiteStore) GetBlobsBySha(ctx context.Context, sha256s []string) (map[string]*domain.ContentBlob, error) {
+	values := uniqueNonEmpty(sha256s)
+	result := make(map[string]*domain.ContentBlob, len(values))
+	for start := 0; start < len(values); start += batchQueryLimit {
+		end := start + batchQueryLimit
+		if end > len(values) {
+			end = len(values)
+		}
+		batch := values[start:end]
+		args := make([]any, len(batch))
+		for i, sha256 := range batch {
+			args[i] = sha256
+		}
+		query := fmt.Sprintf(`SELECT sha256, storage_path, size, ref_count, created_at
+			FROM content_blobs WHERE sha256 IN (%s)`, sqlitePlaceholders(len(batch)))
+		rows, err := s.db.QueryContext(ctx, query, args...)
+		if err != nil {
+			return nil, fmt.Errorf("批量查询 blob: %w", err)
+		}
+		for rows.Next() {
+			var blob domain.ContentBlob
+			var createdAt string
+			if err := rows.Scan(&blob.SHA256, &blob.StoragePath, &blob.Size, &blob.RefCount, &createdAt); err != nil {
+				rows.Close()
+				return nil, fmt.Errorf("扫描 blob: %w", err)
+			}
+			blob.CreatedAt = parseTime(createdAt)
+			result[blob.SHA256] = &blob
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("读取 blob: %w", err)
+		}
+		rows.Close()
+	}
+	return result, nil
+}
+
 // PutBlob 写入去重记录
 func (s *SQLiteStore) PutBlob(_ context.Context, b *domain.ContentBlob) error {
 	_, err := s.db.Exec(
@@ -282,6 +321,36 @@ func (s *SQLiteStore) PutFile(_ context.Context, f *domain.FileMetadata) error {
 		return fmt.Errorf("写入文件: %w", err)
 	}
 	return nil
+}
+
+// GetFilesByIDs 批量查询未删除文件，供批量下载减少数据库往返。
+func (s *SQLiteStore) GetFilesByIDs(ctx context.Context, ids []string) ([]*domain.FileMetadata, error) {
+	values := uniqueNonEmpty(ids)
+	files := make([]*domain.FileMetadata, 0, len(values))
+	for start := 0; start < len(values); start += batchQueryLimit {
+		end := start + batchQueryLimit
+		if end > len(values) {
+			end = len(values)
+		}
+		batch := values[start:end]
+		args := make([]any, len(batch))
+		for i, id := range batch {
+			args[i] = id
+		}
+		query := fmt.Sprintf(`SELECT file_id, sha256, name, path, size, namespace, is_dir, parent_id, created_at
+			FROM files WHERE file_id IN (%s) AND deleted_at IS NULL`, sqlitePlaceholders(len(batch)))
+		rows, err := s.db.QueryContext(ctx, query, args...)
+		if err != nil {
+			return nil, fmt.Errorf("批量查询文件: %w", err)
+		}
+		batchFiles, scanErr := scanFiles(rows)
+		rows.Close()
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		files = append(files, batchFiles...)
+	}
+	return files, nil
 }
 
 // GetFile 按 ID 查文件
