@@ -341,7 +341,7 @@ jobs:
         run: sha256sum fileupload-* > checksums.txt
 
       - name: Upload dev release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           tag_name: dev
@@ -375,7 +375,7 @@ jobs:
         run: sha256sum fileupload-* > checksums.txt
 
       - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           files: build/*
