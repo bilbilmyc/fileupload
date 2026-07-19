@@ -32,10 +32,10 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 )
@@ -123,19 +123,38 @@ func (c *Client) do(req *http.Request) (*http.Response, error) {
 			req.Body = body
 		}
 		resp, err := c.httpClient.Do(req)
-		if err != nil {
+		if err == nil {
+			if resp.StatusCode != http.StatusServiceUnavailable && resp.StatusCode < 500 {
+				return resp, nil
+			}
+			if attempt == MaxRetries-1 {
+				return resp, nil
+			}
+			resp.Body.Close()
+		} else {
 			lastErr = err
-			time.Sleep(time.Duration(attempt+1) * 500 * time.Millisecond)
-			continue
+			if attempt == MaxRetries-1 {
+				break
+			}
 		}
-		if resp.StatusCode != http.StatusServiceUnavailable && resp.StatusCode < 500 {
-			return resp, nil
-		}
-		resp.Body.Close()
+
 		delay := time.Duration(attempt+1) * 500 * time.Millisecond
-		time.Sleep(delay)
+		if err := sleepWithContext(req.Context(), delay); err != nil {
+			return nil, err
+		}
 	}
 	return nil, lastErr
+}
+
+func sleepWithContext(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // url 生成带命名空间的完整 URL。
@@ -231,7 +250,7 @@ func SHA256Sum(data []byte) string {
 
 // FileSHA256 计算文件的 SHA-256 十六进制字符串。
 func FileSHA256(path string) (string, error) {
-	f, err := openFile(path)
+	f, err := os.Open(path)
 	if err != nil {
 		return "", err
 	}
@@ -245,15 +264,6 @@ func hashReader(r io.Reader) (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
-}
-
-// openFile 打开文件（在 SDK 中用于读取上传文件，方便测试 mock 替换）。
-var openFile = func(path string) (io.ReadCloser, error) {
-	return fileOpen(path)
-}
-
-func fileOpen(path string) (io.ReadCloser, error) {
-	return nil, fmt.Errorf("文件操作在 SDK 中不可用，请使用 UploadReader")
 }
 
 // ---- 请求构造辅助 ----

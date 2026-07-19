@@ -129,8 +129,8 @@ const info = await client.upload(new Blob([buf]), 'photo.jpg')
 
 **Go**
 ```go
-existing, err := c.Upload(ctx, "/path/to/file.txt",
-    fileupload.WithSHA256(sha256Hex))
+existing, err := c.CheckExists(ctx, sha256Hex, "file.txt")
+if err != nil { /* 处理错误 */ }
 if existing == nil { /* 需上传 */ }
 ```
 
@@ -293,7 +293,7 @@ await client.deleteDir(dirID)
 
 **Go**
 ```go
-// TODO：v0.2.0+ 待补
+err := c.Rename(ctx, fileID, "newname.txt")
 ```
 
 **curl**
@@ -305,7 +305,7 @@ curl -X PATCH .../v1/files/{id} -H "Content-Type: application/json" -d '{"name":
 
 **Go**
 ```go
-info, err := c.SubmitDir(ctx, "my-dir", []fileupload.clientDirEntry{
+info, err := c.SubmitDir(ctx, "my-dir", []fileupload.DirEntry{
     {Path: "a.txt", FileID: "f1"},
     {Path: "b.txt", FileID: "f2"},
 })

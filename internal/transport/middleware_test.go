@@ -358,4 +358,8 @@ func TestCORS_SetsVaryForAllowedOrigin(t *testing.T) {
 	if got := w.Header().Get("Vary"); got != "Origin" {
 		t.Fatalf("Vary = %q, want Origin", got)
 	}
+	const wantExposed = "Upload-Offset, Location, X-SHA256, X-Tree-SHA256, Content-Range, X-File-ID, X-File-SHA256, X-File-Size"
+	if got := w.Header().Get("Access-Control-Expose-Headers"); got != wantExposed {
+		t.Fatalf("exposed headers = %q, want %q", got, wantExposed)
+	}
 }

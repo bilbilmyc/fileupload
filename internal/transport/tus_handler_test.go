@@ -388,6 +388,15 @@ func TestRouter_CheckExists(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Errorf("status = %d, want 200", w.Code)
 	}
+	if got := w.Header().Get("X-File-ID"); got == "" || got == result.FileID {
+		t.Errorf("X-File-ID = %q, want a new logical file ID", got)
+	}
+	if got := w.Header().Get("X-File-SHA256"); got != result.SHA256 {
+		t.Errorf("X-File-SHA256 = %q, want %q", got, result.SHA256)
+	}
+	if got := w.Header().Get("X-File-Size"); got != fmt.Sprint(result.Size) {
+		t.Errorf("X-File-Size = %q, want %d", got, result.Size)
+	}
 }
 
 func TestRouter_CheckExists_Miss(t *testing.T) {

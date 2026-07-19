@@ -103,7 +103,7 @@ func (m *Middleware) CORS(next http.Handler) http.Handler {
 				w.Header().Set("Access-Control-Allow-Origin", header)
 				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS")
 				w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Auth-Token, X-Namespace, X-Request-ID, Range")
-				w.Header().Set("Access-Control-Expose-Headers", "Upload-Offset, Location, X-SHA256, X-Tree-SHA256, Content-Range")
+				w.Header().Set("Access-Control-Expose-Headers", "Upload-Offset, Location, X-SHA256, X-Tree-SHA256, Content-Range, X-File-ID, X-File-SHA256, X-File-Size")
 				w.Header().Set("Access-Control-Max-Age", "86400")
 			}
 		}

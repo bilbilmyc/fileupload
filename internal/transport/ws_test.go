@@ -11,6 +11,34 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+func waitForWSClientCount(t *testing.T, hub *WSHub, want int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if hub.ClientCount() == want {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("ClientCount = %d, want %d", hub.ClientCount(), want)
+}
+
+func readWSEvent(t *testing.T, conn *websocket.Conn) WSEvent {
+	t.Helper()
+	if err := conn.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		t.Fatalf("SetReadDeadline error = %v", err)
+	}
+	_, message, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("ReadMessage error = %v", err)
+	}
+	var event WSEvent
+	if err := json.Unmarshal(message, &event); err != nil {
+		t.Fatalf("unmarshal error = %v", err)
+	}
+	return event
+}
+
 func TestWSHub_NewHub(t *testing.T) {
 	hub := NewWSHub()
 	if hub == nil {
@@ -43,23 +71,14 @@ func TestWSHub_ConnectAndDisconnect(t *testing.T) {
 		t.Fatalf("dial error = %v", err)
 	}
 
-	// Wait for connection to register
-	time.Sleep(50 * time.Millisecond)
-	if hub.ClientCount() != 1 {
-		t.Errorf("ClientCount after connect = %d, want 1", hub.ClientCount())
-	}
+	// Wait for connection to register.
+	waitForWSClientCount(t, hub, 1)
 
 	// Close client connection
 	conn.Close()
-	time.Sleep(50 * time.Millisecond)
 
-	// readPump should remove on disconnect
-	hub.mu.RLock()
-	count := len(hub.clients)
-	hub.mu.RUnlock()
-	if count != 0 {
-		t.Errorf("clients after disconnect = %d, want 0", count)
-	}
+	// readPump should remove on disconnect.
+	waitForWSClientCount(t, hub, 0)
 }
 
 func TestWSHub_Broadcast(t *testing.T) {
@@ -75,19 +94,10 @@ func TestWSHub_Broadcast(t *testing.T) {
 	}
 	defer conn.Close()
 
-	// Broadcast
+	waitForWSClientCount(t, hub, 1)
 	hub.Broadcast(WSEvent{Type: "test", Payload: "data"})
 
-	// Read message
-	_, msg, err := conn.ReadMessage()
-	if err != nil {
-		t.Fatalf("read error = %v", err)
-	}
-
-	var event WSEvent
-	if err := json.Unmarshal(msg, &event); err != nil {
-		t.Fatalf("unmarshal error = %v", err)
-	}
+	event := readWSEvent(t, conn)
 	if event.Type != "test" {
 		t.Errorf("type = %s, want test", event.Type)
 	}
@@ -118,14 +128,10 @@ func TestWSHub_BroadcastTypes(t *testing.T) {
 			}
 			defer conn.Close()
 
+			waitForWSClientCount(t, hub, 1)
 			tt.broadcast(hub)
 
-			_, msg, err := conn.ReadMessage()
-			if err != nil {
-				t.Fatalf("read error = %v", err)
-			}
-			var event WSEvent
-			json.Unmarshal(msg, &event)
+			event := readWSEvent(t, conn)
 			if event.Type != tt.wantType {
 				t.Errorf("type = %s, want %s", event.Type, tt.wantType)
 			}
@@ -154,22 +160,13 @@ func TestWSHub_BroadcastToMultiple(t *testing.T) {
 	}
 	defer conn2.Close()
 
-	time.Sleep(50 * time.Millisecond)
-
-	if hub.ClientCount() != 2 {
-		t.Errorf("ClientCount = %d, want 2", hub.ClientCount())
-	}
+	waitForWSClientCount(t, hub, 2)
 
 	// Broadcast to both
 	hub.Broadcast(WSEvent{Type: "multi"})
 
 	for i, conn := range []*websocket.Conn{conn1, conn2} {
-		_, msg, err := conn.ReadMessage()
-		if err != nil {
-			t.Fatalf("conn%d read error = %v", i+1, err)
-		}
-		var event WSEvent
-		json.Unmarshal(msg, &event)
+		event := readWSEvent(t, conn)
 		if event.Type != "multi" {
 			t.Errorf("conn%d type = %s", i+1, event.Type)
 		}
@@ -188,17 +185,14 @@ func TestWSHub_ClientCount(t *testing.T) {
 
 	url := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws"
 
-	conn, _, _ := websocket.DefaultDialer.Dial(url, nil)
-	time.Sleep(50 * time.Millisecond)
-
-	if n := hub.ClientCount(); n != 1 {
-		t.Errorf("after connect count = %d, want 1", n)
+	conn, _, err := websocket.DefaultDialer.Dial(url, nil)
+	if err != nil {
+		t.Fatalf("dial error = %v", err)
 	}
+	waitForWSClientCount(t, hub, 1)
 
 	conn.Close()
-	time.Sleep(50 * time.Millisecond)
-
-	// readPump cleans up, but we can check via Close()
+	waitForWSClientCount(t, hub, 0)
 	hub.Close()
 	if n := hub.ClientCount(); n != 0 {
 		t.Errorf("after close count = %d, want 0", n)
@@ -213,8 +207,11 @@ func TestWSHub_BroadcastAfterClose(t *testing.T) {
 	defer srv.Close()
 
 	url := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws"
-	conn, _, _ := websocket.DefaultDialer.Dial(url, nil)
-	time.Sleep(50 * time.Millisecond)
+	conn, _, err := websocket.DefaultDialer.Dial(url, nil)
+	if err != nil {
+		t.Fatalf("dial error = %v", err)
+	}
+	waitForWSClientCount(t, hub, 1)
 
 	hub.Close()
 

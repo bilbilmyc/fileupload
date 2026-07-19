@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"net/http"
 	"net/http/pprof"
+	"strconv"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
@@ -210,11 +211,11 @@ func (r *Router) handleCheckExists(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	respondJSON(w, http.StatusOK, map[string]any{
-		"file_id": result.FileID,
-		"sha256":  result.SHA256,
-		"size":    result.Size,
-	})
+	// HEAD 响应没有可供客户端读取的响应体，秒传元数据通过响应头返回。
+	w.Header().Set("X-File-ID", result.FileID)
+	w.Header().Set("X-File-SHA256", result.SHA256)
+	w.Header().Set("X-File-Size", strconv.FormatInt(result.Size, 10))
+	w.WriteHeader(http.StatusOK)
 }
 
 // handleAdminScan 触发一致性巡检

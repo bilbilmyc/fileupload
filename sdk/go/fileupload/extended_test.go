@@ -30,7 +30,7 @@ func TestSubmitDir_ExistingAPI(t *testing.T) {
 	defer srv.Close()
 
 	c := NewClient(srv.URL, "default")
-	info, err := c.SubmitDir(context.Background(), "mydir", []clientDirEntry{
+	info, err := c.SubmitDir(context.Background(), "mydir", []DirEntry{
 		{Path: "a.txt", FileID: "f1"},
 		{Path: "b.txt", FileID: "f2"},
 	})

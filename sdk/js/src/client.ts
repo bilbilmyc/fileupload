@@ -302,11 +302,43 @@ export class FileuploadClient {
       const response = await this.http.head('/v1/files', {
         params: { sha256, name },
       })
-      if (response.status === 200) return response.data as FileInfo
-    } catch {
-      // 404 = not found
+      if (response.status !== 200) return null
+
+      // HEAD 响应体不会传给客户端；优先读取服务端返回的秒传元数据头。
+      const fileId = response.headers['x-file-id']
+      const fileSizeHeader = response.headers['x-file-size']
+      const fileSize = typeof fileSizeHeader === 'string' && fileSizeHeader.trim() !== ''
+        ? Number(fileSizeHeader)
+        : Number.NaN
+      if (
+        typeof fileId === 'string' &&
+        fileId !== '' &&
+        Number.isSafeInteger(fileSize) &&
+        fileSize >= 0
+      ) {
+        return {
+          file_id: fileId,
+          sha256: String(response.headers['x-file-sha256'] || sha256),
+          size: fileSize,
+          name: name || '',
+        }
+      }
+
+      // 兼容自定义 transport 中仍可提供响应体的旧实现。
+      const body = response.data as Partial<FileInfo> | undefined
+      if (body?.file_id && typeof body.size === 'number') {
+        return {
+          file_id: body.file_id,
+          sha256: body.sha256 || sha256,
+          size: body.size,
+          name: body.name || name || '',
+        }
+      }
+      throw new Error('check exists response missing X-File-ID or X-File-Size')
+    } catch (error) {
+      if (axios.isAxiosError(error) && error.response?.status === 404) return null
+      throw error
     }
-    return null
   }
 
   // ========== 批量操作 ==========
