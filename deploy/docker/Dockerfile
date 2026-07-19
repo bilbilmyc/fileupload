@@ -22,7 +22,7 @@ COPY . .
 COPY --from=web-builder /workspace/web/dist ./web/dist
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/server ./cmd/server
 
-FROM alpine:3.20
+FROM alpine:3.24
 RUN apk add --no-cache ca-certificates tzdata \
     && adduser -D -h /var/lib/fileupload fileupload \
     && mkdir -p /var/lib/fileupload/data /var/lib/fileupload/tmp \
