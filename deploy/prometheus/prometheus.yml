@@ -1,0 +1,34 @@
+# Prometheus 抓取配置 — fileupload P0 监控
+#
+# 说明：
+# - `server:8080` 适用于与 fileupload 服务位于同一个 Docker Compose 网络的 Prometheus。
+# - 使用 systemd 或独立主机部署时，将 target 改为 fileupload 服务的可达地址。
+
+global:
+  scrape_interval: 15s
+  scrape_timeout: 10s
+  evaluation_interval: 15s
+  external_labels:
+    service: fileupload
+
+rule_files:
+  - /etc/prometheus/rules/alerts.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - alertmanager:9093
+
+scrape_configs:
+  - job_name: fileupload
+    metrics_path: /metrics
+    scheme: http
+    scrape_interval: 15s
+    scrape_timeout: 10s
+    static_configs:
+      - targets:
+          - server:8080
+        labels:
+          service: fileupload
+

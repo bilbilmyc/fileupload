@@ -10,6 +10,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/bilbilmyc/fileupload/internal/domain"
+	"github.com/bilbilmyc/fileupload/internal/metrics"
 	"github.com/bilbilmyc/fileupload/web"
 )
 
@@ -162,6 +163,7 @@ func (r *Router) registerRoutes() {
 					}
 				}
 			}
+			updateHealthMetrics(checks)
 		}
 		respondJSON(w, http.StatusOK, result)
 	})
@@ -183,7 +185,9 @@ func (r *Router) registerRoutes() {
 	}
 
 	// === Prometheus 指标（v0.2.0+） ===
-	r.mux.Handle("GET /metrics", r.middleware.MetricsAuth(promhttp.Handler()))
+	// 每次抓取指标时同步探测后端，保证 fileupload_health_status 不会因为
+	// 没有额外调用 /health 而长期停留在旧值。
+	r.mux.Handle("GET /metrics", r.middleware.MetricsAuth(http.HandlerFunc(r.handleMetrics)))
 }
 
 // handleCheckExists 秒传预检
@@ -227,4 +231,28 @@ func (r *Router) handleAdminScan(w http.ResponseWriter, req *http.Request) {
 	}
 
 	respondJSON(w, http.StatusOK, report)
+}
+
+// handleMetrics 在输出 Prometheus 指标前刷新后端健康状态。
+// 健康检查失败不会阻断指标输出，Prometheus 仍可读取进程和失败计数器。
+func (r *Router) handleMetrics(w http.ResponseWriter, req *http.Request) {
+	if r.health != nil {
+		updateHealthMetrics(r.health.Check(req.Context()))
+	}
+	promhttp.Handler().ServeHTTP(w, req)
+}
+
+func updateHealthMetrics(checks map[string]any) {
+	for component, value := range checks {
+		statusMap, ok := value.(map[string]any)
+		if !ok {
+			continue
+		}
+		status, _ := statusMap["status"].(string)
+		if status == "ok" {
+			metrics.HealthStatus.WithLabelValues(component).Set(1)
+		} else {
+			metrics.HealthStatus.WithLabelValues(component).Set(0)
+		}
+	}
 }

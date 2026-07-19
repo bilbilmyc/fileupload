@@ -282,7 +282,7 @@ fileupload completion fish | source     # fish
 | `GET` | `/v1/admin/status` | 系统状态（需要 `admin` role） |
 | `GET` | `/v1/admin/audit` | 审计日志（分页，需要 `admin` role） |
 | `POST` | `/v1/admin/scan` | 触发一致性巡检（需要 `admin` role） |
-| `GET` | `/metrics` | Prometheus 指标（设置 `server.metrics_token` 后需 Bearer token） |
+| `GET` | `/metrics` | Prometheus 指标（内部部署可直接访问；配置 `server.metrics_token` 后需 Bearer token） |
 | `GET` | `/health` | 健康检查 |
 | `GET` / `POST` | `/ws` | WebSocket 实时推送 |
 
@@ -311,11 +311,21 @@ make docker
 cd deploy/docker && docker compose up -d
 ```
 
-### 生产建议
+### Prometheus 监控（P0）
 
+Prometheus 配置、告警规则和部署说明位于 [`deploy/prometheus/`](deploy/prometheus/README.md)。当前按小规模内部使用配置，`prometheus.yml` 默认不携带 token，抓取同一 Docker Compose 网络中的 `server:8080`；systemd 或独立主机部署时请将 target 改为 fileupload 服务的可达地址，并确保 `/metrics` 不暴露到公网。
+
+上线前必须：
+
+1. 将 `prometheus.yml`、`alerts.yml` 和 Alertmanager 配置挂载到监控服务。
+2. 验证 `up{job="fileupload"} == 1`、两个 `fileupload_health_status` 均为 1。
+3. 按实际通知渠道替换 `alertmanager.yml` 中的占位符，并用一次测试告警确认通知链路。
+4. 如果未来需要跨不可信网络抓取，再启用 `server.metrics_token` 和 Prometheus Bearer token；当前 `server.environment: production` 仍会强制要求 metrics token。
+
+### 生产建议
 - **启动安全校验**：设置 `server.environment: production` 后，服务会拒绝未启用 JWT 强制认证、缺少本地用户、CORS 使用 `*`、启用调试端点或未保护 metrics 的配置。
 - **身份与租户**：普通 JWT 用户的 namespace 以 token claim 为准，不能用 `X-Namespace` 越权；仅 `admin` role 可以跨 namespace 操作。请使用 bcrypt hash 配置本地用户，绝不要启用 `dev_admin_enabled`。
-- **运维端点**：`/debug/pprof/*` 和 `/debug/vars` 默认不注册；需要排障时短时开启并使用 admin JWT。Prometheus 请为 `/metrics` 配置独立的长随机 Bearer token。
+- **运维端点**：`/debug/pprof/*` 和 `/debug/vars` 默认不注册；需要排障时短时开启并使用 admin JWT。内部 Prometheus 只应在受防火墙保护的网络中访问 `/metrics`；跨不可信网络时再启用独立的长随机 Bearer token。
 - **前端**放 Gateway/Nginx 做 TLS 终结、域名绑定，并将 `cors.allowed_origins` 限制为实际前端域名。
 - **Redis**启用 AOF 持久化，配置密码；**数据库**生产环境推荐 PostgreSQL，SQLite 适合开发/小规模。
 - **备份**定期备份对象数据、数据库和配置密钥，并周期性恢复演练。
