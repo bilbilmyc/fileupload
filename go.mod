@@ -14,7 +14,7 @@ require (
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/klauspost/compress v1.19.0
 	github.com/prometheus/client_golang v1.23.2
-	github.com/redis/go-redis/v9 v9.7.1
+	github.com/redis/go-redis/v9 v9.7.3
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/crypto v0.53.0
 	golang.org/x/sync v0.21.0
