@@ -216,7 +216,7 @@ jobs:
       # 保证发行二进制携带完整管理面板而非占位页。CLI 不引用 web 包，无需下载。
       - name: Download web assets
         if: matrix.component == 'server'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: web-dist
           path: web/dist
@@ -275,7 +275,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: ${{ env.APP_NAME }}-server-linux-*
           merge-multiple: true
@@ -330,7 +330,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: ${{ env.APP_NAME }}-*
           merge-multiple: true
@@ -364,7 +364,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: ${{ env.APP_NAME }}-*
           merge-multiple: true
