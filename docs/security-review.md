@@ -22,6 +22,8 @@
 | `govulncheck ./...` | 当前调用图无可达漏洞 |
 | `pnpm audit --audit-level high` | 未发现已知高危漏洞 |
 
+CI 固定使用 Go 1.25.12，覆盖本次扫描发现的旧标准库补丁版本问题。
+
 本次 `govulncheck@v1.6.0` 报告 `GO-2026-5932` 位于 `golang.org/x/crypto@v0.53.0` 的未维护 `openpgp` 包；当前调用图不包含该包，且该漏洞暂无上游修复版本。项目只使用 `x/crypto` 的 bcrypt 等包，已确认无可达漏洞；依赖升级时继续复查。
 
 ## 已接受的残余风险
