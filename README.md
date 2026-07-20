@@ -5,7 +5,7 @@
 
 高性能、可自托管的文件上传下载服务。支持动态分片、客户端压缩、流式打包下载、SHA-256 全链路校验、断点续传、秒传（内容寻址去重）、文件分享。单二进制部署，内置 React 管理面板。
 
-**版本**：v0.4.0+（含 Prometheus 指标、Grafana 仪表盘、Alertmanager 告警、Go/JS 双 SDK）
+**版本**：稳定版以 GitHub Release 为准（含 Prometheus 指标、Grafana 仪表盘、Alertmanager 告警、审计日志、自动数据库迁移、Go/JS 双 SDK）
 
 ---
 
@@ -191,8 +191,8 @@ fileupload rm abc123
 # 服务端一致性巡检
 fileupload scan
 
-# 压测（50 个文件 × 100MB，16 并发）
-fileupload bench --files 50 --size 100m --concurrency 16
+# 本地可重复基线（文件数和大小按目标环境调整）
+fileupload bench --files 50 --size 1m --concurrency 8 --seed 20260719 --cleanup --json
 ```
 
 ### 子命令一览
@@ -206,7 +206,7 @@ fileupload bench --files 50 --size 100m --concurrency 16
 | `stat` | 文件/目录详情 | — |
 | `status` | 查询上传会话进度 | — |
 | `scan` | 触发一致性巡检 | — |
-| `bench` | 压测 | `--files`, `--size`, `--concurrency` |
+| `bench` | 可重复压测 | `--files`, `--size`, `--concurrency`, `--seed`, `--cleanup`, `--json` |
 | `config` | 查看当前配置 | — |
 | `login` | JWT 登录 | `--username`, `--password` |
 | `completion` | shell 补全脚本 | `bash \| zsh \| fish \| powershell` |
@@ -329,7 +329,9 @@ Prometheus 配置、告警规则和部署说明位于 [`deploy/prometheus/`](dep
 - **运维端点**：`/debug/pprof/*` 和 `/debug/vars` 默认不注册；需要排障时短时开启并使用 admin JWT。内部 Prometheus 只应在受防火墙保护的网络中访问 `/metrics`；跨不可信网络时再启用独立的长随机 Bearer token。
 - **前端**放 Gateway/Nginx 做 TLS 终结、域名绑定，并将 `cors.allowed_origins` 限制为实际前端域名。
 - **Redis**启用 AOF 持久化，配置密码；**数据库**生产环境推荐 PostgreSQL，SQLite 适合开发/小规模。
-- **备份**定期备份对象数据、数据库和配置密钥，并周期性恢复演练。
+- **备份**定期备份对象数据、数据库和配置密钥，并周期性恢复演练；升级前先看 [数据库迁移说明](docs/database-migrations.md)。
+- **审计**管理员可从 `/v1/admin/audit` 查询关键写操作、认证失败和管理操作；审计写入失败会告警但不会阻断业务。
+- **安全审查**见 [docs/security-review.md](docs/security-review.md)，**压测复现**见 [docs/benchmark.md](docs/benchmark.md)。
 - **巡检**定期执行 `fileupload scan` 或配置定时任务；**调优**根据机器配置调整 `worker_pool_size`、`write_timeout`。
 
 ---

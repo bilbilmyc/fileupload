@@ -74,7 +74,7 @@ func Build(d Deps) (*Server, error) {
 
 	// 传输层
 	mw := transport.NewMiddleware().WithCORS(d.CORSOrigins).WithAuth(d.AuthCfg).
-		WithObservability(d.ServerCfg.DebugEndpoints, d.ServerCfg.MetricsToken)
+		WithObservability(d.ServerCfg.DebugEndpoints, d.ServerCfg.MetricsToken).WithAuditLogger(d.Metadata)
 	if d.Auth != nil {
 		mw.WithJWT(d.Auth)
 	}

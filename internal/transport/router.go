@@ -66,14 +66,17 @@ func NewRouter(mw *Middleware, tus *TusHandler, rest *RESTHandler, download *Dow
 // Handler 返回经过中间件包装的最终 handler
 func (r *Router) Handler() http.Handler {
 	var h http.Handler = r.mux
+	h = r.middleware.RequestBodyLimit(h)
 	h = r.middleware.Namespace(h)   // 命名空间注入（读取已验证的 JWT claims）
 	h = r.middleware.JWTValidate(h) // JWT 验证（Bearer token）
 	h = r.middleware.Auth(h)        // X-Auth-Token 认证
 	h = r.middleware.RateLimit(h)
 	h = r.middleware.Logging(h) // 请求日志
+	h = r.middleware.Audit(h)   // 持久化安全敏感操作
 	h = r.middleware.RequestID(h)
 	h = r.middleware.Recover(h)
-	h = r.middleware.CORS(h) // CORS（最外层）
+	h = r.middleware.CORS(h)
+	h = r.middleware.SecurityHeaders(h) // 安全响应头（最外层，覆盖 OPTIONS）
 	return h
 }
 

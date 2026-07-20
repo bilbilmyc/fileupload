@@ -1,8 +1,8 @@
-# fileupload v0.11.0 — 发布说明
+# fileupload v0.14.0 — 发布说明
 
-**稳定版本**：v0.11.0（2026-06-25）
-**Git tag**：`v0.11.0`
-**提交**：`c069269`（main 分支）
+**稳定版本**：v0.14.0（2026-07-20）
+**Git tag**：`v0.14.0`
+**提交**：发布前最后一个 main 提交（见 GitHub Release）
 
 ---
 
@@ -18,6 +18,9 @@
 - **SDK 双端**：Go + JS/TS 完整覆盖 31 个端点
 - **监控**：Prometheus 指标 + 6 告警规则 + 10 Grafana 面板 + Alertmanager 分流
 - **管理面板**：单二进制内置 React SPA
+- **运维加固**：关键操作审计日志、登录限流、安全响应头、控制面请求体限制
+- **数据库迁移**：SQLite/PostgreSQL 版本化自动迁移，PostgreSQL 多实例 advisory lock
+- **可重复压测**：固定随机种子、延迟分位数、吞吐/错误率门槛和自动清理
 
 ---
 
@@ -25,20 +28,19 @@
 
 | 维度 | 验证方式 | 数据 |
 |---|---|---|
-| 后端编译 | `go build ./...` | 14 包 OK |
-| 后端单元测试 | `go test ./...` | 14 包 PASS |
-| 后端覆盖率 | `go test -cover` | **48.2%**（hasher 93% / lifecycle 94% / auth 88% / compressor 81%） |
-| SDK 上传流 | httptest.Server | **44.2%**（11 个新测试覆盖 tus + REST） |
-| 前端构建 | `npm run build` | TypeScript + Vite OK |
-| 前端单元测试 | `vitest run` | **76 PASS + 3 skipped** |
-| 前端覆盖率 | `vitest --coverage` | **53.18%**（sdk.ts 100% / upload-utils 95% / upload-task 100%） |
-| E2E | Playwright | 3 smoke 测试 PASS |
-| 监控配置 | alerts.yml + dashboard.json + alertmanager.yml | 各自有 YAML/JSON 解析测试 |
-| 构建产物 | `make release` | 4 平台 × server/cli = 8 个二进制 |
-| CI 流程 | `.github/workflows/ci.yml` | push / PR / tag 自动构建 |
+| Go 静态检查 | `go vet ./...` | 通过 |
+| Go race 测试 | `go test -race -count=1 -timeout 120s ./...` | 全部 Go 包 PASS |
+| 前端 lint | `pnpm web:lint` | 通过 |
+| 前端单元测试 | `pnpm web:test` | **94 PASS + 3 skipped** |
+| 前端生产构建 | `pnpm web:build` | TypeScript + Vite OK |
+| E2E | Chromium smoke tests，单 worker | **10 PASS** |
+| Go 漏洞扫描 | `govulncheck@v1.6.0 ./...` | 0 个可达漏洞 |
+| 前端依赖审计 | `pnpm audit --audit-level high` | 未发现高危漏洞 |
+| 数据库迁移 | SQLite 升级回归 + PostgreSQL CI 集成测试 | 版本表和索引校验 |
+| 可重复压测 | Windows + SQLite + miniredis，50 × 1 MiB，8 并发 | 67.68 MiB/s，0% 错误，清理成功 |
+| 构建产物 | tag CI | 6 平台 × server/cli = 12 个二进制 |
 
 ---
-
 ## 部署方式
 
 ### 最小化部署（dev/test 环境）
@@ -64,7 +66,7 @@ curl http://localhost:8080/metrics | head
 
 ### 生产部署
 
-参考 `deploy/docker/`（Dockerfile + docker-compose 待补）+ `deploy/systemd/`：
+参考 `deploy/docker/`（Dockerfile + Docker Compose）和 `deploy/systemd/`：
 
 ```bash
 make docker          # linux/amd64 镜像
@@ -75,10 +77,10 @@ make docker-arm64    # linux/arm64 镜像
 
 1. **HTTPS**：前置 nginx/caddy/cloudflare 终止 TLS，不要裸跑 :8080
 2. **JWT 密钥**：设置 `AUTH_JWT_SECRET` 环境变量（≥32 字节随机）
-3. **admin 密码**：首次启动会在日志打印临时 admin 密码，**立即改**
-4. **存储后端**：本地 FS 起步，S3 适配器已就绪（切换需改配置 + 重启）
-5. **数据库**：SQLite 适合单机；多实例请用 Postgres（adapter 已实现）
-6. **Redis**：可热数据用 Redis（hot/cold 架构），单实例模式也支持
+3. **admin 密码**：使用配置中的 bcrypt 密码；禁止生产环境启用 `dev_admin_enabled`
+4. **存储后端**：小规模使用 LocalFS；需要对象存储时按配置启用 S3，并验证权限和回收策略
+5. **数据库**：SQLite 适合单机；多实例请用 PostgreSQL；升级前先备份并阅读 `docs/database-migrations.md`
+6. **Redis**：生产启用认证和持久化；多实例部署需在网关增加分布式限流
 
 ### 监控接入
 
@@ -117,22 +119,16 @@ Grafana：导入 `deploy/grafana/dashboard.json`（UID `fileupload-main`）
 
 ## 不能做的（已知限制）
 
-| 限制 | 影响 | 何时修 |
+| 限制 | 影响 | 处理方式 |
 |---|---|---|
-| **未做真实负载测试** | 高并发下吞吐未知 | 上线前必须用 wrk/vegeta 实测 |
-| **无安全审计** | JWT 强度、注入、SSRF 未系统审计 | 上线前请安全人员 review |
-| **Postgres 集成测试仅 CI** | 本地不能跑 PG 适配器 | 已知限制，按用户指示未做 |
-| **UploadContext 覆盖率 40%** | React hooks 状态机测试覆盖低 | 非阻塞，核心逻辑已抽纯函数 |
-| **client.ts 8 个函数仍用 axios** | 双代码路径（SDK + axios） | v0.12.0 删除 axios 函数 |
-| **无事务化 deleteDir** | 中途失败物理文件不回滚（DB 已回滚） | 评审遗留，需 SDK + adapter 改动 |
-| **WebSocket 事件类型未文档化** | 客户端订阅事件类型靠反推 | docs/api.md 待补 |
+| **Postgres 集成测试本地依赖外部服务** | 本机无 PostgreSQL 时无法运行适配器集成测试 | CI 使用 PostgreSQL service 验证 |
+| **进程内限流** | 多实例限流状态不共享 | 生产多实例需在网关/WAF 增加分布式限流 |
+| **审计写入失败不阻断业务** | 极端情况下可能缺审计记录 | `slog` 告警；高要求场景接入外部可靠日志管道 |
+| **SQLite 单写者模型** | 高并发写入扩展性有限 | 多实例/高并发使用 PostgreSQL |
 | **i18n 无** | 错误消息、UI 文案均为中文 | 国际化时再做 |
-| **SDK Go 上传流测试部分 skipped** | TestUpload / TestUploadDir 跳过（依赖 os.File） | 集成测试覆盖 |
-| **无自动数据库 schema migration** | 新版本可能 break 旧 DB | 需 sql-migrate 或类似 |
 
 ---
-
-## v0.11.0 之后不主动加新功能
+## 稳定版之后不主动加新功能
 
 本次为收尾版本。后续改动仅：
 
@@ -148,14 +144,14 @@ Grafana：导入 `deploy/grafana/dashboard.json`（UID `fileupload-main`）
 
 ### 升级路径
 
-v0.11.0 是第一个稳定 API 集合（31 个端点 + 5 份 ADR + SDK 完整）。
+当前稳定版本以 GitHub Release 为准；本版本已补齐审计、安全加固、自动迁移和可重复压测工具。
 
-- 旧版（v0.0.1 - v0.10.0）→ v0.11.0：二进制替换即可，配置文件向后兼容
-- 数据库 schema 变更（如有）：见 `internal/adapters/metadata/*/migrate()`
+- 旧版升级：先备份数据，再替换二进制并启动；服务会自动执行版本化迁移。
+- 数据库 schema 变更：见 [docs/database-migrations.md](docs/database-migrations.md)
 
 ### 回滚
 
-`git checkout v0.X.Y` → `make release` → 替换部署。SQLite 数据库可直接回退，Postgres 需 `pg_dump` + 手动恢复。
+回滚前先停止服务并恢复与数据库一致的文件/数据库备份；迁移只向前兼容，不建议手工逆向 schema。详情见 `docs/database-migrations.md`。
 
 ---
 

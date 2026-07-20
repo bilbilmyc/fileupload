@@ -1,7 +1,9 @@
 package transport
 
 import (
+	"bytes"
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -105,5 +107,55 @@ func TestMetricsAuth(t *testing.T) {
 	h.ServeHTTP(authorized, authorizedReq)
 	if authorized.Code != http.StatusNoContent {
 		t.Fatalf("authorized status = %d, want %d", authorized.Code, http.StatusNoContent)
+	}
+}
+
+func TestSecurityHeaders(t *testing.T) {
+	mw := NewMiddleware()
+	h := mw.SecurityHeaders(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
+	req := httptest.NewRequest(http.MethodGet, "/v1/auth/me", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	for header, want := range map[string]string{
+		"X-Content-Type-Options": "nosniff",
+		"X-Frame-Options":        "DENY",
+		"Referrer-Policy":        "no-referrer",
+		"Cache-Control":          "no-store",
+	} {
+		if got := w.Header().Get(header); got != want {
+			t.Errorf("%s = %q, want %q", header, got, want)
+		}
+	}
+	if w.Header().Get("Content-Security-Policy") == "" {
+		t.Fatal("Content-Security-Policy is missing")
+	}
+	if w.Header().Get("Strict-Transport-Security") != "" {
+		t.Fatal("HSTS must not be sent over plain HTTP")
+	}
+}
+
+func TestRequestBodyLimit(t *testing.T) {
+	mw := NewMiddleware()
+	h := mw.RequestBodyLimit(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, err := io.ReadAll(r.Body); err != nil {
+			respondError(w, http.StatusRequestEntityTooLarge, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	large := httptest.NewRequest(http.MethodPost, "/v1/auth/login", bytes.NewReader(make([]byte, (1<<20)+1)))
+	largeW := httptest.NewRecorder()
+	h.ServeHTTP(largeW, large)
+	if largeW.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("large control request status = %d, want 413", largeW.Code)
+	}
+
+	upload := httptest.NewRequest(http.MethodPatch, "/uploads/session-1", bytes.NewReader(make([]byte, (1<<20)+1)))
+	uploadW := httptest.NewRecorder()
+	h.ServeHTTP(uploadW, upload)
+	if uploadW.Code != http.StatusNoContent {
+		t.Fatalf("upload data request status = %d, want 204", uploadW.Code)
 	}
 }

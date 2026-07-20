@@ -2,18 +2,28 @@ package transport
 
 import (
 	"net/http"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/bilbilmyc/fileupload/internal/domain"
 )
 
 // AuthHandler 认证 HTTP 处理器
 type AuthHandler struct {
-	authSvc domain.AuthService
+	authSvc      domain.AuthService
+	loginLimiter *sharePasswordLimiter
 }
 
 // NewAuthHandler 创建认证处理器
 func NewAuthHandler(authSvc domain.AuthService) *AuthHandler {
-	return &AuthHandler{authSvc: authSvc}
+	return &AuthHandler{authSvc: authSvc, loginLimiter: newSharePasswordLimiter(5, 15*time.Minute, nil)}
+}
+
+// withLoginLimiter 仅用于注入确定性测试策略。
+func (h *AuthHandler) withLoginLimiter(limiter *sharePasswordLimiter) *AuthHandler {
+	h.loginLimiter = limiter
+	return h
 }
 
 // Login POST /v1/auth/login
@@ -28,14 +38,25 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	username := strings.ToLower(strings.TrimSpace(req.Username))
+	client := shareClientAddress(r)
+	if retry, allowed := h.loginLimiter.Allow(username, client); !allowed {
+		respondLoginRateLimited(w, retry)
+		return
+	}
 	pair, err := h.authSvc.Login(r.Context(), req.Username, req.Password)
 	if err != nil {
+		if retry, locked := h.loginLimiter.RecordFailure(username, client); locked {
+			respondLoginRateLimited(w, retry)
+			return
+		}
 		respondJSON(w, http.StatusUnauthorized, map[string]string{
 			"error": "认证失败",
 			"code":  "auth_failed",
 		})
 		return
 	}
+	h.loginLimiter.Reset(username, client)
 
 	// 从 token 中解析用户信息
 	claims, _ := h.authSvc.ValidateToken(pair.AccessToken)
@@ -95,5 +116,18 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 		"user_id":   claims.UserID,
 		"namespace": claims.Namespace,
 		"roles":     claims.Roles,
+	})
+}
+
+func respondLoginRateLimited(w http.ResponseWriter, retry time.Duration) {
+	seconds := int64((retry + time.Second - 1) / time.Second)
+	if seconds < 1 {
+		seconds = 1
+	}
+	w.Header().Set("Retry-After", strconv.FormatInt(seconds, 10))
+	respondJSON(w, http.StatusTooManyRequests, map[string]any{
+		"error":               "登录失败次数过多，请稍后重试",
+		"code":                "login_rate_limited",
+		"retry_after_seconds": seconds,
 	})
 }

@@ -16,6 +16,14 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+var invalidUserPasswordHash = func() []byte {
+	hash, err := bcrypt.GenerateFromPassword([]byte("fileupload-invalid-user"), bcrypt.DefaultCost)
+	if err != nil {
+		panic("generate invalid-user bcrypt hash: " + err.Error())
+	}
+	return hash
+}()
+
 // JWTService JWT 鉴权实现
 type JWTService struct {
 	secret []byte
@@ -72,6 +80,8 @@ func DevelopmentUsers() []domain.AuthUser {
 func (s *JWTService) Login(_ context.Context, username, password string) (*domain.TokenPair, error) {
 	user, ok := s.users[username]
 	if !ok {
+		// 与生产 bcrypt 用户执行同等级计算，降低通过响应时延枚举用户名的风险。
+		_ = bcrypt.CompareHashAndPassword(invalidUserPasswordHash, []byte(password))
 		return nil, fmt.Errorf("用户名或密码错误")
 	}
 	if strings.HasPrefix(user.Password, "$2") {

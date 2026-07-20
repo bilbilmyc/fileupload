@@ -3,6 +3,7 @@
 package transport
 
 import (
+	"bufio"
 	"context"
 	"crypto/rand"
 	"crypto/subtle"
@@ -27,6 +28,7 @@ const (
 	ctxKeyNamespace        ctxKey = "namespace"
 	ctxKeyAuthClaims       ctxKey = "auth_claims"
 	ctxKeyStaticAuthorized ctxKey = "static_authorized"
+	ctxKeyAuditState       ctxKey = "audit_state"
 )
 
 // Middleware 中间件集合
@@ -37,6 +39,7 @@ type Middleware struct {
 	corsOrigins    []string           // CORS 允许的源
 	debugEndpoints bool
 	metricsToken   string
+	audit          auditLogger
 }
 
 // AuthConfig 认证中间件配置
@@ -69,6 +72,12 @@ func (m *Middleware) WithJWT(authSvc domain.AuthService) *Middleware {
 // WithCORS 设置 CORS 允许的源（链式调用）
 func (m *Middleware) WithCORS(origins []string) *Middleware {
 	m.corsOrigins = origins
+	return m
+}
+
+// WithAuditLogger 配置持久化审计日志。
+func (m *Middleware) WithAuditLogger(logger auditLogger) *Middleware {
+	m.audit = logger
 	return m
 }
 
@@ -113,6 +122,42 @@ func (m *Middleware) CORS(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// SecurityHeaders 设置浏览器安全响应头。HSTS 仅在 TLS 请求上启用，避免本地 HTTP 开发被错误缓存。
+func (m *Middleware) SecurityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ws: wss:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'")
+		if r.TLS != nil {
+			w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+		}
+		if strings.HasPrefix(r.URL.Path, "/v1/auth/") || r.URL.Path == "/v1/admin/audit" {
+			w.Header().Set("Cache-Control", "no-store")
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// RequestBodyLimit 为控制面 API 设置 1 MiB 请求体上限。上传数据路径由对应 handler
+// 按协商分片大小执行独立的 64 MiB 上限，因此不在这里重复限制。
+func (m *Middleware) RequestBodyLimit(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Body != nil && r.Method != http.MethodGet && r.Method != http.MethodHead && !isUploadDataPath(r.URL.Path) {
+			r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func isUploadDataPath(path string) bool {
+	if strings.HasPrefix(path, "/uploads/") {
+		return true
+	}
+	return strings.HasPrefix(path, "/v1/uploads/") && strings.Contains(path, "/chunks/")
 }
 
 // RateLimiterCleanup 启动限流器条目定期清理（应作为 goroutine 启动）
@@ -185,6 +230,7 @@ func (m *Middleware) Namespace(next http.Handler) http.Handler {
 		if ns == "" {
 			ns = "default"
 		}
+		updateAuditNamespace(r.Context(), ns)
 		ctx := context.WithValue(r.Context(), ctxKeyNamespace, ns)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
@@ -336,12 +382,42 @@ func (l *RateLimiter) Allow() bool {
 // responseWriter wraps http.ResponseWriter to capture status code
 type responseWriter struct {
 	http.ResponseWriter
-	status int
+	status      int
+	wroteHeader bool
 }
 
 func (rw *responseWriter) WriteHeader(code int) {
+	if rw.wroteHeader {
+		return
+	}
+	rw.wroteHeader = true
 	rw.status = code
 	rw.ResponseWriter.WriteHeader(code)
+}
+
+func (rw *responseWriter) Write(p []byte) (int, error) {
+	if !rw.wroteHeader {
+		rw.WriteHeader(http.StatusOK)
+	}
+	return rw.ResponseWriter.Write(p)
+}
+
+// Unwrap 允许 http.ResponseController 访问底层 writer。
+func (rw *responseWriter) Unwrap() http.ResponseWriter { return rw.ResponseWriter }
+
+func (rw *responseWriter) Flush() {
+	_ = http.NewResponseController(rw.ResponseWriter).Flush()
+}
+
+func (rw *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	return http.NewResponseController(rw.ResponseWriter).Hijack()
+}
+
+func (rw *responseWriter) Push(target string, opts *http.PushOptions) error {
+	if pusher, ok := rw.ResponseWriter.(http.Pusher); ok {
+		return pusher.Push(target, opts)
+	}
+	return http.ErrNotSupported
 }
 
 // Auth X-Auth-Token 认证中间件
@@ -372,6 +448,7 @@ func (m *Middleware) Auth(next http.Handler) http.Handler {
 			})
 			return
 		}
+		updateAuditActor(r.Context(), "static-token")
 		ctx := context.WithValue(r.Context(), ctxKeyStaticAuthorized, true)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
@@ -434,6 +511,7 @@ func (m *Middleware) JWTValidate(next http.Handler) http.Handler {
 		}
 
 		// 从 token 中提取 namespace 注入 context，覆盖 X-Namespace 头
+		updateAuditActor(r.Context(), claims.UserID)
 		ctx := context.WithValue(r.Context(), ctxKeyAuthClaims, claims)
 		ns := claims.Namespace
 		if ns != "" {

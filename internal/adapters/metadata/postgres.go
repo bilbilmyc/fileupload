@@ -37,83 +37,9 @@ func NewPostgresStore(dsn string) (*PostgresStore, error) {
 	return store, nil
 }
 
-// migrate 创建表结构（与 SQLite 迁移对应）
+// migrate 在 PostgreSQL advisory lock 保护下按版本应用 schema 迁移。
 func (s *PostgresStore) migrate() error {
-	queries := []string{
-		`CREATE TABLE IF NOT EXISTS content_blobs (
-			sha256       TEXT PRIMARY KEY,
-			storage_path TEXT NOT NULL,
-			size         BIGINT NOT NULL,
-			ref_count    INTEGER NOT NULL DEFAULT 0,
-			created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
-		)`,
-		`CREATE TABLE IF NOT EXISTS files (
-			file_id    TEXT PRIMARY KEY,
-			sha256     TEXT REFERENCES content_blobs(sha256),
-			name       TEXT NOT NULL,
-			path       TEXT NOT NULL DEFAULT '',
-			size       BIGINT NOT NULL DEFAULT 0,
-			namespace  TEXT NOT NULL,
-			is_dir     BOOLEAN NOT NULL DEFAULT FALSE,
-			parent_id  TEXT,
-			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-			deleted_at TIMESTAMPTZ
-		)`,
-		`CREATE INDEX IF NOT EXISTS idx_files_namespace_parent ON files(namespace, parent_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_files_sha256 ON files(sha256)`,
-		`CREATE INDEX IF NOT EXISTS idx_files_path ON files(namespace, path)`,
-		`CREATE TABLE IF NOT EXISTS file_tags (
-			file_id    TEXT NOT NULL REFERENCES files(file_id) ON DELETE CASCADE,
-			tag        TEXT NOT NULL,
-			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-			PRIMARY KEY (file_id, tag)
-		)`,
-		`CREATE INDEX IF NOT EXISTS idx_file_tags_tag ON file_tags(tag)`,
-		`CREATE TABLE IF NOT EXISTS audit_log (
-			id         SERIAL PRIMARY KEY,
-			action     TEXT NOT NULL,
-			target_type TEXT NOT NULL DEFAULT '',
-			target_id  TEXT NOT NULL DEFAULT '',
-			user_id    TEXT NOT NULL DEFAULT '',
-			namespace  TEXT NOT NULL DEFAULT '',
-			detail     TEXT NOT NULL DEFAULT '',
-			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-		)`,
-		`CREATE TABLE IF NOT EXISTS namespace_quota_locks (
-			namespace TEXT PRIMARY KEY
-		)`,
-		`CREATE TABLE IF NOT EXISTS namespace_reservations (
-			reservation_id TEXT PRIMARY KEY,
-			namespace      TEXT NOT NULL,
-			bytes          BIGINT NOT NULL,
-			created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
-		)`,
-		`CREATE INDEX IF NOT EXISTS idx_namespace_reservations_namespace ON namespace_reservations(namespace)`,
-		`CREATE TABLE IF NOT EXISTS shares (
-			token        TEXT PRIMARY KEY,
-			file_id      TEXT NOT NULL,
-			password_hash TEXT NOT NULL DEFAULT '',
-			expires_at   TEXT NOT NULL DEFAULT '',
-			max_downloads INTEGER NOT NULL DEFAULT 0,
-			cur_downloads INTEGER NOT NULL DEFAULT 0,
-			namespace    TEXT NOT NULL DEFAULT '',
-			created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
-		)`,
-	}
-
-	for _, q := range queries {
-		if _, err := s.db.Exec(q); err != nil {
-			return fmt.Errorf("执行迁移: %w", err)
-		}
-	}
-	// 支持既有实例在线升级到回收站软删除字段。
-	if _, err := s.db.Exec(`ALTER TABLE files ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`); err != nil {
-		return fmt.Errorf("添加 files.deleted_at: %w", err)
-	}
-	if _, err := s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_files_namespace_deleted ON files(namespace, deleted_at)`); err != nil {
-		return fmt.Errorf("创建回收站索引: %w", err)
-	}
-	return nil
+	return runPostgresMigrations(s.db)
 }
 
 // ReserveNamespaceBytes atomically accounts for active files and outstanding reservations.

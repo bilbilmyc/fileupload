@@ -1,5 +1,29 @@
 # Changelog
 
+## [v0.14.0] - 2026-07-20
+
+### Added
+
+- 关键写操作、认证/授权失败、限流和管理操作审计日志，并新增管理员审计查询说明
+- SQLite/PostgreSQL 版本化自动数据库迁移，支持旧数据库升级和 PostgreSQL 多实例迁移锁
+- `fileupload bench` 可重复压测：固定种子、延迟 p50/p95/p99、吞吐与错误率门槛、自动清理和 JSON 输出
+- 安全审查记录、数据库迁移说明和本机可复现压测基线文档
+- CI `govulncheck` 与前端高危依赖审计门禁
+
+### Security
+
+- 增加登录失败限流与未知用户 dummy bcrypt 校验，降低暴力破解和用户名枚举风险
+- 增加 CSP、HSTS（TLS）、防点击劫持、防 MIME 嗅探等安全响应头
+- 限制控制面请求体大小，避免非上传端点被异常大请求占用资源
+
+### Verification
+
+- Go `vet`、`go test -race` 全量通过
+- 前端 lint、94 个单元测试、生产构建和 10 个 Chromium smoke tests 通过
+- `govulncheck@v1.6.0` 无可达漏洞；`pnpm audit --audit-level high` 通过
+- Windows + SQLite + miniredis 本地基线：50 × 1 MiB、8 并发、50 MiB、67.68 MiB/s、0% 错误、清理成功
+
+
 fileupload 项目所有重要变更记录。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
 ## [v0.1.0] - 2026-06-24

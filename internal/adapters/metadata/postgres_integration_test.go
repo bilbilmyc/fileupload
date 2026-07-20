@@ -35,7 +35,21 @@ func uniquePGID(prefix string) string {
 }
 
 func TestPostgresStore_ConnectAndMigrate(t *testing.T) {
-	_ = newIntegrationPostgresStore(t)
+	store := newIntegrationPostgresStore(t)
+	var versions int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&versions); err != nil {
+		t.Fatalf("query schema_migrations: %v", err)
+	}
+	if versions < len(postgresMigrations) {
+		t.Fatalf("migration count = %d, want at least %d", versions, len(postgresMigrations))
+	}
+	var auditIndexes int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM pg_indexes WHERE schemaname = current_schema() AND indexname IN ('idx_audit_log_created_at', 'idx_audit_log_action_created')`).Scan(&auditIndexes); err != nil {
+		t.Fatalf("query audit indexes: %v", err)
+	}
+	if auditIndexes != 2 {
+		t.Fatalf("audit indexes = %d, want 2", auditIndexes)
+	}
 }
 
 func TestPostgresStore_PutAndGetBlob(t *testing.T) {

@@ -2,6 +2,7 @@ package metadata
 
 import (
 	"context"
+	"database/sql"
 	"path/filepath"
 	"testing"
 	"time"
@@ -516,6 +517,56 @@ func TestSQLiteStore_Migrate_Idempotent(t *testing.T) {
 		t.Fatalf("第二次 NewSQLiteStore error = %v", err)
 	}
 	s2.Close()
+}
+
+func TestSQLiteStore_Migrate_RecordsVersionsAndUpgradesLegacySchema(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "legacy.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("sql.Open error = %v", err)
+	}
+	legacy := []string{
+		`CREATE TABLE content_blobs (sha256 TEXT PRIMARY KEY, storage_path TEXT NOT NULL, size BIGINT NOT NULL, ref_count INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL)`,
+		`CREATE TABLE files (file_id TEXT PRIMARY KEY, sha256 TEXT, name TEXT NOT NULL, path TEXT NOT NULL, size BIGINT NOT NULL DEFAULT 0, namespace TEXT NOT NULL, is_dir INTEGER NOT NULL DEFAULT 0, parent_id TEXT, created_at TEXT NOT NULL)`,
+	}
+	for _, query := range legacy {
+		if _, err := db.Exec(query); err != nil {
+			_ = db.Close()
+			t.Fatalf("create legacy schema: %v", err)
+		}
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close legacy db: %v", err)
+	}
+
+	store, err := NewSQLiteStore(path)
+	if err != nil {
+		t.Fatalf("upgrade legacy schema: %v", err)
+	}
+	defer store.Close()
+
+	var versions int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&versions); err != nil {
+		t.Fatalf("query schema_migrations: %v", err)
+	}
+	if versions != len(sqliteMigrations) {
+		t.Fatalf("migration count = %d, want %d", versions, len(sqliteMigrations))
+	}
+	var deletedAt int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('files') WHERE name = 'deleted_at'`).Scan(&deletedAt); err != nil {
+		t.Fatalf("query deleted_at: %v", err)
+	}
+	if deletedAt != 1 {
+		t.Fatalf("deleted_at columns = %d, want 1", deletedAt)
+	}
+	var auditIndexes int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name IN ('idx_audit_log_created_at', 'idx_audit_log_action_created')`).Scan(&auditIndexes); err != nil {
+		t.Fatalf("query audit indexes: %v", err)
+	}
+	if auditIndexes != 2 {
+		t.Fatalf("audit indexes = %d, want 2", auditIndexes)
+	}
 }
 
 func TestSQLiteStore_Close(t *testing.T) {

@@ -31,81 +31,9 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 	return store, nil
 }
 
-// migrate 创建表结构
+// migrate 按版本应用 SQLite schema 迁移。
 func (s *SQLiteStore) migrate() error {
-	queries := []string{
-		`CREATE TABLE IF NOT EXISTS content_blobs (
-			sha256       TEXT PRIMARY KEY,
-			storage_path TEXT NOT NULL,
-			size         BIGINT NOT NULL,
-			ref_count    INTEGER NOT NULL DEFAULT 0,
-			created_at   TEXT NOT NULL DEFAULT (datetime('now'))
-		)`,
-		`CREATE TABLE IF NOT EXISTS files (
-			file_id    TEXT PRIMARY KEY,
-			sha256     TEXT REFERENCES content_blobs(sha256),
-			name       TEXT NOT NULL,
-			path       TEXT NOT NULL,
-			size       BIGINT NOT NULL DEFAULT 0,
-			namespace  TEXT NOT NULL,
-			is_dir     INTEGER NOT NULL DEFAULT 0,
-			parent_id  TEXT,
-			created_at TEXT NOT NULL DEFAULT (datetime('now')),
-			deleted_at TEXT
-		)`,
-		`CREATE INDEX IF NOT EXISTS idx_files_namespace_parent ON files(namespace, parent_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_files_sha256 ON files(sha256)`,
-		`CREATE INDEX IF NOT EXISTS idx_files_path ON files(namespace, path)`,
-		`CREATE TABLE IF NOT EXISTS file_tags (
-			file_id    TEXT NOT NULL REFERENCES files(file_id) ON DELETE CASCADE,
-			tag        TEXT NOT NULL,
-			created_at TEXT NOT NULL DEFAULT (datetime('now')),
-			PRIMARY KEY (file_id, tag)
-		)`,
-		`CREATE INDEX IF NOT EXISTS idx_file_tags_tag ON file_tags(tag)`,
-		auditLogMigration,
-		`CREATE TABLE IF NOT EXISTS namespace_quota_locks (
-			namespace TEXT PRIMARY KEY
-		)`,
-		`CREATE TABLE IF NOT EXISTS namespace_reservations (
-			reservation_id TEXT PRIMARY KEY,
-			namespace      TEXT NOT NULL,
-			bytes          BIGINT NOT NULL,
-			created_at     TEXT NOT NULL DEFAULT (datetime('now'))
-		)`,
-		`CREATE INDEX IF NOT EXISTS idx_namespace_reservations_namespace ON namespace_reservations(namespace)`,
-		`CREATE TABLE IF NOT EXISTS shares (
-			token        TEXT PRIMARY KEY,
-			file_id      TEXT NOT NULL,
-			password_hash TEXT NOT NULL DEFAULT '',
-			expires_at   TEXT NOT NULL DEFAULT '',
-			max_downloads INTEGER NOT NULL DEFAULT 0,
-			cur_downloads INTEGER NOT NULL DEFAULT 0,
-			namespace    TEXT NOT NULL DEFAULT '',
-			created_at   TEXT NOT NULL DEFAULT (datetime('now'))
-		)`,
-	}
-
-	for _, q := range queries {
-		if _, err := s.db.Exec(q); err != nil {
-			return fmt.Errorf("执行迁移: %w", err)
-		}
-	}
-	// 兼容已有 SQLite 数据库：仅在列确实缺失时新增回收站软删除标记，
-	// 避免依赖驱动错误文案判断“重复列”。
-	var deletedAtColumns int
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('files') WHERE name = 'deleted_at'`).Scan(&deletedAtColumns); err != nil {
-		return fmt.Errorf("检查 files.deleted_at: %w", err)
-	}
-	if deletedAtColumns == 0 {
-		if _, err := s.db.Exec(`ALTER TABLE files ADD COLUMN deleted_at TEXT`); err != nil {
-			return fmt.Errorf("添加 files.deleted_at: %w", err)
-		}
-	}
-	if _, err := s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_files_namespace_deleted ON files(namespace, deleted_at)`); err != nil {
-		return fmt.Errorf("创建回收站索引: %w", err)
-	}
-	return nil
+	return runSQLiteMigrations(s.db)
 }
 
 // ReserveNamespaceBytes atomically accounts for active files and outstanding reservations.

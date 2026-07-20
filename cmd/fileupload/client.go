@@ -162,6 +162,22 @@ func (c *Client) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
+// PurgeTrash 永久清理回收站中的文件。
+func (c *Client) PurgeTrash(ctx context.Context, id string) error {
+	u := fmt.Sprintf("%s/v1/trash/%s?namespace=%s", c.ServerURL, url.PathEscape(id), url.QueryEscape(c.Namespace))
+	req, _ := http.NewRequestWithContext(ctx, "DELETE", u, nil)
+	resp, err := c.do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("purge trash failed (%d): %s", resp.StatusCode, string(body))
+	}
+	return nil
+}
+
 // DeleteDir 删除目录。
 func (c *Client) DeleteDir(ctx context.Context, id string) error {
 	u := fmt.Sprintf("%s/v1/dirs/%s?namespace=%s", c.ServerURL, url.PathEscape(id), url.QueryEscape(c.Namespace))

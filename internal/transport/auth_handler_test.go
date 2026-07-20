@@ -149,3 +149,38 @@ func TestAuthHandler_Me_NoClaims(t *testing.T) {
 		t.Errorf("status = %d, want 401", w.Code)
 	}
 }
+
+func TestAuthHandler_LoginRateLimitAndReset(t *testing.T) {
+	now := time.Date(2026, time.July, 19, 12, 0, 0, 0, time.UTC)
+	limiter := newSharePasswordLimiter(2, time.Minute, func() time.Time { return now })
+	jwtSvc := auth.NewJWTService("test-secret", time.Hour, auth.DevelopmentUsers())
+	handler := NewAuthHandler(jwtSvc).withLoginLimiter(limiter)
+
+	login := func(password string) *httptest.ResponseRecorder {
+		body, _ := json.Marshal(domain.LoginRequest{Username: "admin", Password: password})
+		req := httptest.NewRequest(http.MethodPost, "/v1/auth/login", bytes.NewReader(body))
+		req.RemoteAddr = "198.51.100.5:43123"
+		w := httptest.NewRecorder()
+		handler.Login(w, req)
+		return w
+	}
+
+	if got := login("wrong").Code; got != http.StatusUnauthorized {
+		t.Fatalf("first failure status = %d, want 401", got)
+	}
+	limited := login("wrong")
+	if limited.Code != http.StatusTooManyRequests || limited.Header().Get("Retry-After") != "60" {
+		t.Fatalf("limited response = %d retry=%q", limited.Code, limited.Header().Get("Retry-After"))
+	}
+	if got := login("admin123").Code; got != http.StatusTooManyRequests {
+		t.Fatalf("locked login status = %d, want 429", got)
+	}
+
+	now = now.Add(time.Minute)
+	if got := login("admin123").Code; got != http.StatusOK {
+		t.Fatalf("login after cooldown status = %d, want 200", got)
+	}
+	if got := login("wrong").Code; got != http.StatusUnauthorized {
+		t.Fatalf("failure after reset status = %d, want 401", got)
+	}
+}

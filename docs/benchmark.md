@@ -1,67 +1,63 @@
-# 压测报告
+# 可重复压测报告
 
-> 生成日期: 2026-06-22
-> 环境: 本地开发机 (Darwin arm64)
+> 目的：提供可提交到 CI/发布说明中的、可重复的基线；结果不是对所有生产硬件的性能承诺。
 
-## 测试环境
+## 测试环境与口径
 
 | 项目 | 值 |
 |------|-----|
-| CPU | Apple M-series |
-| 内存 | 16 GB |
-| 存储 | 本地 NVMe SSD |
-| Redis | 远程 (12.2.40.40:6002) |
-| 数据库 | SQLite (本地) |
-| 服务端并发 | 10 workers |
-| 默认分片 | 10 MB |
+| 测试日期 | 2026-07-19 |
+| 主机 | Windows 本地开发机 |
+| 服务端 | 当前工作树构建的 `server.exe` |
+| 存储 | LocalFS，本地磁盘 |
+| 数据库 | SQLite |
+| Redis | miniredis，本机 `127.0.0.1:16379` |
+| worker pool | 8 |
+| 并发 | 8 |
+| 随机种子 | `20260719` |
 
-## 测试结果
+### 实测命令
 
-### 小文件 (默认配置)
-
-| 场景 | 文件数 | 文件大小 | 并发 | 总传输 | 耗时 | 吞吐 | 平均延迟 |
-|------|--------|----------|------|--------|------|------|----------|
-| 基准 | 3 | 1 MB | 2 | 3 MB | 0.01s | - | 4ms |
-| 中等 | 5 | 5 MB | 4 | 25 MB | 0.78s | **32 MB/s** | 156ms |
-
-### 执行命令
-
-```bash
-fileupload bench --files 5 --size 5m --concurrency 4
+```powershell
+fileupload.exe --server http://127.0.0.1:18080 --namespace benchmark `
+  bench --files 50 --size 1m --concurrency 8 --seed 20260719 --cleanup --json
 ```
 
-## 吞吐分析
+`--seed` 保证压测输入可重复；`--cleanup` 会在压测结束后删除并清理回收站中的测试文件。压测失败或清理失败都会返回非零退出码，适合接入 CI 或发布前检查。
 
-当前瓶颈分析：
+## 结果
 
-1. **网络 I/O** — ~32 MB/s 受限于本地回环 + Redis 远程延迟
-2. **磁盘 I/O** — 分片写入 temp + finalize 合并 → data/
-3. **Worker 池** — 10 workers 在当前规模下充足
+| 指标 | 结果 |
+|------|------:|
+| 请求文件数 | 50 |
+| 成功 / 失败 | 50 / 0 |
+| 上传总量 | 50 MiB |
+| 总耗时 | 0.739 s |
+| 吞吐 | **67.68 MiB/s** |
+| 错误率 | **0%** |
+| 延迟最小 / 平均 | 47.0 / 113.2 ms |
+| 延迟 p50 / p95 / p99 | 114.0 / 180.6 / 185.5 ms |
+| 延迟最大 | 219.9 ms |
+| 清理失败数 | 0 |
 
-## 预估扩展
+原始 JSON 结果由 CLI 直接输出，结果字段包含 `started_at`、`bytes_uploaded`、`throughput_mib_per_second`、`error_rate`、完整延迟分位数与清理状态。
 
-| 并发数 | 预估吞吐 (MB/s) | 瓶颈 |
-|--------|-----------------|------|
-| 1 | ~8 MB/s | 单线程磁盘 |
-| 4 | ~32 MB/s | Redis 延迟 |
-| 8 | ~50 MB/s | 本地磁盘 |
-| 16 | ~60 MB/s | CPU / 网络 |
+## 解释与生产使用建议
 
-> 注：生产环境建议使用本地 Redis + S3 存储以获得更高吞吐。
+- 该结果只代表“Windows + 本地 SQLite + 本机 Redis + 本地磁盘 + 1 MiB 文件”的回环基线，不能直接外推公网、容器、PostgreSQL 或 S3 性能。
+- 上线前应在目标机器使用相同 `--seed` 和业务代表性文件大小重复测试，并记录 CPU、内存、磁盘、Redis、数据库和网络指标。
+- 小规模内部使用优先关注 `error_rate`、p95/p99 延迟、磁盘剩余空间、Redis 连接状态、数据库连接池和队列积压，而不是只看吞吐。
+- CLI 可使用 `--max-error-rate` 与 `--min-throughput-mibps` 作为发布门槛，例如：
 
-## 优化建议
-
-1. **Redis 本地部署** — 远程 Redis 增加 ~5ms 延迟/请求
-2. **增大 worker 池** — `worker_pool_size: 20` 适当提高并发
-3. **WriteTimeout 调整** — 大文件 (>100MB) 需延长写入超时
-4. **分片大小** — `default_chunk_size: 20971520` (20MB) 减少分片数量
-
-## 复现
-
-```bash
-# 启动服务端
-FILEUPLOAD_REDIS_ADDR=localhost:6379 go run ./cmd/server
-
-# 压测
-go run ./cmd/fileupload bench --files 10 --size 10m --concurrency 8
+```powershell
+fileupload.exe --server http://127.0.0.1:8080 bench `
+  --files 100 --size 10m --concurrency 8 --seed 20260719 --cleanup `
+  --max-error-rate 0 --min-throughput-mibps 20 --json
 ```
+
+## 复现前提
+
+1. 启动 Redis（生产建议使用 Redis 7+，配置认证和持久化）。
+2. 启动 fileupload，确保 `storage.data_dir`、`storage.temp_dir` 已创建且服务账号可读写。
+3. 使用独立 namespace，并启用 `--cleanup`，避免污染真实数据。
+4. 将 JSON 保存到构建产物或 CI artifact，和版本、配置摘要一同归档。
