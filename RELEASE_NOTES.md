@@ -1,10 +1,15 @@
-# fileupload v0.14.0 — 发布说明
+# fileupload v0.14.1 — 发布说明
 
-**稳定版本**：v0.14.0（2026-07-20）
-**Git tag**：`v0.14.0`
-**提交**：发布前最后一个 main 提交（见 GitHub Release）
+**稳定版本**：v0.14.1（2026-07-20）
+**Git tag**：`v0.14.1`
+**提交**：`43fe49a9a45c2a03c8f0715ef9c385f7ee6f3c64`
 
 ---
+
+## 本次更新
+
+- 追平 main 分支已验证的依赖维护更新：`actions/download-artifact` v8、`golang.org/x/crypto` v0.54.0、`github.com/redis/go-redis/v9` v9.21.0、`golang.org/x/sync` v0.22.0。
+- 发布基于最新 main 提交，保持 v0.14.0 的全部功能、安全加固和运维能力。
 
 ## 这是什么
 

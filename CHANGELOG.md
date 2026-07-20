@@ -1,5 +1,16 @@
 # Changelog
 
+## [v0.14.1] - 2026-07-20
+
+### Changed
+
+- 追平已通过 CI 的依赖维护更新：`actions/download-artifact` v8、`golang.org/x/crypto` v0.54.0、`github.com/redis/go-redis/v9` v9.21.0、`golang.org/x/sync` v0.22.0。
+- 稳定版发布基于最新 main 提交，并复用 v0.14.0 的完整功能与安全加固。
+
+### Verification
+
+- main 分支最新 CI 已通过安全扫描、race 测试、前端测试、浏览器 smoke tests、跨平台构建和 Docker 镜像构建。
+
 ## [v0.14.0] - 2026-07-20
 
 ### Added
